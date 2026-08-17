@@ -1,0 +1,18 @@
+{
+  "contractTag": "browser-protocol-v1",
+  "sourceRepository": "usesesame/sesame-desktop",
+  "sourcePath": "src-tauri/contracts/browser/v1",
+  "implementationSourceCommit": "dcace6546a49bb03e3b1ce85682ada9fbe3e52dd",
+  "vendoredAt": "2026-08-14",
+  "publication": {
+    "repository": "usesesame/Sesame",
+    "trackingRef": "main",
+    "note": "The desktop still publishes from the original monorepo, which is private. Set SESAME_CONTRACT_TOKEN to read it, and point repository at usesesame/sesame-desktop once that repository is renamed and public."
+  },
+  "files": {
+    "contract.json": "2ff029398da169bc5b9de9850650a900409f84b1769cc711ab44ff61d1f9a30c",
+    "request.schema.json": "f16d6b4b82afcfa6cbaf7bd96ca57c1d5d25e2b394c5d1876c6376e2557b6682",
+    "response.schema.json": "d97969a82822a91ded8bbb1514112f096e72572ee23b99f3377a79b4a1b8829f",
+    "vectors.json": "f36610f08a8ce26147d47d7f97612bcd26aac3f1cee3428e344401956fcb3be2"
+  }
+}

@@ -1,0 +1,24 @@
+# Review routing for the browser extension. Later rules win, so the paths where
+# a mistake is silent are listed last.
+
+* @d0mkaaa
+
+# Delivery controls. Changing these changes what "passing" means.
+/.github/                @d0mkaaa
+/eslint.config.js        @d0mkaaa
+/package.json            @d0mkaaa
+/package-lock.json       @d0mkaaa
+/scripts/                @d0mkaaa
+
+# This extension runs inside pages it does not control. Everything below either
+# handles a credential or decides who may send one.
+/src/protocol/           @d0mkaaa
+/src/background/         @d0mkaaa
+/src/content/            @d0mkaaa
+/src/permissions/        @d0mkaaa
+
+# The store identity, the permissions users are asked for, and the pinned
+# native-host origin. A change here is a store-review and trust change.
+/manifests/              @d0mkaaa
+/contracts/              @d0mkaaa
+/SECURITY.md             @d0mkaaa

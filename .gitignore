@@ -1,0 +1,11 @@
+node_modules
+dist
+test-results
+coverage
+store-packages
+.host-compat
+*.log
+.env
+.env.*
+!.env.example
+*.local

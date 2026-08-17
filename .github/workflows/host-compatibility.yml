@@ -1,0 +1,51 @@
+name: Host protocol compatibility
+
+# A store release cannot be recalled the way a desktop build can, so the
+# published extension has to keep working against hosts it did not ship with.
+# This job watches the desktop-owned contract instead of waiting for a user to
+# report that filling stopped working.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Desktop git ref to check against
+        required: false
+        default: main
+  push:
+    paths:
+      - 'contracts/browser/**'
+      - 'src/protocol/**'
+      - 'scripts/host-compatibility.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - run: npm ci
+
+      - name: Download the published desktop fixtures
+        run: node scripts/host-compatibility.mjs ${{ inputs.ref && format('--ref {0}', inputs.ref) || '' }}
+
+      - name: Replay the published vectors through the extension validators
+        run: npx vitest run tests/compat
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: host-compatibility
+          path: .host-compat
+          retention-days: 14

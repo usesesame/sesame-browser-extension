@@ -1,0 +1,38 @@
+/* =========================================================================
+   Sesame browser extension: popup, options, and onboarding pages.
+
+   Colour, type, spacing, radii, shadows, and motion come from
+   design/tokens.css, which every surface shares. Each page's main.ts imports it
+   before this file.
+
+   This surface used to ship its own palette with a different brand green
+   (#2f6043) and a different gold (#e5b940), so the extension did not match the
+   app it belongs to. It now uses the shared values.
+
+   The in-page fill overlay is NOT styled from here. It renders in a closed
+   shadow root with all:initial inside a page Sesame does not control, so it
+   cannot read these custom properties. Its values are generated into
+   src/content/overlay-tokens.ts; see that file.
+   ========================================================================= */
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  width: 340px;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 var(--font-ui);
+}
+
+button, summary { font: inherit; }
+button:focus-visible, summary:focus-visible, a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--gold) 65%, transparent);
+  outline-offset: 2px;
+}
+
+main {
+  padding: 14px;
+  background: var(--bg);
+}

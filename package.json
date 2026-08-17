@@ -1,0 +1,47 @@
+{
+  "name": "@sesame/extension",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "version:check": "node scripts/version-contract.mjs check",
+    "version:sync": "node scripts/version-contract.mjs sync",
+    "design:tokens:check": "node scripts/design-tokens.mjs check",
+    "design:tokens:sync": "node scripts/design-tokens.mjs sync",
+    "lint": "eslint .",
+    "build": "npm run build:chrome",
+    "build:chrome": "vite build --mode chrome && vite build --config vite.content.config.ts --mode chrome && vite build --config vite.overlay.config.ts --mode chrome",
+    "build:edge": "vite build --mode edge && vite build --config vite.content.config.ts --mode edge && vite build --config vite.overlay.config.ts --mode edge",
+    "build:integration": "vite build --mode integration && vite build --config vite.content.config.ts --mode integration && vite build --config vite.overlay.config.ts --mode integration",
+    "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
+    "test:unit": "vitest run tests/unit",
+    "test:browser": "npm run build:integration && node -e \"console.log('no extension browser tests exist yet, skipping')\"",
+    "package:stores": "node scripts/package-stores.mjs",
+    "compat:host:download": "node scripts/host-compatibility.mjs",
+    "compat:host": "npm run compat:host:download && vitest run tests/compat",
+    "release:check": "npm run version:check && npm run design:tokens:check && npm run lint && npm run check && npm run test:unit && npm run build:chrome && npm run build:edge && npm run package:stores",
+    "ci": "npm run release:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/chrome": "^0.0.268",
+    "@types/node": "^24.13.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-svelte": "^3.17.0",
+    "globals": "^17.4.0",
+    "svelte": "^5.56.4",
+    "svelte-check": "^4.7.1",
+    "svelte-eslint-parser": "^1.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.57.1",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26"
+  }
+}

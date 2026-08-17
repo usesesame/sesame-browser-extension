@@ -1,0 +1,73 @@
+name: Store release packages
+
+# Builds the two upload packages and their evidence. It deliberately does not
+# upload to either store: Chrome and Edge keep separate listings and separate
+# review queues, and a package is verified by hand in a clean profile before a
+# person submits it.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+concurrency:
+  group: extension-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    environment: store-release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - run: npm ci
+
+      - name: Require an exact source-version tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF" != "refs/tags/v$version" ]; then
+            echo "Release tag $GITHUB_REF does not match package version $version." >&2
+            exit 1
+          fi
+
+      - name: Run the complete release gate
+        run: npm run ci
+
+      - name: Record the package evidence
+        run: |
+          node -e '
+            const record = require("./store-packages/store-release.json")
+            const rows = record.packages.map((entry) => `| ${entry.browser} | ${entry.filename} | ${entry.files} | ${entry.bytes} | \`${entry.sha256}\` |`)
+            console.log([
+              `## Sesame extension ${record.version}`,
+              "",
+              `Native messaging protocol ${record.protocolVersion}, supported hosts ${record.hostCompatibility.minimumHostProtocolVersion} to ${record.hostCompatibility.currentHostProtocolVersion}.`,
+              "",
+              "| Browser | Package | Files | Bytes | SHA-256 |",
+              "| --- | --- | --- | --- | --- |",
+              ...rows,
+              "",
+              `SBOM: ${record.sbom.filename}, ${record.sbom.components} locked components.`,
+              "",
+              "Verify both packages in a clean profile before uploading. Chrome and Edge have separate listings.",
+            ].join("\n"))
+          ' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sesame-extension-${{ github.ref_name }}
+          path: store-packages
+          if-no-files-found: error
+          retention-days: 90

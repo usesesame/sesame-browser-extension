@@ -1,0 +1,22 @@
+/* =========================================================================
+   Sesame browser extension: onboarding page.
+
+   This is a full browser tab, not the 340px popup, so it does not share
+   popup/app.css (that file pins body width to the popup's fixed size, which
+   used to clamp this page and break the card's centering).
+   ========================================================================= */
+
+* { box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--type-2)/1.5 var(--font-ui);
+}
+
+button:focus-visible, a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--gold) 65%, transparent);
+  outline-offset: 2px;
+}

@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Sesame",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA29RvdjiY26Hz1Z0euPXPgT7Di/uM1pUDG6I3s3V/TbvJSzAmAGHDIj1Y49C0rwsfJ5d78M0zEb7shE/N49HzOTONjruyphVgtig8bjxJqcpTWRUZrGfSXL/Eg+WxlKufn8sq04x8WjRUO50NBtd0Sl+tYHVQnInmNZZPcoci4a/Ll0TMMEggcFY0iuAOiDZnP5Zc/xCnBfK/wRCtYp6HQLtjySmOs0UdteDvoXyTo3sgSUz2dOqufKPr0Jgb/y8LPATRbDwyeUQES0sPyXOduNMGISiK9EnZwZH3qb7DgkLBjGwwR86nbH7wDoSzkcvjqzb1PbQhvNABclqr7JdXTQIDAQAB",
+  "description": "Fills one verified sign-in form after explicit approval in the Sesame desktop app.",
+  "icons": {
+    "16": "icons/16x16.png",
+    "32": "icons/32x32.png",
+    "48": "icons/48x48.png",
+    "128": "icons/128x128.png"
+  },
+  "action": {
+    "default_title": "Sesame",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16x16.png",
+      "32": "icons/32x32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "nativeMessaging", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*"],
+  "options_page": "options.html",
+  "commands": {
+    "fill-login": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Fill the current sign-in page with Sesame"
+    },
+    "fill-identity": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+I",
+        "mac": "Command+Shift+I"
+      },
+      "description": "Fill name, address, and contact fields with Sesame"
+    }
+  }
+}
