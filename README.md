@@ -119,7 +119,8 @@ recorded digests at the pinned implementation commit, checks the compatibility
 range at the desktop's tracking branch, and replays every downloaded vector
 through the real validators. It runs on a schedule rather than in pull-request
 CI. It needs network access to the desktop repository, and it needs
-`SESAME_CONTRACT_TOKEN` while that repository is private.
+no token, because that repository is public; `SESAME_CONTRACT_TOKEN` is only
+needed if it is ever made private again.
 
 ## Native host distribution
 
