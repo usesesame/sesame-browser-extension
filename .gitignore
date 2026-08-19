@@ -9,3 +9,6 @@ store-packages
 .env.*
 !.env.example
 *.local
+
+# Local working notes, never published with the source.
+*.local.md
