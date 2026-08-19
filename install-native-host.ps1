@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('Chrome', 'Edge', 'Both')]
-  [string]$Browser = 'Both',
+  [ValidateSet('Chrome', 'Edge', 'Firefox', 'Both', 'All')]
+  [string]$Browser = 'All',
 
   [string]$HostPath,
 
@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 $identityPath = Join-Path $PSScriptRoot 'contracts\native-host.json'
 $identity = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json
 $ExtensionId = [string]$identity.official_extension_id
+$FirefoxExtensionId = [string]$identity.firefox_extension_id
 $hostName = [string]$identity.host_name
 if (-not $HostPath) {
   throw 'Pass -HostPath for a desktop-owned browser host executable.'
@@ -23,6 +24,7 @@ if (-not $AllowDebugHost -and $resolvedHost -match '[\\/]debug[\\/]') {
 
 $manifestFolder = Join-Path $env:LOCALAPPDATA 'Sesame\native-messaging'
 $manifestPath = Join-Path $manifestFolder "$hostName.json"
+$firefoxManifestPath = Join-Path $manifestFolder "$hostName.firefox.json"
 New-Item -ItemType Directory -Force -Path $manifestFolder | Out-Null
 $manifest = [ordered]@{
   name = $hostName
@@ -37,16 +39,33 @@ $manifest = [ordered]@{
   [Text.UTF8Encoding]::new($false)
 )
 
-$registryPaths = @()
-if ($Browser -in @('Chrome', 'Both')) {
-  $registryPaths += "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+# Firefox pins the extension id rather than an origin, so its manifest differs.
+$firefoxManifest = [ordered]@{
+  name = $hostName
+  description = 'Sesame native messaging host'
+  path = $resolvedHost
+  type = 'stdio'
+  allowed_extensions = @($FirefoxExtensionId)
 }
-if ($Browser -in @('Edge', 'Both')) {
-  $registryPaths += "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+[IO.File]::WriteAllText(
+  $firefoxManifestPath,
+  ($firefoxManifest | ConvertTo-Json -Depth 3),
+  [Text.UTF8Encoding]::new($false)
+)
+
+$registrations = @()
+if ($Browser -in @('Chrome', 'Both', 'All')) {
+  $registrations += @{ Path = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"; Manifest = $manifestPath }
 }
-foreach ($registryPath in $registryPaths) {
-  New-Item -Force -Path $registryPath | Out-Null
-  Set-Item -LiteralPath $registryPath -Value $manifestPath
+if ($Browser -in @('Edge', 'Both', 'All')) {
+  $registrations += @{ Path = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"; Manifest = $manifestPath }
+}
+if ($Browser -in @('Firefox', 'All')) {
+  $registrations += @{ Path = "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"; Manifest = $firefoxManifestPath }
+}
+foreach ($registration in $registrations) {
+  New-Item -Force -Path $registration.Path | Out-Null
+  Set-Item -LiteralPath $registration.Path -Value $registration.Manifest
 }
 
 Write-Host "Sesame native host registered for $Browser and pinned extension $ExtensionId."

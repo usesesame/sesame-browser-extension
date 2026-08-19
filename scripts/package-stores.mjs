@@ -6,7 +6,7 @@ import { verifyStoreManifest } from './store-manifest.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const output = resolve(root, process.argv[2] ?? 'store-packages')
-const browsers = ['chrome', 'edge']
+const browsers = ['chrome', 'edge', 'firefox']
 
 const read = (...parts) => readFileSync(join(root, ...parts))
 const readJson = (...parts) => JSON.parse(read(...parts).toString('utf8'))

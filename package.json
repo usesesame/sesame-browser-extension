@@ -13,6 +13,7 @@
     "build": "npm run build:chrome",
     "build:chrome": "vite build --mode chrome && vite build --config vite.content.config.ts --mode chrome && vite build --config vite.overlay.config.ts --mode chrome",
     "build:edge": "vite build --mode edge && vite build --config vite.content.config.ts --mode edge && vite build --config vite.overlay.config.ts --mode edge",
+    "build:firefox": "vite build --mode firefox && vite build --config vite.content.config.ts --mode firefox && vite build --config vite.overlay.config.ts --mode firefox",
     "build:integration": "vite build --mode integration && vite build --config vite.content.config.ts --mode integration && vite build --config vite.overlay.config.ts --mode integration",
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
     "test:unit": "vitest run tests/unit",
@@ -20,7 +21,7 @@
     "package:stores": "node scripts/package-stores.mjs",
     "compat:host:download": "node scripts/host-compatibility.mjs",
     "compat:host": "npm run compat:host:download && vitest run tests/compat",
-    "release:check": "npm run version:check && npm run design:tokens:check && npm run lint && npm run check && npm run test:unit && npm run build:chrome && npm run build:edge && npm run package:stores",
+    "release:check": "npm run version:check && npm run design:tokens:check && npm run lint && npm run check && npm run test:unit && npm run build:chrome && npm run build:edge && npm run build:firefox && npm run package:stores",
     "ci": "npm run release:check"
   },
   "devDependencies": {

@@ -27,7 +27,20 @@ export function verifyStoreManifest(browser, manifest, version, identity) {
   if (JSON.stringify(manifest.optional_host_permissions) !== JSON.stringify(REQUIRED_OPTIONAL_HOST_PERMISSIONS)) {
     fail(`optional_host_permissions must be exactly ${REQUIRED_OPTIONAL_HOST_PERMISSIONS.join(', ')}.`)
   }
-  // The native host pins exact extension origins with no wildcards.
+  // The native host pins exact extension identities with no wildcards.
+  // Firefox is pinned by gecko id; Chromium by the id derived from the packed key.
+  if (browser === 'firefox') {
+    if ('key' in manifest) fail('a Chromium packing key must not reach the Firefox package.')
+    const gecko = manifest.browser_specific_settings?.gecko?.id
+    if (!gecko) fail('browser_specific_settings.gecko.id is missing.')
+    if (gecko !== identity.firefox_extension_id) {
+      fail(`gecko id ${gecko} is not the host-pinned id ${identity.firefox_extension_id}.`)
+    }
+    if (!identity.allowed_extensions.includes(gecko)) {
+      fail(`the pinned native-host contract does not allow ${gecko}.`)
+    }
+    return gecko
+  }
   const derived = chromiumExtensionId(manifest.key)
   if (derived !== identity.official_extension_id) {
     fail(`derived extension id ${derived} is not the host-pinned id ${identity.official_extension_id}.`)
