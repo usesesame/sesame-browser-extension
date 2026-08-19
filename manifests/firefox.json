@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "Sesame",
+  "version": "0.1.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "sesame@usesesame.app",
+      "strict_min_version": "115.0"
+    }
+  },
+  "description": "Fills one verified sign-in form after explicit approval in the Sesame desktop app.",
+  "icons": {
+    "16": "icons/16x16.png",
+    "32": "icons/32x32.png",
+    "48": "icons/48x48.png",
+    "128": "icons/128x128.png"
+  },
+  "action": {
+    "default_title": "Sesame",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16x16.png",
+      "32": "icons/32x32.png"
+    }
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "scripting",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "options_page": "options.html",
+  "commands": {
+    "fill-login": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Fill the current sign-in page with Sesame"
+    },
+    "fill-identity": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+I",
+        "mac": "Command+Shift+I"
+      },
+      "description": "Fill name, address, and contact fields with Sesame"
+    }
+  }
+}

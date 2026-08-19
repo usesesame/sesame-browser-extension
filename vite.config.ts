@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 const modeToManifest = {
   chrome: 'chrome.json',
   edge: 'edge.json',
+  firefox: 'firefox.json',
   integration: 'chrome.json',
 }
 

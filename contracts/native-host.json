@@ -8,5 +8,9 @@
   "desktop_source": {
     "repository_path": "src-tauri/src/adapters/platform/browser_host.rs",
     "commit": "ec9dc8d39d0ea9874a15baa8164b5447d9d2cb52"
-  }
+  },
+  "firefox_extension_id": "sesame@usesesame.app",
+  "allowed_extensions": [
+    "sesame@usesesame.app"
+  ]
 }
