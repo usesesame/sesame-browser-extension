@@ -26,20 +26,49 @@ export function inspectLoginSurface(): LoginInspection {
   }
 }
 
+const USERNAME_HINT = /user|login|signin|sign-in|email|e-mail|account|identifier|handle/
+const NOT_USERNAME_HINT = /search|query|filter|find|coupon|promo|voucher|captcha|one-?time|verification|security-?code|otp/
+
+function labelText(input: HTMLInputElement): string {
+  const parts: string[] = []
+  if (input.id) {
+    for (const label of document.querySelectorAll(`label[for="${CSS.escape(input.id)}"]`)) {
+      parts.push(label.textContent ?? '')
+    }
+  }
+  const wrapping = input.closest('label')
+  if (wrapping) parts.push(wrapping.textContent ?? '')
+  return parts.join(' ')
+}
+
 export function isUsernameField(input: HTMLInputElement): boolean {
   const type = input.type.toLowerCase()
   const autocomplete = input.autocomplete.toLowerCase().split(/\s+/)
-  const hints = `${input.name} ${input.id}`.toLowerCase()
-  return autocomplete.includes('username')
-    || autocomplete.includes('email')
-    || type === 'email'
-    || ((type === 'text' || type === 'tel') && /user|login|email|account|identifier/.test(hints))
+  if (autocomplete.includes('one-time-code') || type === 'search') return false
+
+  const hints = [
+    input.name,
+    input.id,
+    input.placeholder,
+    input.getAttribute('aria-label') ?? '',
+    labelText(input),
+  ].join(' ').toLowerCase()
+
+  if (NOT_USERNAME_HINT.test(hints)) return false
+  if (autocomplete.includes('username') || autocomplete.includes('email')) return true
+  if (type === 'email') return true
+  return (type === 'text' || type === 'tel') && USERNAME_HINT.test(hints)
 }
 
 export function isVisible(input: HTMLInputElement): boolean {
   if (input.disabled || input.readOnly || input.type === 'hidden') return false
+  // A sign-up honeypot is a real input no person can see, and filling it is
+  // what the page is watching for.
+  if (input.closest('[aria-hidden="true"]')) return false
   const style = getComputedStyle(input)
-  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+  if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+  const opacity = Number.parseFloat(style.opacity)
+  if (Number.isFinite(opacity) && opacity === 0) return false
   const rect = input.getBoundingClientRect()
-  return rect.width > 0 && rect.height > 0
+  return rect.width > 1 && rect.height > 1
 }

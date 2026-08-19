@@ -10,10 +10,6 @@ const read = (...parts: string[]) => JSON.parse(readFileSync(join(root, ...parts
 const contract = read('contracts', 'native-host.json')
 const chromeManifest = read('manifests', 'chrome.json')
 
-// Chrome derives an unpacked extension's ID from its manifest key: the first
-// sixteen bytes of the SHA-256 of the DER public key, with each hex digit shifted
-// into a-p. Recomputing it is the only way to know the pinned ID is still the one
-// Chrome will hand the native host.
 function extensionIdForKey(base64Key: string): string {
   const digest = createHash('sha256').update(Buffer.from(base64Key, 'base64')).digest('hex').slice(0, 32)
   return Array.from(digest, (character) => String.fromCharCode(97 + Number.parseInt(character, 16))).join('')

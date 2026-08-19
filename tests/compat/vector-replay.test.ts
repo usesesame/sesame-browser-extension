@@ -25,9 +25,6 @@ interface Vectors {
 }
 
 const root = resolve(import.meta.dirname, '..', '..')
-// host-compatibility.mjs writes the freshly downloaded fixtures here. Preferring
-// them means CI replays what the desktop publishes today, while a plain local run
-// still replays the vendored snapshot rather than skipping.
 const downloaded = join(root, '.host-compat', 'vectors.json')
 const vendored = join(root, 'contracts', 'browser', 'v1', 'vectors.json')
 const source = existsSync(downloaded) ? downloaded : vendored
