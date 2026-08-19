@@ -5,7 +5,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "sesame@usesesame.app",
-      "strict_min_version": "115.0"
+      "strict_min_version": "128.0"
     }
   },
   "description": "Fills one verified sign-in form after explicit approval in the Sesame desktop app.",
