@@ -1,6 +1,6 @@
 import type { CardFieldKey, CardFields } from '../protocol/native'
 import { isVisible, setValue } from './field-writer'
-import { cardFieldsForAutocomplete, hasCombinedExpiryAutocomplete } from './card-fields'
+import { cardFieldsForInput, hasCombinedExpiryField } from './card-fields'
 
 type PendingCardFill = { token: string; origin: string; fields: CardFieldKey[] }
 type Phase = 'prepare' | 'fill' | 'clear'
@@ -51,11 +51,11 @@ export function fillCardSurface(origin: string, token: string, values: CardField
 function detectCardFields(): CardTargets {
   const targets: CardTargets = { fields: {} }
   for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
-    if (hasCombinedExpiryAutocomplete(input.autocomplete) && !targets.combinedExpiry) {
+    if (hasCombinedExpiryField(input) && !targets.combinedExpiry) {
       targets.combinedExpiry = input
     }
-    for (const field of cardFieldsForAutocomplete(input.autocomplete)) {
-      if (!hasCombinedExpiryAutocomplete(input.autocomplete) && !targets.fields[field]) targets.fields[field] = input
+    for (const field of cardFieldsForInput(input)) {
+      if (!hasCombinedExpiryField(input) && !targets.fields[field]) targets.fields[field] = input
     }
   }
   return targets

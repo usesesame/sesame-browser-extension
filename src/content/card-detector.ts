@@ -1,5 +1,5 @@
 import type { CardFieldKey } from '../protocol/native'
-import { cardFieldsForAutocomplete } from './card-fields'
+import { cardFieldsForInput } from './card-fields'
 
 export interface CardInspection {
   ok: true
@@ -13,7 +13,7 @@ export function inspectCardSurface(): CardInspectionResult {
   if (location.protocol !== 'https:') return { ok: false, code: 'insecure-page' }
   const fields = new Set<CardFieldKey>()
   for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
-    for (const field of cardFieldsForAutocomplete(input.autocomplete)) fields.add(field)
+    for (const field of cardFieldsForInput(input)) fields.add(field)
   }
   if (window.top !== window) {
     return fields.size > 0

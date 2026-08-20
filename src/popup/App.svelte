@@ -241,7 +241,9 @@
       cardFeedback = cardResponse?.code === 'insecure-page'
         ? 'Cards are never filled on HTTP pages.'
         : cardResponse?.code === 'untrusted-frame'
-          ? 'Cards are not filled in an embedded frame with a different page origin.' : ''
+          ? 'Cards are not filled in an embedded frame with a different page origin.'
+          : cardResponse?.code === 'no-fields'
+            ? 'No supported top-level card fields were found on this page.' : ''
     } catch {
       activeTabId = null
       activeOrigin = ''

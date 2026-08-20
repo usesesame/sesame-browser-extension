@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { cardFieldsForAutocomplete, hasCombinedExpiryAutocomplete } from '../../src/content/card-fields'
+import { cardFieldsForAutocomplete, cardFieldsForInput, hasCombinedExpiryAutocomplete } from '../../src/content/card-fields'
 import { inspectLoginSurface, isUsernameField, isVisible } from '../../src/content/field-detector'
 
 // happy-dom performs no layout, so every element measures zero.
@@ -139,5 +139,12 @@ describe('card autocomplete fields', () => {
     expect(cardFieldsForAutocomplete('cc-exp-month')).toEqual(['expiryMonth'])
     expect(cardFieldsForAutocomplete('cc-exp-year')).toEqual(['expiryYear'])
     expect(hasCombinedExpiryAutocomplete('cc-exp-year')).toBe(false)
+  })
+
+  it('recognises explicit payment labels when a site omits autocomplete', () => {
+    expect(cardFieldsForInput(first('<input name="cardnumber">'))).toEqual(['number'])
+    expect(cardFieldsForInput(first('<input aria-label="CVC">'))).toEqual(['securityCode'])
+    expect(cardFieldsForInput(first('<input placeholder="MM / YY" aria-label="Expiration date">')))
+      .toEqual(['expiryMonth', 'expiryYear'])
   })
 })
