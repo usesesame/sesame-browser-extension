@@ -6,8 +6,8 @@
   "vendoredAt": "2026-08-20",
   "publication": {
     "repository": "usesesame/sesame-desktop",
-    "trackingRef": "feature/card-autofill",
-    "note": "The desktop pull request must merge before this extension change."
+    "trackingRef": "main",
+    "note": "The desktop repository is public, so the raw transport needs no token. SESAME_CONTRACT_TOKEN is only required if it is ever made private again."
   },
   "files": {
     "contract.json": "d72135e3ede6b19f2906226be975fecdb387e517b9f11d0ccbce1dd7652ee41d",
