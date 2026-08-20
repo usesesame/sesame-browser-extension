@@ -107,6 +107,22 @@ chrome.runtime.onConnect.addListener((port) => {
     })
     return
   }
+  if (port.name === 'sesame:card-fill') {
+    const controller = new AbortController()
+    port.onDisconnect.addListener(() => controller.abort())
+    let started = false
+    port.onMessage.addListener((message) => {
+      if (started || message?.type !== 'start') return
+      started = true
+      loadInlineSettings().then((settings) => settings.cardSuggestionsEnabled
+        ? coordinator.fillCardActivePage(controller.signal)
+        : { ok: false as const, code: 'card-suggestions-disabled' }
+      ).then((result) => { try { port.postMessage(result) } catch { /* noop */ } }).catch(() => {
+        try { port.postMessage({ ok: false, code: 'fill-failed' }) } catch { /* noop */ }
+      })
+    })
+    return
+  }
   try { port.disconnect() } catch { /* noop */ }
 })
 
@@ -139,6 +155,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       state: 'unavailable',
       code: 'page-check-failed',
     }))
+    return true
+  }
+  if (message?.type === 'sesame:inspect-card') {
+    loadInlineSettings().then((settings) => settings.cardSuggestionsEnabled
+      ? coordinator.inspectCardActivePage()
+      : { state: 'unavailable' as const, code: 'card-suggestions-disabled' }
+    ).then(sendResponse).catch(() => sendResponse({ state: 'unavailable', code: 'page-check-failed' }))
     return true
   }
   if (message?.type === 'sesame:autofill') {

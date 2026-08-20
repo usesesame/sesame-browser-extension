@@ -4,12 +4,15 @@ import {
   NATIVE_FILL_TIMEOUT_MS,
   PROTOCOL_VERSION,
   makeIdentityRequest,
+  makeCardRequest,
   makeRequest,
   makeSaveRequest,
   safeNativeResponse,
   type FillFields,
   type IdentityFieldKey,
   type IdentityFields,
+  type CardFieldKey,
+  type CardFields,
   type NativeRequest,
 } from '../protocol/native'
 import type { Browser, NativePort } from '../platform/chrome'
@@ -161,6 +164,17 @@ export async function requestIdentityFill(
   return { ok: true, identity: result.response.identity }
 }
 
+export async function requestCardFill(
+  browser: Browser,
+  origin: string,
+  fields: readonly CardFieldKey[],
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<{ ok: true; card: CardFields } | { ok: false; code: string }> {
+  const result = await connectOnce(browser, makeCardRequest(origin, fields), { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal })
+  if (!result.ok) return { ok: false, code: result.code }
+  return result.response.card ? { ok: true, card: result.response.card } : { ok: false, code: 'invalid-response' }
+}
+
 export interface NativeSaveResult {
   ok: true
 }
@@ -195,6 +209,7 @@ interface ConnectOnceResult {
     opened?: true
     credential?: { username: string; password: string }
     identity?: IdentityFields
+    card?: CardFields
     saved?: true
   }
 }
@@ -281,6 +296,9 @@ export function connectOnce(
       }
       if (response.ok && 'identity' in response) {
         return finish('ok', { identity: response.identity })
+      }
+      if (response.ok && 'card' in response) {
+        return finish('ok', { card: response.card })
       }
       if (response.ok && 'saved' in response) {
         return finish('ok', { saved: true })

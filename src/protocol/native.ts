@@ -1,6 +1,7 @@
 // Wire protocol shared with the desktop host: byte-for-byte compatible, response schemas closed.
 export const NATIVE_HOST = 'app.usesesame.browser'
 export const PROTOCOL_VERSION = 1
+export const CARD_PROTOCOL_VERSION = 2
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
@@ -12,11 +13,22 @@ export const IDENTITY_FIELD_KEYS = [
 ] as const
 export type IdentityFieldKey = (typeof IDENTITY_FIELD_KEYS)[number]
 
+export const CARD_FIELD_KEYS = ['cardholderName', 'number', 'expiryMonth', 'expiryYear', 'securityCode'] as const
+export type CardFieldKey = (typeof CARD_FIELD_KEYS)[number]
+export type CardFields = Partial<Record<CardFieldKey, string>>
+
+export function redactCard(fields: CardFields): void {
+  for (const field of CARD_FIELD_KEYS) {
+    if (fields[field] !== undefined) fields[field] = ''
+  }
+}
+
 export type NativeRequest =
   | { version: number; type: 'capabilities'; requestId: string }
   | { version: number; type: 'activate'; requestId: string }
   | { version: number; type: 'fill'; requestId: string; origin: string; fields?: FillFields }
   | { version: number; type: 'identity'; requestId: string; origin: string; fields: string }
+  | { version: 2; type: 'card'; requestId: string; origin: string; fields: string }
   | { version: number; type: 'save'; requestId: string; origin: string; kind: 'new' | 'update'; title?: string; username?: string; password: string }
 
 export type NativeResult =
@@ -24,6 +36,7 @@ export type NativeResult =
   | { ok: true; opened: true }
   | { ok: true; credential: Credential }
   | { ok: true; identity: IdentityFields }
+  | { ok: true; card: CardFields }
   | { ok: true; saved: true }
   | { ok: false; code: string }
 
@@ -54,6 +67,7 @@ const BASE_REQUEST_KEYS = new Set(['version', 'type', 'requestId'])
 const FILL_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin'])
 const FILL_FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
 const IDENTITY_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
+const CARD_KEYS = new Set(['version', 'type', 'requestId', 'card'])
 const SAVE_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'kind', 'password'])
 const UNAVAILABLE_CODES: Readonly<Record<string, string>> = Object.freeze({
   desktopUnavailable: 'desktop-unavailable',
@@ -94,7 +108,11 @@ export function isCapabilities(value: unknown): value is DesktopCapabilities {
 }
 
 export function isNativeRequest(value: unknown): value is NativeRequest {
-  if (!isRecord(value) || value.version !== PROTOCOL_VERSION || !isRequestId(value.requestId)) {
+  if (!isRecord(value) || (value.version !== PROTOCOL_VERSION && value.version !== CARD_PROTOCOL_VERSION) || !isRequestId(value.requestId)) {
+    return false
+  }
+  if ((value.version === PROTOCOL_VERSION && value.type === 'card')
+    || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')) {
     return false
   }
   if (value.type === 'capabilities' || value.type === 'activate') {
@@ -118,6 +136,11 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && new Set(fields).size === fields.length
       && fields.every((field) => IDENTITY_FIELD_KEYS.includes(field as IdentityFieldKey))
   }
+  if (value.type === 'card') {
+    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, IDENTITY_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
+    const fields = value.fields.split(',')
+    return fields.length > 0 && new Set(fields).size === fields.length && fields.every((field) => CARD_FIELD_KEYS.includes(field as CardFieldKey))
+  }
   if (value.type === 'save') {
     const allowed = new Set(SAVE_REQUEST_KEYS)
     if (value.title !== undefined) allowed.add('title')
@@ -138,7 +161,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
 
 export function safeNativeResponse(raw: unknown, request: NativeRequest): NativeResult {
   if (!isRecord(raw)) return { ok: false, code: 'invalid-response' }
-  if (raw.version !== PROTOCOL_VERSION) return { ok: false, code: 'protocol-mismatch' }
+  if (raw.version !== request.version) return { ok: false, code: 'protocol-mismatch' }
   if (raw.requestId !== request.requestId) return { ok: false, code: 'request-mismatch' }
 
   if (raw.type === 'error') {
@@ -203,6 +226,25 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
       identity[key] = value
     }
     return { ok: true, identity }
+  }
+
+  if (request.type === 'card') {
+    if (raw.type === 'card-unavailable') {
+      if (!hasExactKeys(raw, UNAVAILABLE_KEYS)) return { ok: false, code: 'unsafe-response' }
+      return typeof raw.reason === 'string' && UNAVAILABLE_CODES[raw.reason]
+        ? { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
+        : { ok: false, code: 'invalid-response' }
+    }
+    if (raw.type !== 'card' || !hasExactKeys(raw, CARD_KEYS) || !isRecord(raw.card)) return { ok: false, code: 'unsafe-response' }
+    const requested = request.fields.split(',') as CardFieldKey[]
+    if (!hasExactKeys(raw.card, new Set(requested))) return { ok: false, code: 'unsafe-response' }
+    const card: CardFields = {}
+    for (const field of requested) {
+      const value = raw.card[field]
+      if (typeof value !== 'string' || value.length === 0 || value.length > MAX_CREDENTIAL_FIELD) return { ok: false, code: 'invalid-response' }
+      card[field] = value
+    }
+    return { ok: true, card }
   }
 
   if (request.type === 'save') {
@@ -278,6 +320,14 @@ export function makeIdentityRequest(
     origin: normalizedOrigin,
     fields: unique.join(','),
   }
+}
+
+export function makeCardRequest(origin: string, fields: readonly CardFieldKey[]): Extract<NativeRequest, { type: 'card' }> {
+  const normalizedOrigin = normalizeFillOrigin(origin)
+  if (!normalizedOrigin || !normalizedOrigin.startsWith('https://')) throw new TypeError('card request requires an HTTPS origin')
+  const unique = Array.from(new Set(fields))
+  if (unique.length === 0 || unique.some((field) => !CARD_FIELD_KEYS.includes(field))) throw new TypeError('card request requires known fields')
+  return { version: CARD_PROTOCOL_VERSION, type: 'card', requestId: crypto.randomUUID(), origin: normalizedOrigin, fields: unique.join(',') }
 }
 
 export function makeSaveRequest(

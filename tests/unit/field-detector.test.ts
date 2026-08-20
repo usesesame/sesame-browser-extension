@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
+import { cardFieldsForAutocomplete, hasCombinedExpiryAutocomplete } from '../../src/content/card-fields'
 import { inspectLoginSurface, isUsernameField, isVisible } from '../../src/content/field-detector'
 
 // happy-dom performs no layout, so every element measures zero.
@@ -125,5 +126,18 @@ describe('inspectLoginSurface', () => {
     if (!inspection.ok) throw new Error('expected a surface')
     expect(Object.keys(inspection.surface).sort()).toEqual(['ok', 'origin'])
     expect(inspection.surface.origin).toBe(window.location.origin)
+  })
+})
+
+describe('card autocomplete fields', () => {
+  it('requests both expiry parts for one combined expiry input', () => {
+    expect(cardFieldsForAutocomplete('section-payment cc-exp')).toEqual(['expiryMonth', 'expiryYear'])
+    expect(hasCombinedExpiryAutocomplete('section-payment cc-exp')).toBe(true)
+  })
+
+  it('keeps separate expiry inputs distinct', () => {
+    expect(cardFieldsForAutocomplete('cc-exp-month')).toEqual(['expiryMonth'])
+    expect(cardFieldsForAutocomplete('cc-exp-year')).toEqual(['expiryYear'])
+    expect(hasCombinedExpiryAutocomplete('cc-exp-year')).toBe(false)
   })
 })

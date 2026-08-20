@@ -2,6 +2,8 @@ import { inspectLoginSurface } from './field-detector'
 import { fillLoginSurface } from './field-writer'
 import { inspectIdentitySurface } from './identity-detector'
 import { fillIdentitySurface } from './identity-writer'
+import { inspectCardSurface } from './card-detector'
+import { fillCardSurface } from './card-writer'
 import { attachInlineButton } from './overlay'
 import { fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
 import { attachSignupCapture, ensureSignupCapture } from './signup-capture'
@@ -11,6 +13,8 @@ type GlobalApi = {
   sesameFillLoginSurface: typeof fillLoginSurface
   sesameInspectIdentitySurface: typeof inspectIdentitySurface
   sesameFillIdentitySurface: typeof fillIdentitySurface
+  sesameInspectCardSurface: typeof inspectCardSurface
+  sesameFillCardSurface: typeof fillCardSurface
   sesameFillRegistrationSurface: typeof fillRegistrationSurface
   sesameInspectRegistrationSurface: typeof inspectRegistrationSurface
   sesameInspectPasswordSurface: typeof inspectPasswordSurface
@@ -26,6 +30,8 @@ const api: GlobalApi = {
   sesameFillLoginSurface: fillLoginSurface,
   sesameInspectIdentitySurface: inspectIdentitySurface,
   sesameFillIdentitySurface: fillIdentitySurface,
+  sesameInspectCardSurface: inspectCardSurface,
+  sesameFillCardSurface: fillCardSurface,
   sesameFillRegistrationSurface: fillRegistrationSurface,
   sesameInspectRegistrationSurface: inspectRegistrationSurface,
   sesameInspectPasswordSurface: inspectPasswordSurface,
@@ -58,6 +64,8 @@ export {
   fillLoginSurface,
   inspectIdentitySurface,
   fillIdentitySurface,
+  inspectCardSurface,
+  fillCardSurface,
   fillRegistrationSurface,
   inspectRegistrationSurface,
   inspectPasswordSurface,

@@ -96,6 +96,9 @@
 
   let page: PageState = { kind: 'checking', code: 'checking', hostname: '', hasUsernameField: false, hasPasswordField: false }
   let identityFields: string[] = []
+  let cardFields: string[] = []
+  let cardWorking = false
+  let cardFeedback = ''
   let identityWorking = false
   let identityFeedback = ''
   let activeTabId: number | null = null
@@ -233,11 +236,18 @@
       identityFields = identityResponse?.state === 'ready' && Array.isArray(identityResponse.fields)
         ? identityResponse.fields
         : []
+      const cardResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-card' }), 4_000)
+      cardFields = cardResponse?.state === 'ready' && Array.isArray(cardResponse.fields) ? cardResponse.fields : []
+      cardFeedback = cardResponse?.code === 'insecure-page'
+        ? 'Cards are never filled on HTTP pages.'
+        : cardResponse?.code === 'untrusted-frame'
+          ? 'Cards are not filled in an embedded frame with a different page origin.' : ''
     } catch {
       activeTabId = null
       activeOrigin = ''
       inlineSitePaused = false
       identityFields = []
+      cardFields = []
       page = { ...page, kind: 'restricted', code: 'page-restricted' }
     }
     setPageDiagnostic({
@@ -385,6 +395,30 @@
     identityFeedback = result?.ok === true
       ? `Filled ${result.filledFields.map((field: string) => IDENTITY_FIELD_LABELS[field] ?? field).join(', ')}. Review the page before continuing.`
       : IDENTITY_MESSAGES[result?.code] ?? 'The fill request could not be completed.'
+  }
+
+  async function fillCard() {
+    if (cardWorking || desktopState !== 'ready' || cardFields.length === 0) return
+    cardWorking = true
+    cardFeedback = 'Waiting for approval in Sesame…'
+    const port = chrome.runtime.connect({ name: 'sesame:card-fill' })
+    const result = await new Promise<any>((resolve) => {
+      let settled = false
+      const finish = (value: any) => { if (!settled) { settled = true; resolve(value) } }
+      port.onMessage.addListener((message) => { finish(message); port.disconnect() })
+      port.onDisconnect.addListener(() => finish({ ok: false, code: 'host-disconnected' }))
+      port.postMessage({ type: 'start' })
+    })
+    cardWorking = false
+    cardFeedback = result?.ok === true
+      ? 'Card fields filled. Review the page before paying.'
+      : result?.code === 'card-suggestions-disabled'
+        ? 'Card suggestions are disabled in the extension settings.'
+        : result?.code === 'insecure-page'
+          ? 'Cards are never filled on HTTP pages.'
+          : result?.code === 'untrusted-frame'
+            ? 'Cards are not filled in an embedded frame with a different page origin.'
+            : IDENTITY_MESSAGES[result?.code] ?? 'The card fill request could not be completed.'
   }
 
   async function generateAndFillPassword() {
@@ -564,6 +598,11 @@
     <FillButton onClick={fillIdentity} disabled={desktopState !== 'ready'} loading={identityWorking} loadingLabel="Waiting for approval…" label="Fill identity" />
   {/if}
   {#if identityFeedback}<p class="fill-feedback" role="status">{identityFeedback}</p>{/if}
+
+  {#if !desktopNeedsOpening && cardFields.length > 0}
+    <FillButton onClick={fillCard} disabled={desktopState !== 'ready'} loading={cardWorking} loadingLabel="Waiting for approval…" label="Fill card" />
+  {/if}
+  {#if cardFeedback}<p class="fill-feedback" role="status">{cardFeedback}</p>{/if}
 
   <Diagnostics diagnostic={$popupState.diagnostic} pageDiagnostic={$popupState.pageDiagnostic} />
   <footer>Development build {chrome.runtime.getManifest().version}</footer>

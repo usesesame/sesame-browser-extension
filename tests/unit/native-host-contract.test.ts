@@ -35,19 +35,21 @@ describe('native host contract', () => {
 })
 
 describe('vendored browser contract', () => {
-  const vendored = join(root, 'contracts', 'browser', 'v1')
-  const source = read('contracts', 'browser', 'v1', 'SOURCE.json')
+  for (const version of ['v1', 'v2']) {
+    const vendored = join(root, 'contracts', 'browser', version)
+    const source = read('contracts', 'browser', version, 'SOURCE.json')
 
-  it('records a digest matching every file it vendors', () => {
-    for (const [name, expected] of Object.entries(source.files as Record<string, string>)) {
-      const path = join(vendored, name)
-      expect(existsSync(path), `${name} is recorded but missing`).toBe(true)
-      expect(createHash('sha256').update(readFileSync(path)).digest('hex'), name).toBe(expected)
-    }
-  })
+    it(`${version} records a digest matching every file it vendors`, () => {
+      for (const [name, expected] of Object.entries(source.files as Record<string, string>)) {
+        const path = join(vendored, name)
+        expect(existsSync(path), `${name} is recorded but missing`).toBe(true)
+        expect(createHash('sha256').update(readFileSync(path)).digest('hex'), name).toBe(expected)
+      }
+    })
 
-  it('tracks the repository the desktop is actually published from', () => {
-    expect(source.publication.repository).toBe('usesesame/sesame-desktop')
-    expect(source.implementationSourceCommit).toMatch(/^[0-9a-f]{40}$/)
-  })
+    it(`${version} tracks the repository the desktop is actually published from`, () => {
+      expect(source.publication.repository).toBe('usesesame/sesame-desktop')
+      expect(source.implementationSourceCommit).toMatch(/^[0-9a-f]{40}$/)
+    })
+  }
 })

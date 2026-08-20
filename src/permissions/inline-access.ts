@@ -2,17 +2,19 @@ export const GLOBAL_HTTPS_PATTERN = 'https://*/*'
 export const INLINE_SETTINGS_KEY = 'inlineSettingsV1'
 
 export interface InlineSettings {
-  version: 1
+  version: 2
   pausedOrigins: string[]
   onboardingDismissed: boolean
+  cardSuggestionsEnabled: boolean
 }
 
 type StorageArea = Pick<chrome.storage.StorageArea, 'get' | 'set'>
 
 const DEFAULT_SETTINGS: InlineSettings = {
-  version: 1,
+  version: 2,
   pausedOrigins: [],
   onboardingDismissed: false,
+  cardSuggestionsEnabled: true,
 }
 
 export function inlinePermissionMode(origins: string[] | undefined): 'disabled' | 'global' | 'legacy-sites' {
@@ -44,12 +46,19 @@ export function originPattern(origin: string): string | null {
 export async function loadInlineSettings(storage: StorageArea = chrome.storage.local): Promise<InlineSettings> {
   const stored = await storage.get(INLINE_SETTINGS_KEY)
   const value = stored[INLINE_SETTINGS_KEY]
-  if (!isRecord(value) || value.version !== 1) return { ...DEFAULT_SETTINGS }
+  if (!isRecord(value)) return { ...DEFAULT_SETTINGS }
   return {
-    version: 1,
+    version: 2,
     pausedOrigins: normalizePausedOrigins(value.pausedOrigins),
     onboardingDismissed: value.onboardingDismissed === true,
+    cardSuggestionsEnabled: value.cardSuggestionsEnabled !== false,
   }
+}
+
+export async function setCardSuggestionsEnabled(enabled: boolean, storage: StorageArea = chrome.storage.local): Promise<InlineSettings> {
+  const next = { ...(await loadInlineSettings(storage)), cardSuggestionsEnabled: enabled }
+  await storage.set({ [INLINE_SETTINGS_KEY]: next })
+  return next
 }
 
 export async function setSitePaused(
