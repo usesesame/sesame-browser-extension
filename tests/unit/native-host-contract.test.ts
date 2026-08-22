@@ -9,6 +9,7 @@ const read = (...parts: string[]) => JSON.parse(readFileSync(join(root, ...parts
 
 const contract = read('contracts', 'native-host.json')
 const chromeManifest = read('manifests', 'chrome.json')
+const installer = readFileSync(join(root, 'install-native-host.ps1'), 'utf8')
 
 function extensionIdForKey(base64Key: string): string {
   const digest = createHash('sha256').update(Buffer.from(base64Key, 'base64')).digest('hex').slice(0, 32)
@@ -31,6 +32,11 @@ describe('native host contract', () => {
   it('points at a desktop source file that the installer script also references', () => {
     expect(contract.desktop_source.repository_path).toMatch(/^src-tauri\/src\/.+browser_host\.rs$/)
     expect(contract.desktop_source.commit).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  it('refuses to register a host separated from the desktop executable', () => {
+    expect(installer).toMatch(/Join-Path \(Split-Path -Parent \$resolvedHost\) 'sesame\.exe'/)
+    expect(installer).toMatch(/Test-Path -LiteralPath \$desktopPath -PathType Leaf/)
   })
 })
 

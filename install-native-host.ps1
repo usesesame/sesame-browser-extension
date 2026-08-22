@@ -21,6 +21,10 @@ $resolvedHost = (Resolve-Path -LiteralPath $HostPath -ErrorAction Stop).Path
 if (-not $AllowDebugHost -and $resolvedHost -match '[\\/]debug[\\/]') {
   throw 'Refusing to register a debug browser host. Use a staged development host or pass -AllowDebugHost explicitly.'
 }
+$desktopPath = Join-Path (Split-Path -Parent $resolvedHost) 'sesame.exe'
+if (-not (Test-Path -LiteralPath $desktopPath -PathType Leaf)) {
+  throw 'The browser host must be beside sesame.exe so it can authenticate the desktop broker.'
+}
 
 $manifestFolder = Join-Path $env:LOCALAPPDATA 'Sesame\native-messaging'
 $manifestPath = Join-Path $manifestFolder "$hostName.json"

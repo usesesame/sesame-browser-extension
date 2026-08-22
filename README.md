@@ -130,17 +130,18 @@ to verify store manifests and an explicit development registration helper. A
 production desktop release must install a signed, versioned host and support
 upgrade and removal:
 
-- **Install**: a signed MSI or EXE installer writes the native host binary to a
-  fixed location (for example, `%LOCALAPPDATA%\Sesame\native-host\`) and creates
-  the registry key `HKCU\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser`
-  pointing to the host manifest JSON.
+- **Install**: a signed MSI or EXE installer places the native host beside
+  `sesame.exe`, writes the host manifest under the app's local data directory,
+  and creates the registry key
+  `HKCU\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser`
+  pointing to that manifest.
 - **Upgrade**: the installer increments the host manifest `version`, stops the
   running host process, replaces the binary, and updates the registry path if it
   changed.
 - **Repair**: the installer re-creates the registry key and rewrites the host
   manifest if either is missing.
-- **Removal**: uninstall deletes the binary directory, removes the registry key,
-  and removes the host manifest. The extension will then report
+- **Removal**: uninstall removes the registry key and host manifest before
+  removing the desktop installation. The extension will then report
   `host-not-found` until the user reinstalls.
 
 The host manifest pins the allowed extension origin. It must not allow arbitrary
@@ -154,10 +155,12 @@ For local development only, register an externally supplied desktop host path:
 ```
 
 The helper refuses debug binaries unless `-AllowDebugHost` is explicit, and it
-cannot accept an arbitrary extension id. Full native-host launch and desktop
-approval tests are owned by the desktop product because they require its binary
-and vault. This extension's CI uses a protocol fixture and never receives a
-credential through an environment variable or test log.
+cannot accept an arbitrary extension id. The host must be beside `sesame.exe`,
+which is required for the helper to authenticate the desktop broker. Full
+native-host launch and desktop approval tests are owned by the desktop product
+because they require its binary and vault. This extension's CI uses a protocol
+fixture and never receives a credential through an environment variable or test
+log.
 
 ## Not in this beta
 
