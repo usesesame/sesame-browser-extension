@@ -5,6 +5,7 @@ export interface CardInspection {
   ok: true
   origin: string
   fields: CardFieldKey[]
+  embedded: boolean
 }
 
 export type CardInspectionResult = CardInspection | { ok: false; code: 'no-fields' | 'untrusted-frame' | 'insecure-page' }
@@ -15,13 +16,8 @@ export function inspectCardSurface(): CardInspectionResult {
   for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
     for (const field of cardFieldsForInput(input)) fields.add(field)
   }
-  if (window.top !== window) {
-    return fields.size > 0
-      ? { ok: false, code: 'untrusted-frame' }
-      : { ok: false, code: 'no-fields' }
-  }
   return fields.size > 0
-    ? { ok: true, origin: window.location.origin, fields: Array.from(fields) }
+    ? { ok: true, origin: window.location.origin, fields: Array.from(fields), embedded: window.top !== window }
     : { ok: false, code: 'no-fields' }
 }
 

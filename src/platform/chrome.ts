@@ -9,7 +9,7 @@ export interface Browser {
     query(queryInfo: object): Promise<chrome.tabs.Tab[]>
   }
   scripting: {
-    executeScript<T = unknown>(details: ScriptInjectionDetails<T>): Promise<{ result?: T }[]>
+    executeScript<T = unknown>(details: ScriptInjectionDetails<T>): Promise<{ frameId?: number; result?: T }[]>
   }
 }
 

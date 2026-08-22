@@ -42,6 +42,7 @@ const api: GlobalApi = {
       onConnectionCheck: (force = false) => chrome.runtime.sendMessage({ type: 'sesame:connect', force }),
       onOpenDesktop: () => chrome.runtime.sendMessage({ type: 'sesame:open-desktop' }),
       onFillIdentityRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-identity' }),
+      onFillCardRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-card' }),
     })
   },
   sesameDetachInlineButton: undefined,
@@ -57,7 +58,11 @@ const api: GlobalApi = {
   sesameEnsureSignupCapture: () => ensureSignupCapture(),
 }
 
-Object.assign(window as unknown as Record<string, unknown>, api)
+const live = window as unknown as Partial<GlobalApi>
+Object.assign(window as unknown as Record<string, unknown>, api, {
+  sesameDetachInlineButton: live.sesameDetachInlineButton,
+  sesameDetachSignupCapture: live.sesameDetachSignupCapture,
+})
 
 export {
   inspectLoginSurface,

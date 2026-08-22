@@ -214,7 +214,8 @@
       const purpose = normalizePasswordSurfaceKind(purposeResult?.result)
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-page' }), 4_000)
       if (response?.state !== 'ready') {
-        page = { ...page, kind: 'restricted', code: response?.code ?? 'page-check-failed' }
+        const code = response?.code ?? 'page-check-failed'
+        page = { ...page, kind: code === 'no-fields' ? 'none' : 'restricted', code }
       } else {
         const hasUsernameField = response.hasUsernameField === true
         const hasPasswordField = response.hasPasswordField === true
@@ -238,12 +239,14 @@
         : []
       const cardResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-card' }), 4_000)
       cardFields = cardResponse?.state === 'ready' && Array.isArray(cardResponse.fields) ? cardResponse.fields : []
-      cardFeedback = cardResponse?.code === 'insecure-page'
+      cardFeedback = cardResponse?.state === 'ready' && cardResponse.embedded === true
+        ? 'Card fields are in Stripe payment frames. Approval stays bound to this page.'
+        : cardResponse?.code === 'insecure-page'
         ? 'Cards are never filled on HTTP pages.'
         : cardResponse?.code === 'untrusted-frame'
-          ? 'Cards are not filled in an embedded frame with a different page origin.'
+          ? 'Cards are filled only on this page or in Stripe payment frames.'
           : cardResponse?.code === 'no-fields'
-            ? 'No supported top-level card fields were found on this page.' : ''
+            ? 'No supported card fields were found on this page.' : ''
     } catch {
       activeTabId = null
       activeOrigin = ''
@@ -419,7 +422,7 @@
         : result?.code === 'insecure-page'
           ? 'Cards are never filled on HTTP pages.'
           : result?.code === 'untrusted-frame'
-            ? 'Cards are not filled in an embedded frame with a different page origin.'
+            ? 'Cards are filled only on this page or in Stripe payment frames.'
             : IDENTITY_MESSAGES[result?.code] ?? 'The card fill request could not be completed.'
   }
 
@@ -521,7 +524,7 @@
 
   function pagePresentation(current: PageState) {
     if (current.kind === 'checking') return { title: 'Checking this page', message: 'Looking only for visible sign-in fields.', badge: 'Checking', tone: 'neutral' as const }
-    if (current.kind === 'restricted') return { title: 'Browser page', message: 'This page cannot be inspected or filled.', badge: 'Unavailable', tone: 'warning' as const }
+    if (current.kind === 'restricted') return { title: 'Browser page', message: 'Sesame cannot fill on this page.', badge: 'Unavailable', tone: 'warning' as const }
     if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Password-change forms are refused because Sesame will not guess which existing password to replace.', badge: 'Change form', tone: 'warning' as const }
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
     if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }
@@ -550,7 +553,7 @@
   {:else if phase.name === 'locked'}
     <StatusCard title={phase.title} message={phase.message} />
   {:else if phase.name === 'ready'}
-    <StatusCard title="Connected" message={desktopFillAvailable ? 'Ready to fill from this browser.' : 'Page filling is unavailable in this desktop build.'} tone="success" />
+    <StatusCard title="Connected" message={desktopFillAvailable ? '' : 'Page filling is unavailable in this desktop build.'} tone="success" />
   {/if}
   {#if reconnectScheduled}<p class="retry-note" role="status">Trying the desktop connection again while this window is open.</p>{/if}
 
@@ -568,7 +571,7 @@
     </section>
   {:else}
     <section class="inline-access active-everywhere">
-      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling remain available; the inline control stays active everywhere else.' : 'Focus a field or press Ctrl+Shift+L. No popup is required.'}</p></div>
+      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L.'}</p></div>
       {#if activeOrigin}
         <button type="button" class:enabled={!inlineSitePaused} disabled={inlineWorking} on:click={toggleSitePause}>{inlineSitePaused ? 'Resume' : 'Pause here'}</button>
       {/if}
@@ -607,7 +610,7 @@
   {#if cardFeedback}<p class="fill-feedback" role="status">{cardFeedback}</p>{/if}
 
   <Diagnostics diagnostic={$popupState.diagnostic} pageDiagnostic={$popupState.pageDiagnostic} />
-  <footer>Development build {chrome.runtime.getManifest().version}</footer>
+  <footer>Version {chrome.runtime.getManifest().version}</footer>
 </main>
 
 <style>

@@ -178,6 +178,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }))
     return true
   }
+  if (message?.type === 'sesame:autofill-card') {
+    coordinator.fillCardActivePage().then(sendResponse).catch(() => sendResponse({
+      ok: false,
+      code: 'fill-failed',
+    }))
+    return true
+  }
   if (message?.type === 'sesame:capture-signup') {
     const tabId = sender.tab?.id
     // Origin from the delivering frame, never the message.

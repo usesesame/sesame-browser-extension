@@ -11,7 +11,6 @@ type CardTargets = {
 }
 
 export function fillCardSurface(origin: string, token: string, values: CardFields | null, phase: Phase = 'fill'): { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string } {
-  if (window.top !== window) return { ok: false, code: 'untrusted-frame' }
   if (location.protocol !== 'https:') return { ok: false, code: 'insecure-page' }
   if (location.origin !== origin || token.length < 16 || token.length > 128) return { ok: false, code: 'stale-document' }
   const isolated = globalThis as typeof globalThis & { [PENDING_KEY]?: PendingCardFill }
