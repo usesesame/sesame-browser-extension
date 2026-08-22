@@ -92,7 +92,7 @@
 
   <section class="setting">
     <div><strong>Suggest cards on checkout forms</strong><p>{cardSuggestionsEnabled ? 'Available on HTTPS top-level forms. Each fill needs desktop confirmation.' : 'Disabled. Sesame will not offer saved cards in the browser.'}</p></div>
-    <button class:danger={!cardSuggestionsEnabled} type="button" disabled={working} on:click={toggleCardSuggestions}>{cardSuggestionsEnabled ? 'Turn off' : 'Turn on'}</button>
+    <button class:danger={cardSuggestionsEnabled} type="button" disabled={working} on:click={toggleCardSuggestions}>{cardSuggestionsEnabled ? 'Turn off' : 'Turn on'}</button>
   </section>
 
   <section class="paused">

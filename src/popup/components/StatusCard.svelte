@@ -13,7 +13,7 @@
 
 <section class="card {toneClass}">
   <h2>{title}</h2>
-  <p>{message}</p>
+  {#if message}<p>{message}</p>{/if}
 </section>
 
 <style>
