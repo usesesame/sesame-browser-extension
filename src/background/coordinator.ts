@@ -1,4 +1,4 @@
-import { probeNativeHost, requestFill, requestIdentityFill } from './native-connection'
+import { probeNativeHost, requestCardFill, requestFill, requestIdentityFill } from './native-connection'
 import { transition, initialFillState, type FillContext } from './fill-state'
 import {
   normalizeFillOutcome,
@@ -11,7 +11,7 @@ import {
 import { makeDiagnostic, userMessage } from '../protocol/diagnostics'
 import type { Browser } from '../platform/chrome'
 import { isSameActivePage, tabFillContext } from './tab-context'
-import type { IdentityFieldKey } from '../protocol/native'
+import { CARD_FIELD_KEYS, redactCard, type CardFieldKey, type CardFields, type IdentityFieldKey } from '../protocol/native'
 
 export interface Coordinator {
   state(): FillContext
@@ -20,6 +20,8 @@ export interface Coordinator {
   fillActivePage(signal?: AbortSignal): Promise<FillContext>
   inspectIdentityActivePage(): Promise<IdentityPageCheckResult>
   fillIdentityActivePage(signal?: AbortSignal): Promise<IdentityFillResult>
+  inspectCardActivePage(): Promise<CardPageCheckResult>
+  fillCardActivePage(signal?: AbortSignal): Promise<CardFillResult>
 }
 
 export interface IdentityPageCheckResult {
@@ -31,6 +33,23 @@ export interface IdentityPageCheckResult {
 export type IdentityFillResult =
   | { ok: true; filledFields: IdentityFieldKey[] }
   | { ok: false; code: string }
+
+export interface CardPageCheckResult {
+  state: 'ready' | 'unavailable'
+  code?: string
+  fields?: CardFieldKey[]
+  origin?: string
+  frameIds?: number[]
+  embedded?: boolean
+  targets?: CardFrameTarget[]
+}
+export type CardFillResult = { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string }
+
+interface CardFrameTarget {
+  origin: string
+  frameIds: number[]
+  fields: CardFieldKey[]
+}
 
 export interface ConnectionState {
   state: 'checking' | 'unavailable' | 'desktop-offline' | 'locked' | 'ready'
@@ -189,6 +208,26 @@ export function createCoordinator(browser: Browser): Coordinator {
         activeControllers.delete(controller)
       }
     },
+
+    async inspectCardActivePage(): Promise<CardPageCheckResult> {
+      try {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+        const page = tabFillContext(tab)
+        if (!page.ok) return { state: 'unavailable', code: tab?.url?.startsWith('http:') ? 'insecure-page' : page.code }
+        const inspection = await inspectCardTargets(browser, page.tabId, page.origin)
+        return inspection.state === 'ready'
+          ? { state: 'ready', fields: inspection.fields, embedded: inspection.embedded }
+          : inspection
+      } catch { return { state: 'unavailable', code: 'page-restricted' } }
+    },
+
+    async fillCardActivePage(externalSignal): Promise<CardFillResult> {
+      if (externalSignal?.aborted || activeControllers.size > 0) return { ok: false, code: externalSignal?.aborted ? 'cancelled' : 'fill-in-progress' }
+      const controller = new AbortController(); activeControllers.add(controller)
+      try { return await runCardFill(browser, controller.signal) }
+      catch { return { ok: false, code: controller.signal.aborted ? 'cancelled' : 'page-restricted' } }
+      finally { activeControllers.delete(controller) }
+    },
   }
 }
 
@@ -338,11 +377,77 @@ async function runIdentityFill(browser: Browser, signal: AbortSignal): Promise<I
   }
 }
 
-async function installContentBridge(browser: Browser, tabId: number): Promise<void> {
+async function installContentBridge(browser: Browser, tabId: number, allFrames = false): Promise<void> {
   await browser.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames },
     files: ['content.js'],
   })
+}
+
+export function normalizeCardInspection(raw: unknown, expectedOrigin: string, frameId = 0): CardPageCheckResult {
+  if (!isRecord(raw)) return { state: 'unavailable', code: 'no-fields' }
+  if (!Number.isInteger(frameId) || frameId < 0) return { state: 'unavailable', code: 'no-fields' }
+  if (raw.ok === false) {
+    return Object.keys(raw).length === 2
+      && typeof raw.code === 'string'
+      && ['no-fields', 'untrusted-frame', 'insecure-page', 'content-bridge-unavailable'].includes(raw.code)
+      ? { state: 'unavailable', code: raw.code }
+      : { state: 'unavailable', code: 'no-fields' }
+  }
+  if (raw.ok !== true
+    || Object.keys(raw).length !== 4
+    || typeof raw.origin !== 'string'
+    || typeof raw.embedded !== 'boolean'
+    || raw.embedded !== (frameId !== 0)
+    || !Array.isArray(raw.fields)
+    || raw.fields.length === 0
+    || new Set(raw.fields).size !== raw.fields.length
+    || raw.fields.some((field) => typeof field !== 'string' || !CARD_FIELD_KEYS.includes(field as CardFieldKey))) {
+    return { state: 'unavailable', code: 'no-fields' }
+  }
+  if (frameId === 0 && raw.origin !== expectedOrigin) return { state: 'unavailable', code: 'no-fields' }
+  if (frameId !== 0 && raw.origin !== 'https://js.stripe.com') return { state: 'unavailable', code: 'untrusted-frame' }
+  return {
+    state: 'ready',
+    fields: raw.fields as CardFieldKey[],
+    origin: raw.origin,
+    frameIds: [frameId],
+    embedded: raw.embedded,
+  }
+}
+
+async function inspectCardTargets(browser: Browser, tabId: number, topLevelOrigin: string): Promise<CardPageCheckResult> {
+  await installContentBridge(browser, tabId, true)
+  const injections = await browser.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: invokeCardInspection,
+  })
+  const inspections = injections.map((injection) => normalizeCardInspection(injection.result, topLevelOrigin, injection.frameId ?? -1))
+  const ready = inspections.filter((inspection) => inspection.state === 'ready' && inspection.origin && inspection.frameIds?.length)
+  if (ready.length === 0) {
+    return inspections.some((inspection) => inspection.code === 'untrusted-frame')
+      ? { state: 'unavailable', code: 'untrusted-frame' }
+      : { state: 'unavailable', code: 'no-fields' }
+  }
+  const grouped = new Map<string, CardFrameTarget>()
+  for (const inspection of ready) {
+    const origin = inspection.origin!
+    const target = grouped.get(origin) ?? { origin, frameIds: [], fields: [] }
+    for (const frameId of inspection.frameIds ?? []) {
+      if (!target.frameIds.includes(frameId)) target.frameIds.push(frameId)
+    }
+    for (const field of inspection.fields ?? []) {
+      if (!target.fields.includes(field)) target.fields.push(field)
+    }
+    grouped.set(origin, target)
+  }
+  const targets = [...grouped.values()]
+  const fields = [...new Set(targets.flatMap((target) => target.fields))]
+  return { state: 'ready', fields, embedded: targets.some((target) => target.frameIds.some((frameId) => frameId !== 0)), targets }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function invokeLoginInspection(): unknown {
@@ -379,4 +484,76 @@ function invokeIdentityFill(...args: unknown[]): unknown {
   return typeof fill === 'function'
     ? fill(...args)
     : { ok: false, code: 'content-bridge-unavailable' }
+}
+
+function invokeCardInspection(): unknown {
+  const inspect = (globalThis as typeof globalThis & { sesameInspectCardSurface?: () => unknown }).sesameInspectCardSurface
+  return typeof inspect === 'function' ? inspect() : { ok: false, code: 'content-bridge-unavailable' }
+}
+
+function invokeCardFill(...args: unknown[]): unknown {
+  const fill = (globalThis as typeof globalThis & { sesameFillCardSurface?: (...fillArgs: unknown[]) => unknown }).sesameFillCardSurface
+  return typeof fill === 'function' ? fill(...args) : { ok: false, code: 'content-bridge-unavailable' }
+}
+
+async function runCardFill(browser: Browser, signal: AbortSignal): Promise<CardFillResult> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+  const expectedPage = tabFillContext(tab)
+  if (!expectedPage.ok) return { ok: false, code: tab?.url?.startsWith('http:') ? 'insecure-page' : expectedPage.code }
+  const { tabId } = expectedPage
+  const token = crypto.randomUUID()
+  const preparedTargets: CardFrameTarget[] = []
+  let approvedCard: CardFields | undefined
+  try {
+    const inspection = await inspectCardTargets(browser, tabId, expectedPage.origin)
+    if (inspection.state !== 'ready' || !inspection.targets?.length) return { ok: false, code: inspection.code ?? 'no-fields' }
+    const requestedFields = new Set<CardFieldKey>()
+    for (const target of inspection.targets) {
+      const preparations = await browser.scripting.executeScript({
+        target: { tabId, frameIds: target.frameIds },
+        func: invokeCardFill,
+        args: [target.origin, token, null, 'prepare'],
+      })
+      const fields = collectCardFillFields(preparations.map((preparation) => preparation.result))
+      if (fields.length > 0) preparedTargets.push(target)
+      for (const field of fields) requestedFields.add(field)
+    }
+    const requested = [...requestedFields]
+    if (requested.length === 0) return { ok: false, code: 'no-fields' }
+    const card = await requestCardFill(browser, expectedPage.origin, requested, { signal })
+    if (!card.ok) return card
+    approvedCard = card.card
+    if (signal.aborted) return { ok: false, code: 'cancelled' }
+    const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true })
+    if (!isSameActivePage(expectedPage, currentTab)) return { ok: false, code: 'page-changed' }
+    const writtenFields = new Set<CardFieldKey>()
+    for (const target of preparedTargets) {
+      const writes = await browser.scripting.executeScript({
+        target: { tabId, frameIds: target.frameIds },
+        func: invokeCardFill,
+        args: [target.origin, token, approvedCard, 'fill'],
+      })
+      for (const field of collectCardFillFields(writes.map((write) => write.result))) writtenFields.add(field)
+    }
+    const filledFields = [...writtenFields]
+    return filledFields.length ? { ok: true, filledFields } : { ok: false, code: 'field-write-failed' }
+  } finally {
+    if (approvedCard) redactCard(approvedCard)
+    await Promise.allSettled(preparedTargets.map((target) => browser.scripting.executeScript({
+      target: { tabId, frameIds: target.frameIds },
+      func: invokeCardFill,
+      args: [target.origin, token, null, 'clear'],
+    })))
+  }
+}
+
+function collectCardFillFields(results: unknown[]): CardFieldKey[] {
+  const fields = new Set<CardFieldKey>()
+  for (const result of results) {
+    if (!isRecord(result) || result.ok !== true || !Array.isArray(result.filledFields)) continue
+    for (const field of result.filledFields) {
+      if (typeof field === 'string' && CARD_FIELD_KEYS.includes(field as CardFieldKey)) fields.add(field as CardFieldKey)
+    }
+  }
+  return [...fields]
 }

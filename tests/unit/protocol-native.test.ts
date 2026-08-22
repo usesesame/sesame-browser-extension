@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_FIELD_KEYS,
+  CARD_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
   PROTOCOL_VERSION,
   classifiesAsSecret,
   isCapabilities,
   isCredential,
   isNativeRequest,
+  makeCardRequest,
   makeIdentityRequest,
   makeRequest,
   makeSaveRequest,
   normalizeFillOrigin,
+  redactCard,
   safeNativeResponse,
   type NativeRequest,
 } from '../../src/protocol/native'
@@ -103,6 +106,12 @@ describe('isNativeRequest', () => {
     expect(isNativeRequest({ ...fillRequest('both'), version: PROTOCOL_VERSION + 1 })).toBe(false)
   })
 
+  it('keeps protocol v2 exclusive to card requests', () => {
+    expect(isNativeRequest(makeCardRequest('https://checkout.example.test', ['number']))).toBe(true)
+    expect(isNativeRequest({ version: CARD_PROTOCOL_VERSION, type: 'capabilities', requestId: 'capabilities-2' })).toBe(false)
+    expect(isNativeRequest({ ...fillRequest('both'), version: CARD_PROTOCOL_VERSION })).toBe(false)
+  })
+
   it('rejects an unexpected extra key rather than ignoring it', () => {
     expect(isNativeRequest({ ...fillRequest('both'), extra: 1 })).toBe(false)
   })
@@ -110,6 +119,14 @@ describe('isNativeRequest', () => {
   it('rejects a request id outside the accepted shape', () => {
     expect(isNativeRequest({ ...fillRequest('both'), requestId: 'has spaces' })).toBe(false)
     expect(isNativeRequest({ ...fillRequest('both'), requestId: 'x'.repeat(65) })).toBe(false)
+  })
+})
+
+describe('redactCard', () => {
+  it('clears every approved card field after use', () => {
+    const card = { number: '4111111111111111', expiryMonth: '12', expiryYear: '2030', securityCode: '123' }
+    redactCard(card)
+    expect(card).toEqual({ number: '', expiryMonth: '', expiryYear: '', securityCode: '' })
   })
 })
 

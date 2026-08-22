@@ -96,6 +96,9 @@
 
   let page: PageState = { kind: 'checking', code: 'checking', hostname: '', hasUsernameField: false, hasPasswordField: false }
   let identityFields: string[] = []
+  let cardFields: string[] = []
+  let cardWorking = false
+  let cardFeedback = ''
   let identityWorking = false
   let identityFeedback = ''
   let activeTabId: number | null = null
@@ -211,7 +214,8 @@
       const purpose = normalizePasswordSurfaceKind(purposeResult?.result)
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-page' }), 4_000)
       if (response?.state !== 'ready') {
-        page = { ...page, kind: 'restricted', code: response?.code ?? 'page-check-failed' }
+        const code = response?.code ?? 'page-check-failed'
+        page = { ...page, kind: code === 'no-fields' ? 'none' : 'restricted', code }
       } else {
         const hasUsernameField = response.hasUsernameField === true
         const hasPasswordField = response.hasPasswordField === true
@@ -233,11 +237,22 @@
       identityFields = identityResponse?.state === 'ready' && Array.isArray(identityResponse.fields)
         ? identityResponse.fields
         : []
+      const cardResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-card' }), 4_000)
+      cardFields = cardResponse?.state === 'ready' && Array.isArray(cardResponse.fields) ? cardResponse.fields : []
+      cardFeedback = cardResponse?.state === 'ready' && cardResponse.embedded === true
+        ? 'Card fields are in Stripe payment frames. Approval stays bound to this page.'
+        : cardResponse?.code === 'insecure-page'
+        ? 'Cards are never filled on HTTP pages.'
+        : cardResponse?.code === 'untrusted-frame'
+          ? 'Cards are filled only on this page or in Stripe payment frames.'
+          : cardResponse?.code === 'no-fields'
+            ? 'No supported card fields were found on this page.' : ''
     } catch {
       activeTabId = null
       activeOrigin = ''
       inlineSitePaused = false
       identityFields = []
+      cardFields = []
       page = { ...page, kind: 'restricted', code: 'page-restricted' }
     }
     setPageDiagnostic({
@@ -387,6 +402,30 @@
       : IDENTITY_MESSAGES[result?.code] ?? 'The fill request could not be completed.'
   }
 
+  async function fillCard() {
+    if (cardWorking || desktopState !== 'ready' || cardFields.length === 0) return
+    cardWorking = true
+    cardFeedback = 'Waiting for approval in Sesame…'
+    const port = chrome.runtime.connect({ name: 'sesame:card-fill' })
+    const result = await new Promise<any>((resolve) => {
+      let settled = false
+      const finish = (value: any) => { if (!settled) { settled = true; resolve(value) } }
+      port.onMessage.addListener((message) => { finish(message); port.disconnect() })
+      port.onDisconnect.addListener(() => finish({ ok: false, code: 'host-disconnected' }))
+      port.postMessage({ type: 'start' })
+    })
+    cardWorking = false
+    cardFeedback = result?.ok === true
+      ? 'Card fields filled. Review the page before paying.'
+      : result?.code === 'card-suggestions-disabled'
+        ? 'Card suggestions are disabled in the extension settings.'
+        : result?.code === 'insecure-page'
+          ? 'Cards are never filled on HTTP pages.'
+          : result?.code === 'untrusted-frame'
+            ? 'Cards are filled only on this page or in Stripe payment frames.'
+            : IDENTITY_MESSAGES[result?.code] ?? 'The card fill request could not be completed.'
+  }
+
   async function generateAndFillPassword() {
     if (registrationWorking || activeTabId === null) return
     registrationWorking = true
@@ -485,7 +524,7 @@
 
   function pagePresentation(current: PageState) {
     if (current.kind === 'checking') return { title: 'Checking this page', message: 'Looking only for visible sign-in fields.', badge: 'Checking', tone: 'neutral' as const }
-    if (current.kind === 'restricted') return { title: 'Browser page', message: 'This page cannot be inspected or filled.', badge: 'Unavailable', tone: 'warning' as const }
+    if (current.kind === 'restricted') return { title: 'Browser page', message: 'Sesame cannot fill on this page.', badge: 'Unavailable', tone: 'warning' as const }
     if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Password-change forms are refused because Sesame will not guess which existing password to replace.', badge: 'Change form', tone: 'warning' as const }
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
     if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }
@@ -514,7 +553,7 @@
   {:else if phase.name === 'locked'}
     <StatusCard title={phase.title} message={phase.message} />
   {:else if phase.name === 'ready'}
-    <StatusCard title="Connected" message={desktopFillAvailable ? 'Ready to fill from this browser.' : 'Page filling is unavailable in this desktop build.'} tone="success" />
+    <StatusCard title="Connected" message={desktopFillAvailable ? '' : 'Page filling is unavailable in this desktop build.'} tone="success" />
   {/if}
   {#if reconnectScheduled}<p class="retry-note" role="status">Trying the desktop connection again while this window is open.</p>{/if}
 
@@ -532,7 +571,7 @@
     </section>
   {:else}
     <section class="inline-access active-everywhere">
-      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling remain available; the inline control stays active everywhere else.' : 'Focus a field or press Ctrl+Shift+L. No popup is required.'}</p></div>
+      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L.'}</p></div>
       {#if activeOrigin}
         <button type="button" class:enabled={!inlineSitePaused} disabled={inlineWorking} on:click={toggleSitePause}>{inlineSitePaused ? 'Resume' : 'Pause here'}</button>
       {/if}
@@ -565,8 +604,13 @@
   {/if}
   {#if identityFeedback}<p class="fill-feedback" role="status">{identityFeedback}</p>{/if}
 
+  {#if !desktopNeedsOpening && cardFields.length > 0}
+    <FillButton onClick={fillCard} disabled={desktopState !== 'ready'} loading={cardWorking} loadingLabel="Waiting for approval…" label="Fill card" />
+  {/if}
+  {#if cardFeedback}<p class="fill-feedback" role="status">{cardFeedback}</p>{/if}
+
   <Diagnostics diagnostic={$popupState.diagnostic} pageDiagnostic={$popupState.pageDiagnostic} />
-  <footer>Development build {chrome.runtime.getManifest().version}</footer>
+  <footer>Version {chrome.runtime.getManifest().version}</footer>
 </main>
 
 <style>

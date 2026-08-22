@@ -3,6 +3,7 @@
   import {
     clearPausedSites, GLOBAL_HTTPS_PATTERN, inlinePermissionMode, loadInlineSettings,
     removeAllInlinePermissions, setSitePaused,
+    setCardSuggestionsEnabled,
   } from '../permissions/inline-access'
 
   let enabled = false
@@ -10,6 +11,7 @@
   let pausedOrigins: string[] = []
   let working = false
   let status = ''
+  let cardSuggestionsEnabled = true
 
   onMount(refresh)
 
@@ -19,6 +21,18 @@
     enabled = mode === 'global'
     legacyAccess = mode === 'legacy-sites'
     pausedOrigins = settings.pausedOrigins
+    cardSuggestionsEnabled = settings.cardSuggestionsEnabled
+  }
+
+  async function toggleCardSuggestions() {
+    if (working) return
+    working = true
+    try {
+      const settings = await setCardSuggestionsEnabled(!cardSuggestionsEnabled)
+      cardSuggestionsEnabled = settings.cardSuggestionsEnabled
+      status = cardSuggestionsEnabled ? 'Card suggestions are available on secure checkout forms.' : 'Card suggestions are disabled.'
+    } catch { status = 'Could not change card suggestions.' }
+    finally { working = false }
   }
 
   async function toggleGlobal() {
@@ -76,6 +90,11 @@
 
   <p class="privacy">Sesame detects field structure but never reads existing values. Filling still requires desktop approval and never submits the form.</p>
 
+  <section class="setting">
+    <div><strong>Suggest cards on checkout forms</strong><p>{cardSuggestionsEnabled ? 'Available on HTTPS top-level forms. Each fill needs desktop confirmation.' : 'Disabled. Sesame will not offer saved cards in the browser.'}</p></div>
+    <button class:danger={cardSuggestionsEnabled} type="button" disabled={working} on:click={toggleCardSuggestions}>{cardSuggestionsEnabled ? 'Turn off' : 'Turn on'}</button>
+  </section>
+
   <section class="paused">
     <div class="section-heading">
       <div><strong>Paused inline controls</strong><p>Only sites where you explicitly hid the inline control are stored here.</p></div>
@@ -85,7 +104,7 @@
       <p class="empty">No paused sites.</p>
     {:else}
       <ul>
-        {#each pausedOrigins as origin}
+        {#each pausedOrigins as origin (origin)}
           <li><span>{new URL(origin).hostname}</span><button type="button" on:click={() => resume(origin)}>Resume</button></li>
         {/each}
       </ul>

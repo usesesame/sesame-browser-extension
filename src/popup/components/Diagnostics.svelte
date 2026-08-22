@@ -40,10 +40,6 @@
     <button on:click={copy}>{copied ? 'Copied safely' : 'Copy safe diagnostic'}</button>
   </details>
 {/if}
-{#if pageDiagnostic}
-  <p class="page-code">Page check: <code>{pageDiagnostic.code}</code></p>
-{/if}
-
 <style>
   .diagnostics {
     margin-top: 12px;
@@ -69,14 +65,4 @@
   }
   button:hover { background: var(--tint); }
   button:active { transform: scale(.96); }
-  .page-code {
-    margin: 8px 0 0;
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-  code {
-    background: var(--surface-inset);
-    padding: 1px 4px;
-    border-radius: 4px;
-  }
 </style>

@@ -1,13 +1,14 @@
 // Closed shadow root; never reads field values or submits.
 import { OVERLAY_TOKEN_CSS } from './overlay-tokens'
 import { inspectIdentitySurfaceScoped } from './identity-detector'
+import { cardFieldsForInput } from './card-fields'
 import {
   fillRegistrationSurface,
   inspectPasswordSurface,
   makeRegistrationPassword,
 } from './registration'
 import { copyTemporarily, type TemporaryCopyHandle } from './temporary-copy'
-import type { IdentityFieldKey } from '../protocol/native'
+import type { CardFieldKey, IdentityFieldKey } from '../protocol/native'
 
 // Static stylesheet set via textContent, never parsed as markup.
 const OVERLAY_CSS = `
@@ -38,6 +39,7 @@ export interface OverlayOptions {
   onConnectionCheck(force?: boolean): Promise<unknown> | unknown
   onOpenDesktop(): Promise<unknown> | unknown
   onFillIdentityRequest(): Promise<unknown> | unknown
+  onFillCardRequest(): Promise<unknown> | unknown
 }
 
 const HOST_ID = 'sesame-inline-button'
@@ -55,6 +57,9 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let dismissedField: HTMLInputElement | null = null
   let registrationMode = false
   let identityFieldsAvailable: IdentityFieldKey[] = []
+  let cardButton: HTMLButtonElement | null = null
+  let cardFieldsAvailable: CardFieldKey[] = []
+  let cardMode = false
   let filling = false
   let capability: unknown
   let capabilityAt = 0
@@ -66,6 +71,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   function ensureOverlay() {
     if (host) return
+    document.getElementById(HOST_ID)?.remove()
     host = document.createElement('div')
     host.id = HOST_ID
     host.dataset.sesameOverlay = 'closed'
@@ -95,6 +101,12 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     identityFill.hidden = true
     identityFill.textContent = 'Fill identity'
 
+    const cardFill = document.createElement('button')
+    cardFill.className = 'fill'
+    cardFill.type = 'button'
+    cardFill.hidden = true
+    cardFill.textContent = 'Fill card'
+
     const copy = document.createElement('button')
     copy.className = 'copy'
     copy.type = 'button'
@@ -112,16 +124,18 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     close.setAttribute('aria-label', 'Dismiss')
     close.textContent = '×'
 
-    card.append(mark, fill, identityFill, copy, statusNode, close)
+    card.append(mark, fill, identityFill, cardFill, copy, statusNode, close)
     shadow.append(card)
 
     button = fill
     identityButton = identityFill
+    cardButton = cardFill
     copyButton = copy
     status = statusNode
     host.addEventListener('mousedown', preventFieldBlur)
     fill.addEventListener('click', onFillClick)
     identityFill.addEventListener('click', onFillIdentityClick)
+    cardFill.addEventListener('click', onFillCardClick)
     copy.addEventListener('click', onCopyPassword)
     close.addEventListener('click', dismiss)
     document.documentElement.append(host)
@@ -133,19 +147,24 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   function showOverlay(field: HTMLInputElement) {
     if (field === dismissedField) return
-    const passwordKind = inspectPasswordSurface()
-    const kind =
+    const signInField = isLoginField(field)
+    const passwordKind = signInField ? inspectPasswordSurface() : 'none'
+    const signInKind =
       passwordKind === 'login' || passwordKind === 'registration'
         ? passwordKind
-        : passwordKind === 'none' && isSafeUsernameOnlyAnchor(field)
+        : signInField && passwordKind === 'none' && isSafeUsernameOnlyAnchor(field)
           ? 'username'
           : null
+    const cardFields = cardAnchorFields(field, signInField)
+    const kind = signInKind ?? (cardFields.length > 0 ? 'card' : null)
     if (!kind) {
       hideOverlay()
       return
     }
     ensureOverlay()
     anchorField = field
+    cardMode = kind === 'card'
+    cardFieldsAvailable = cardFields
     registrationMode = kind === 'registration'
     identityFieldsAvailable = registrationMode ? inspectIdentitySurfaceScoped(ownerOf(field)) : []
     if (status) status.textContent = ''
@@ -178,6 +197,18 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   function renderState() {
     if (!button) return
+    if (cardButton) {
+      cardButton.hidden = !(cardMode && cardFieldsAvailable.length > 0)
+      cardButton.disabled = filling
+      cardButton.textContent = filling ? 'Filling…' : 'Fill card'
+    }
+    if (cardMode) {
+      button.hidden = true
+      if (identityButton) identityButton.hidden = true
+      if (copyButton) copyButton.hidden = true
+      return
+    }
+    button.hidden = false
     if (identityButton) {
       identityButton.hidden = !(registrationMode && identityFieldsAvailable.length > 0)
       identityButton.disabled = filling
@@ -277,6 +308,22 @@ export function attachInlineButton(options: OverlayOptions): () => void {
           void refreshCapability()
         }
       }
+    } catch {
+      if (status) status.textContent = 'Sesame could not fill this form.'
+    } finally {
+      filling = false
+      renderState()
+    }
+  }
+
+  async function onFillCardClick() {
+    if (filling || !anchorField) return
+    filling = true
+    renderState()
+    if (status) status.textContent = ''
+    try {
+      const result = await options.onFillCardRequest()
+      if (status) status.textContent = cardFillMessage(result)
     } catch {
       if (status) status.textContent = 'Sesame could not fill this form.'
     } finally {
@@ -412,6 +459,9 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     host = null
     button = null
     identityButton = null
+    cardButton = null
+    cardMode = false
+    cardFieldsAvailable = []
     copyButton = null
     status = null
     anchorField = null
@@ -419,7 +469,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 }
 
 function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
-  if (!isVisible(field) || !isLoginField(field)) return null
+  if (!isVisible(field)) return null
+  if (!isLoginField(field)) return cardFieldsForInput(field).length > 0 ? field : null
   const kind = inspectPasswordSurface()
   if (kind === 'none') return isSafeUsernameOnlyAnchor(field) ? field : null
   if (kind !== 'login' && kind !== 'registration') return null
@@ -519,6 +570,26 @@ export function fillMessage(result: unknown): string {
     return 'This site blocked the field update. Nothing was submitted.'
   if (/signup|password-change|multiple|no-fields/.test(code))
     return 'This form cannot be filled automatically.'
+  return 'Sesame could not fill this form.'
+}
+
+export function cardAnchorFields(field: HTMLInputElement, isSignInField: boolean): CardFieldKey[] {
+  return isSignInField ? [] : cardFieldsForInput(field)
+}
+
+export function cardFillMessage(result: unknown): string {
+  if (!result || typeof result !== 'object') return 'Sesame could not fill this form.'
+  const value = result as { ok?: unknown; code?: unknown; filledFields?: unknown }
+  if (value.ok === true) {
+    const count = Array.isArray(value.filledFields) ? value.filledFields.length : 0
+    return count === 1 ? 'Filled one card field.' : `Filled ${count} card fields.`
+  }
+  const code = typeof value.code === 'string' ? value.code : ''
+  if (code === 'no-fields') return 'No card fields to fill on this form.'
+  if (code === 'untrusted-frame') return 'Sesame does not fill a card in this embedded frame.'
+  if (code === 'insecure-page') return 'Sesame only fills a card on an https page.'
+  if (code === 'cancelled') return 'Card fill was declined.'
+  if (code === 'page-changed') return 'The page changed before the card was filled.'
   return 'Sesame could not fill this form.'
 }
 

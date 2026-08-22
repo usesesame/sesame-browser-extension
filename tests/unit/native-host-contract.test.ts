@@ -9,6 +9,7 @@ const read = (...parts: string[]) => JSON.parse(readFileSync(join(root, ...parts
 
 const contract = read('contracts', 'native-host.json')
 const chromeManifest = read('manifests', 'chrome.json')
+const installer = readFileSync(join(root, 'install-native-host.ps1'), 'utf8')
 
 function extensionIdForKey(base64Key: string): string {
   const digest = createHash('sha256').update(Buffer.from(base64Key, 'base64')).digest('hex').slice(0, 32)
@@ -32,22 +33,29 @@ describe('native host contract', () => {
     expect(contract.desktop_source.repository_path).toMatch(/^src-tauri\/src\/.+browser_host\.rs$/)
     expect(contract.desktop_source.commit).toMatch(/^[0-9a-f]{40}$/)
   })
+
+  it('refuses to register a host separated from the desktop executable', () => {
+    expect(installer).toMatch(/Join-Path \(Split-Path -Parent \$resolvedHost\) 'sesame\.exe'/)
+    expect(installer).toMatch(/Test-Path -LiteralPath \$desktopPath -PathType Leaf/)
+  })
 })
 
 describe('vendored browser contract', () => {
-  const vendored = join(root, 'contracts', 'browser', 'v1')
-  const source = read('contracts', 'browser', 'v1', 'SOURCE.json')
+  for (const version of ['v1', 'v2']) {
+    const vendored = join(root, 'contracts', 'browser', version)
+    const source = read('contracts', 'browser', version, 'SOURCE.json')
 
-  it('records a digest matching every file it vendors', () => {
-    for (const [name, expected] of Object.entries(source.files as Record<string, string>)) {
-      const path = join(vendored, name)
-      expect(existsSync(path), `${name} is recorded but missing`).toBe(true)
-      expect(createHash('sha256').update(readFileSync(path)).digest('hex'), name).toBe(expected)
-    }
-  })
+    it(`${version} records a digest matching every file it vendors`, () => {
+      for (const [name, expected] of Object.entries(source.files as Record<string, string>)) {
+        const path = join(vendored, name)
+        expect(existsSync(path), `${name} is recorded but missing`).toBe(true)
+        expect(createHash('sha256').update(readFileSync(path)).digest('hex'), name).toBe(expected)
+      }
+    })
 
-  it('tracks the repository the desktop is actually published from', () => {
-    expect(source.publication.repository).toBe('usesesame/sesame-desktop')
-    expect(source.implementationSourceCommit).toMatch(/^[0-9a-f]{40}$/)
-  })
+    it(`${version} tracks the repository the desktop is actually published from`, () => {
+      expect(source.publication.repository).toBe('usesesame/sesame-desktop')
+      expect(source.implementationSourceCommit).toMatch(/^[0-9a-f]{40}$/)
+    })
+  }
 })
