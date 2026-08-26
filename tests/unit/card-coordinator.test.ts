@@ -76,4 +76,22 @@ describe('card coordinator', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })
+
+  it('cancels the fill when the caller aborts while awaiting desktop approval', async () => {
+    const browser = browserForCardPage()
+    const coordinator = createCoordinator(browser)
+    const controller = new AbortController()
+    native.requestCardFill.mockImplementation(
+      (_browser: Browser, _origin: string, _fields: readonly string[], options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          options.signal?.addEventListener('abort', () => resolve({ ok: false, code: 'cancelled' }), { once: true })
+        }),
+    )
+
+    const pending = coordinator.fillCardActivePage(controller.signal)
+    controller.abort()
+    const result = await pending
+
+    expect(result).toEqual({ ok: false, code: 'cancelled' })
+  })
 })

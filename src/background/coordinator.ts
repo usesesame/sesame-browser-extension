@@ -7,11 +7,24 @@ import {
   normalizeInspection,
   redactCredential,
   redactIdentity,
+  type Credential,
+  type FillOutcome,
+  type IdentityFillOutcome,
+  type IdentityPageInspection,
+  type PageInspection,
 } from '../protocol/fill'
 import { makeDiagnostic, userMessage } from '../protocol/diagnostics'
 import type { Browser } from '../platform/chrome'
 import { isSameActivePage, tabFillContext } from './tab-context'
-import { CARD_FIELD_KEYS, redactCard, type CardFieldKey, type CardFields, type IdentityFieldKey } from '../protocol/native'
+import {
+  CARD_FIELD_KEYS,
+  redactCard,
+  type CardFieldKey,
+  type CardFields,
+  type FillFields,
+  type IdentityFieldKey,
+  type IdentityFields,
+} from '../protocol/native'
 
 export interface Coordinator {
   state(): FillContext
@@ -48,7 +61,6 @@ export type CardFillResult = { ok: true; filledFields: CardFieldKey[] } | { ok: 
 interface CardFrameTarget {
   origin: string
   frameIds: number[]
-  fields: CardFieldKey[]
 }
 
 export interface ConnectionState {
@@ -147,26 +159,11 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillActivePage(externalSignal): Promise<FillContext> {
-      if (externalSignal?.aborted) {
-        return update({ type: 'cancelled', code: 'cancelled' })
-      }
-      if (activeControllers.size > 0) {
-        return update({ type: 'failed', code: 'fill-in-progress' })
-      }
-
-      const controller = new AbortController()
-      activeControllers.add(controller)
-      if (externalSignal) {
-        externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
-      }
-
-      try {
-        return await runFill(browser, controller.signal, update)
-      } catch {
-        return update({ type: 'failed', code: controller.signal.aborted ? 'cancelled' : 'page-restricted' })
-      } finally {
-        activeControllers.delete(controller)
-      }
+      return withFillGuard(activeControllers, externalSignal, {
+        cancelled: () => update({ type: 'cancelled', code: 'cancelled' }),
+        busy: () => update({ type: 'failed', code: 'fill-in-progress' }),
+        restricted: (aborted) => update({ type: 'failed', code: aborted ? 'cancelled' : 'page-restricted' }),
+      }, (signal) => runFill(browser, signal, update))
     },
 
     async inspectIdentityActivePage(): Promise<IdentityPageCheckResult> {
@@ -191,22 +188,11 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillIdentityActivePage(externalSignal): Promise<IdentityFillResult> {
-      if (externalSignal?.aborted) return { ok: false, code: 'cancelled' }
-      if (activeControllers.size > 0) return { ok: false, code: 'fill-in-progress' }
-
-      const controller = new AbortController()
-      activeControllers.add(controller)
-      if (externalSignal) {
-        externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
-      }
-
-      try {
-        return await runIdentityFill(browser, controller.signal)
-      } catch {
-        return { ok: false, code: controller.signal.aborted ? 'cancelled' : 'page-restricted' }
-      } finally {
-        activeControllers.delete(controller)
-      }
+      return withFillGuard(activeControllers, externalSignal, {
+        cancelled: () => ({ ok: false, code: 'cancelled' }),
+        busy: () => ({ ok: false, code: 'fill-in-progress' }),
+        restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
+      }, (signal) => runIdentityFill(browser, signal))
     },
 
     async inspectCardActivePage(): Promise<CardPageCheckResult> {
@@ -222,11 +208,211 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillCardActivePage(externalSignal): Promise<CardFillResult> {
-      if (externalSignal?.aborted || activeControllers.size > 0) return { ok: false, code: externalSignal?.aborted ? 'cancelled' : 'fill-in-progress' }
-      const controller = new AbortController(); activeControllers.add(controller)
-      try { return await runCardFill(browser, controller.signal) }
-      catch { return { ok: false, code: controller.signal.aborted ? 'cancelled' : 'page-restricted' } }
-      finally { activeControllers.delete(controller) }
+      return withFillGuard(activeControllers, externalSignal, {
+        cancelled: () => ({ ok: false, code: 'cancelled' }),
+        busy: () => ({ ok: false, code: 'fill-in-progress' }),
+        restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
+      }, (signal) => runCardFill(browser, signal))
+    },
+  }
+}
+
+// Owns the concurrency guard and the abort wiring for every fill entry point,
+// so a surface cannot ship without both — the way the card path once did.
+async function withFillGuard<T>(
+  activeControllers: Set<AbortController>,
+  externalSignal: AbortSignal | undefined,
+  outcomes: {
+    cancelled: () => T
+    busy: () => T
+    restricted: (aborted: boolean) => T
+  },
+  run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  if (externalSignal?.aborted) return outcomes.cancelled()
+  if (activeControllers.size > 0) return outcomes.busy()
+
+  const controller = new AbortController()
+  activeControllers.add(controller)
+  externalSignal?.addEventListener('abort', () => controller.abort(), { once: true })
+
+  try {
+    return await run(controller.signal)
+  } catch {
+    return outcomes.restricted(controller.signal.aborted)
+  } finally {
+    activeControllers.delete(controller)
+  }
+}
+
+// The shared inspect -> verify origin -> prepare -> approve -> re-verify -> fill -> clear
+// choreography for a surface confined to the top-level document. Login and identity are
+// both instances of it; card is not, because it must fill across several frames.
+interface SingleFrameSurface<Inspection extends { ok: boolean }, ApprovalInput, Approved, Outcome extends { ok: boolean }> {
+  invokeInspect: () => unknown
+  normalizeInspection: (raw: unknown) => Inspection
+  unfillableCode?: (inspection: Extract<Inspection, { ok: true }>) => string | undefined
+  prepare: (
+    browser: Browser,
+    tabId: number,
+    origin: string,
+    documentToken: string,
+    inspection: Extract<Inspection, { ok: true }>
+  ) => Promise<{ ok: true; approvalInput: ApprovalInput } | { ok: false; code: string }>
+  requestApproval: (
+    browser: Browser,
+    origin: string,
+    input: ApprovalInput,
+    signal: AbortSignal
+  ) => Promise<{ ok: true; approved: Approved } | { ok: false; code: string }>
+  fill: (browser: Browser, tabId: number, origin: string, documentToken: string, approved: Approved) => Promise<Outcome>
+  clear: (browser: Browser, tabId: number, origin: string, documentToken: string) => Promise<void>
+  events?: {
+    inspectionStarted?: () => void
+    inspectionCompleted?: (inspection: Extract<Inspection, { ok: true }>, documentToken: string) => void
+    approvalReceived?: (approved: Approved) => void
+  }
+}
+
+async function runSingleFrameFill<
+  Inspection extends { ok: boolean },
+  ApprovalInput,
+  Approved,
+  Outcome extends { ok: boolean }
+>(
+  browser: Browser,
+  signal: AbortSignal,
+  surface: SingleFrameSurface<Inspection, ApprovalInput, Approved, Outcome>
+): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }> } | { ok: false; code: string }> {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+  const expectedPage = tabFillContext(tab)
+  if (!expectedPage.ok) return { ok: false, code: expectedPage.code }
+
+  const { tabId, origin } = expectedPage
+  surface.events?.inspectionStarted?.()
+
+  const documentToken = crypto.randomUUID()
+  let prepared = false
+
+  try {
+    await installContentBridge(browser, tabId)
+    const [inspectionInjection] = await browser.scripting.executeScript({ target: { tabId }, func: surface.invokeInspect })
+    const inspection = surface.normalizeInspection(inspectionInjection?.result)
+    if (!inspection.ok) return { ok: false, code: (inspection as unknown as { code: string }).code }
+    const readyInspection = inspection as Extract<Inspection, { ok: true }> & { surface: { origin: string } }
+    if (readyInspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
+    const unfillable = surface.unfillableCode?.(readyInspection)
+    if (unfillable) return { ok: false, code: unfillable }
+
+    const prep = await surface.prepare(browser, tabId, origin, documentToken, readyInspection)
+    if (!prep.ok) return prep
+    prepared = true
+    if (signal.aborted) return { ok: false, code: 'cancelled' }
+
+    surface.events?.inspectionCompleted?.(readyInspection, documentToken)
+
+    const approval = await surface.requestApproval(browser, origin, prep.approvalInput, signal)
+    if (!approval.ok) return approval
+    if (signal.aborted) return { ok: false, code: 'cancelled' }
+
+    surface.events?.approvalReceived?.(approval.approved)
+
+    const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true })
+    if (!isSameActivePage(expectedPage, currentTab)) return { ok: false, code: 'page-changed' }
+
+    const outcome = await surface.fill(browser, tabId, origin, documentToken, approval.approved)
+    return outcome.ok ? { ok: true, outcome: outcome as Extract<Outcome, { ok: true }> } : { ok: false, code: (outcome as unknown as { code: string }).code }
+  } catch {
+    return { ok: false, code: signal.aborted ? 'cancelled' : 'page-restricted' }
+  } finally {
+    if (prepared) {
+      try {
+        await surface.clear(browser, tabId, origin, documentToken)
+      } catch { /* noop */ }
+    }
+  }
+}
+
+function loginSurface(
+  update: (event: Parameters<typeof transition>[1]) => FillContext
+): SingleFrameSurface<PageInspection, FillFields, Credential, FillOutcome> {
+  return {
+    invokeInspect: invokeLoginInspection,
+    normalizeInspection,
+    unfillableCode: (inspection) => (!inspection.hasPasswordField && !inspection.hasUsernameField ? 'no-fields' : undefined),
+    async prepare(browser, tabId, origin, documentToken) {
+      const [preparation] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeLoginFill,
+        args: [origin, documentToken, null, 'prepare'],
+      })
+      const prep = normalizeFillOutcome(preparation?.result)
+      if (!prep.ok) return prep
+      const approvalInput: FillFields = prep.usernameFilled && !prep.passwordFilled ? 'username'
+        : prep.passwordFilled && !prep.usernameFilled ? 'password' : 'both'
+      return { ok: true, approvalInput }
+    },
+    async requestApproval(browser, origin, input, signal) {
+      const fill = await requestFill(browser, origin, { signal, fields: input })
+      return fill.ok ? { ok: true, approved: fill.credential } : fill
+    },
+    async fill(browser, tabId, origin, documentToken, approved) {
+      const [injection] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeLoginFill,
+        args: [origin, documentToken, approved, 'fill'],
+      })
+      redactCredential({ credential: approved })
+      return normalizeFillOutcome(injection?.result)
+    },
+    async clear(browser, tabId, origin, documentToken) {
+      await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeLoginFill,
+        args: [origin, documentToken, null, 'clear'],
+      })
+    },
+    events: {
+      inspectionStarted: () => update({ type: 'inspection-started' }),
+      inspectionCompleted: (inspection, documentToken) => update({ type: 'inspection-completed', inspection, documentToken }),
+      approvalReceived: (credential) => update({ type: 'approval-received', credential }),
+    },
+  }
+}
+
+function identitySurface(): SingleFrameSurface<IdentityPageInspection, readonly IdentityFieldKey[], IdentityFields, IdentityFillOutcome> {
+  return {
+    invokeInspect: invokeIdentityInspection,
+    normalizeInspection: normalizeIdentityInspection,
+    async prepare(browser, tabId, origin, documentToken, inspection) {
+      const [preparation] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeIdentityFill,
+        args: [origin, documentToken, null, 'prepare'],
+      })
+      const prep = normalizeIdentityFillOutcome(preparation?.result)
+      if (!prep.ok) return prep
+      return { ok: true, approvalInput: inspection.fields }
+    },
+    async requestApproval(browser, origin, input, signal) {
+      const fill = await requestIdentityFill(browser, origin, input, { signal })
+      return fill.ok ? { ok: true, approved: fill.identity } : fill
+    },
+    async fill(browser, tabId, origin, documentToken, approved) {
+      const [injection] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeIdentityFill,
+        args: [origin, documentToken, approved, 'fill'],
+      })
+      redactIdentity({ identity: approved })
+      return normalizeIdentityFillOutcome(injection?.result)
+    },
+    async clear(browser, tabId, origin, documentToken) {
+      await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeIdentityFill,
+        args: [origin, documentToken, null, 'clear'],
+      })
     },
   }
 }
@@ -236,145 +422,15 @@ async function runFill(
   signal: AbortSignal,
   update: (event: Parameters<typeof transition>[1]) => FillContext
 ): Promise<FillContext> {
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-  const expectedPage = tabFillContext(tab)
-  if (!expectedPage.ok) return update({ type: 'failed', code: expectedPage.code })
-
-  const { tabId, origin } = expectedPage
-
-  update({ type: 'inspection-started' })
-
-  const documentToken = crypto.randomUUID()
-  let prepared = false
-
-  try {
-    await installContentBridge(browser, tabId)
-    const [inspectionInjection] = await browser.scripting.executeScript({
-      target: { tabId },
-      func: invokeLoginInspection,
-    })
-    const inspection = normalizeInspection(inspectionInjection?.result)
-    if (!inspection.ok) {
-      return update({ type: 'failed', code: inspection.code })
-    }
-    if (inspection.surface.origin !== origin) {
-      return update({ type: 'failed', code: 'origin-mismatch' })
-    }
-    if (!inspection.hasPasswordField && !inspection.hasUsernameField) {
-      return update({ type: 'failed', code: 'no-fields' })
-    }
-
-    const [preparation] = await browser.scripting.executeScript({
-      target: { tabId },
-      func: invokeLoginFill,
-      args: [origin, documentToken, null, 'prepare'],
-    })
-    const prep = normalizeFillOutcome(preparation?.result)
-    if (!prep.ok) {
-      return update({ type: 'failed', code: prep.code })
-    }
-    prepared = true
-    if (signal.aborted) return update({ type: 'cancelled', code: 'cancelled' })
-
-    update({ type: 'inspection-completed', inspection, documentToken })
-
-    const requestedFields = prep.usernameFilled && !prep.passwordFilled ? 'username'
-      : prep.passwordFilled && !prep.usernameFilled ? 'password' : 'both'
-    const fill = await requestFill(browser, origin, { signal, fields: requestedFields })
-    if (!fill.ok) {
-      return update({ type: 'failed', code: fill.code })
-    }
-    if (signal.aborted) return update({ type: 'cancelled', code: 'cancelled' })
-
-    const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true })
-    if (!isSameActivePage(expectedPage, currentTab)) {
-      return update({ type: 'failed', code: 'page-changed' })
-    }
-
-    update({ type: 'approval-received', credential: fill.credential })
-
-    const [injection] = await browser.scripting.executeScript({
-      target: { tabId },
-      func: invokeLoginFill,
-      args: [origin, documentToken, fill.credential, 'fill'],
-    })
-    redactCredential({ credential: fill.credential })
-    const outcome = normalizeFillOutcome(injection?.result)
-    if (!outcome.ok) {
-      return update({ type: 'failed', code: outcome.code })
-    }
-    return update({ type: 'fill-completed', usernameFilled: outcome.usernameFilled, passwordFilled: outcome.passwordFilled })
-  } catch {
-    return update({ type: 'failed', code: signal.aborted ? 'cancelled' : 'page-restricted' })
-  } finally {
-    if (prepared) {
-      try {
-        await browser.scripting.executeScript({
-          target: { tabId },
-          func: invokeLoginFill,
-          args: [origin, documentToken, null, 'clear'],
-        })
-      } catch { /* noop */ }
-    }
-  }
+  const result = await runSingleFrameFill(browser, signal, loginSurface(update))
+  return result.ok
+    ? update({ type: 'fill-completed', usernameFilled: result.outcome.usernameFilled, passwordFilled: result.outcome.passwordFilled })
+    : update({ type: 'failed', code: result.code })
 }
 
 async function runIdentityFill(browser: Browser, signal: AbortSignal): Promise<IdentityFillResult> {
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-  const expectedPage = tabFillContext(tab)
-  if (!expectedPage.ok) return { ok: false, code: expectedPage.code }
-
-  const { tabId, origin } = expectedPage
-  const documentToken = crypto.randomUUID()
-  let prepared = false
-
-  try {
-    await installContentBridge(browser, tabId)
-    const [inspectionInjection] = await browser.scripting.executeScript({
-      target: { tabId },
-      func: invokeIdentityInspection,
-    })
-    const inspection = normalizeIdentityInspection(inspectionInjection?.result)
-    if (!inspection.ok) return { ok: false, code: inspection.code }
-    if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
-
-    const [preparation] = await browser.scripting.executeScript({
-      target: { tabId },
-      func: invokeIdentityFill,
-      args: [origin, documentToken, null, 'prepare'],
-    })
-    const prep = normalizeIdentityFillOutcome(preparation?.result)
-    if (!prep.ok) return { ok: false, code: prep.code }
-    prepared = true
-    if (signal.aborted) return { ok: false, code: 'cancelled' }
-
-    const fill = await requestIdentityFill(browser, origin, inspection.fields, { signal })
-    if (!fill.ok) return { ok: false, code: fill.code }
-    if (signal.aborted) return { ok: false, code: 'cancelled' }
-
-    const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true })
-    if (!isSameActivePage(expectedPage, currentTab)) return { ok: false, code: 'page-changed' }
-
-    const [injection] = await browser.scripting.executeScript({
-      target: { tabId },
-      func: invokeIdentityFill,
-      args: [origin, documentToken, fill.identity, 'fill'],
-    })
-    redactIdentity({ identity: fill.identity })
-    return normalizeIdentityFillOutcome(injection?.result)
-  } catch {
-    return { ok: false, code: signal.aborted ? 'cancelled' : 'page-restricted' }
-  } finally {
-    if (prepared) {
-      try {
-        await browser.scripting.executeScript({
-          target: { tabId },
-          func: invokeIdentityFill,
-          args: [origin, documentToken, null, 'clear'],
-        })
-      } catch { /* noop */ }
-    }
-  }
+  const result = await runSingleFrameFill(browser, signal, identitySurface())
+  return result.ok ? { ok: true, filledFields: result.outcome.filledFields } : result
 }
 
 async function installContentBridge(browser: Browser, tabId: number, allFrames = false): Promise<void> {
@@ -429,7 +485,7 @@ async function inspectCardTargets(browser: Browser, tabId: number, topLevelOrigi
       ? { state: 'unavailable', code: 'untrusted-frame' }
       : { state: 'unavailable', code: 'no-fields' }
   }
-  const grouped = new Map<string, CardFrameTarget>()
+  const grouped = new Map<string, CardFrameTarget & { fields: CardFieldKey[] }>()
   for (const inspection of ready) {
     const origin = inspection.origin!
     const target = grouped.get(origin) ?? { origin, frameIds: [], fields: [] }
@@ -520,6 +576,7 @@ async function runCardFill(browser: Browser, signal: AbortSignal): Promise<CardF
     }
     const requested = [...requestedFields]
     if (requested.length === 0) return { ok: false, code: 'no-fields' }
+    if (signal.aborted) return { ok: false, code: 'cancelled' }
     const card = await requestCardFill(browser, expectedPage.origin, requested, { signal })
     if (!card.ok) return card
     approvedCard = card.card
