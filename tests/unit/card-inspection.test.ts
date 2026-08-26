@@ -6,7 +6,7 @@ const origin = 'https://checkout.example.test'
 describe('normalizeCardInspection', () => {
   it('accepts a closed top-level inspection bound to the active origin', () => {
     expect(normalizeCardInspection({ ok: true, origin, fields: ['number', 'securityCode'], embedded: false }, origin))
-      .toEqual({ state: 'ready', origin, fields: ['number', 'securityCode'], frameIds: [0], embedded: false })
+      .toEqual({ state: 'ready', origin, fields: ['number', 'securityCode'], frameId: 0 })
     expect(normalizeCardInspection({ ok: true, origin, fields: ['number'], embedded: false, extra: true }, origin))
       .toEqual({ state: 'unavailable', code: 'no-fields' })
     expect(normalizeCardInspection({ ok: true, origin: 'https://other.example.test', fields: ['number'], embedded: false }, origin))
@@ -15,7 +15,7 @@ describe('normalizeCardInspection', () => {
 
   it('accepts a js.stripe.com payment-frame inspection when its frame id is known', () => {
     expect(normalizeCardInspection({ ok: true, origin: 'https://js.stripe.com', fields: ['number'], embedded: true }, origin, 12))
-      .toEqual({ state: 'ready', origin: 'https://js.stripe.com', fields: ['number'], frameIds: [12], embedded: true })
+      .toEqual({ state: 'ready', origin: 'https://js.stripe.com', fields: ['number'], frameId: 12 })
   })
 
   it('rejects an inspection without a browser-provided frame id', () => {
