@@ -1,5 +1,5 @@
 import type { CardFieldKey } from '../protocol/native'
-import { tokens } from './field-writer'
+import { isVisible, tokens } from './field-writer'
 
 const AUTOCOMPLETE_TO_FIELDS: Readonly<Record<string, readonly CardFieldKey[]>> = Object.freeze({
   'cc-name': ['cardholderName'],
@@ -36,6 +36,36 @@ export function hasCombinedExpiryField(input: HTMLInputElement): boolean {
   const hint = inputHint(input)
   return /\b(?:expiry|expiration|exp(?:iration)?[\s_-]*date|valid[\s_-]*thru)\b/.test(hint)
     && !/\b(?:month|year)\b/.test(hint)
+}
+
+export interface CardSurfaceTargets {
+  fields: Partial<Record<CardFieldKey, HTMLInputElement>>
+  combinedExpiry?: HTMLInputElement
+}
+
+// The one scan of the page's card inputs: inspection (is this form fillable)
+// and the write (which input gets which value) both derive from this result,
+// so they cannot disagree about what the page contains.
+export function scanCardSurface(): CardSurfaceTargets {
+  const targets: CardSurfaceTargets = { fields: {} }
+  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
+    if (hasCombinedExpiryField(input) && !targets.combinedExpiry) {
+      targets.combinedExpiry = input
+    }
+    for (const field of cardFieldsForInput(input)) {
+      if (!hasCombinedExpiryField(input) && !targets.fields[field]) targets.fields[field] = input
+    }
+  }
+  return targets
+}
+
+export function cardFieldKeysForTargets(targets: CardSurfaceTargets): CardFieldKey[] {
+  const keys = Object.keys(targets.fields) as CardFieldKey[]
+  if (targets.combinedExpiry) {
+    if (!keys.includes('expiryMonth')) keys.push('expiryMonth')
+    if (!keys.includes('expiryYear')) keys.push('expiryYear')
+  }
+  return keys
 }
 
 function inputHint(input: HTMLInputElement): string {
