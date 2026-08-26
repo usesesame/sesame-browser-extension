@@ -1,4 +1,5 @@
 export const GLOBAL_HTTPS_PATTERN = 'https://*/*'
+import { isRecord } from '../shared/values'
 export const INLINE_SETTINGS_KEY = 'inlineSettingsV1'
 
 export interface InlineSettings {
@@ -116,8 +117,4 @@ function isSupportedWebUrl(url: URL): boolean {
 
 function isLoopback(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
