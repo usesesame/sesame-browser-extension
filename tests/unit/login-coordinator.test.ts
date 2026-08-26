@@ -27,10 +27,10 @@ function browserForLoginPage(): Browser {
     scripting: {
       executeScript: vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
         if ('files' in details) return []
-        if (details.func.name === 'invokeLoginInspection') {
+        if (details.func.name === 'invokeBridgeInspection') {
           return [{ result: { ok: true, surface: { ok: true, origin: pageOrigin }, hasPasswordField: true, hasUsernameField: true } }]
         }
-        const phase = details.args?.[3]
+        const phase = details.args?.[4]
         if (phase === 'prepare') return [{ result: { ok: true, usernameFilled: true, passwordFilled: true } }]
         if (phase === 'fill') return [{ result: { ok: true, usernameFilled: true, passwordFilled: true } }]
         return [{ result: { ok: true, usernameFilled: false, passwordFilled: false } }]

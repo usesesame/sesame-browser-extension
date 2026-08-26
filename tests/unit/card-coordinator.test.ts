@@ -28,13 +28,13 @@ function browserForCardPage(): Browser {
     scripting: {
       executeScript: vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
         if ('files' in details) return []
-        if (details.func.name === 'invokeCardInspection') {
+        if (details.func.name === 'invokeBridgeInspection') {
           return [
             { frameId: 0, result: { ok: true, origin: pageOrigin, fields: ['cardholderName'], embedded: false } },
             { frameId: 12, result: { ok: true, origin: stripeOrigin, fields: ['number', 'securityCode'], embedded: true } },
           ]
         }
-        const phase = details.args?.[3]
+        const phase = details.args?.[4]
         const frameId = details.target.frameIds?.[0]
         if (phase === 'prepare') {
           return frameId === 0

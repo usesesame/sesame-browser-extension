@@ -27,10 +27,10 @@ function browserForIdentityPage(): Browser {
     scripting: {
       executeScript: vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
         if ('files' in details) return []
-        if (details.func.name === 'invokeIdentityInspection') {
+        if (details.func.name === 'invokeBridgeInspection') {
           return [{ result: { ok: true, surface: { ok: true, origin: pageOrigin }, fields: ['fullName', 'email'] } }]
         }
-        const phase = details.args?.[3]
+        const phase = details.args?.[4]
         if (phase === 'fill') return [{ result: { ok: true, filledFields: ['fullName', 'email'] } }]
         return [{ result: { ok: true, filledFields: [] } }]
       }) as unknown as Browser['scripting']['executeScript'],
