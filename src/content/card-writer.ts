@@ -1,23 +1,19 @@
 import type { CardFieldKey, CardFields } from '../protocol/native'
-import { isVisible, setValue } from './field-writer'
-import { cardFieldsForInput, hasCombinedExpiryField } from './card-fields'
+import { setValue } from './field-writer'
+import { cardFieldKeysForTargets, scanCardSurface } from './card-fields'
 
 type PendingCardFill = { token: string; origin: string; fields: CardFieldKey[] }
 type Phase = 'prepare' | 'fill' | 'clear'
 const PENDING_KEY = '__sesamePendingCardFillV2'
-type CardTargets = {
-  fields: Partial<Record<CardFieldKey, HTMLInputElement>>
-  combinedExpiry?: HTMLInputElement
-}
 
 export function fillCardSurface(origin: string, token: string, values: CardFields | null, phase: Phase = 'fill'): { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string } {
   if (location.protocol !== 'https:') return { ok: false, code: 'insecure-page' }
   if (location.origin !== origin || token.length < 16 || token.length > 128) return { ok: false, code: 'stale-document' }
   const isolated = globalThis as typeof globalThis & { [PENDING_KEY]?: PendingCardFill }
   if (phase === 'clear') { delete isolated[PENDING_KEY]; return { ok: true, filledFields: [] } }
-  const targets = detectCardFields()
+  const targets = scanCardSurface()
   if (phase === 'prepare') {
-    const requested = requestedFields(targets)
+    const requested = cardFieldKeysForTargets(targets)
     if (!requested.length) return { ok: false, code: 'no-fields' }
     isolated[PENDING_KEY] = { token, origin, fields: requested }
     return { ok: true, filledFields: requested }
@@ -45,28 +41,6 @@ export function fillCardSurface(origin: string, token: string, values: CardField
     for (const field of Object.keys(values) as CardFieldKey[]) values[field] = ''
   }
   return filledFields.length ? { ok: true, filledFields } : { ok: false, code: 'field-write-failed' }
-}
-
-function detectCardFields(): CardTargets {
-  const targets: CardTargets = { fields: {} }
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
-    if (hasCombinedExpiryField(input) && !targets.combinedExpiry) {
-      targets.combinedExpiry = input
-    }
-    for (const field of cardFieldsForInput(input)) {
-      if (!hasCombinedExpiryField(input) && !targets.fields[field]) targets.fields[field] = input
-    }
-  }
-  return targets
-}
-
-function requestedFields(targets: CardTargets): CardFieldKey[] {
-  const requested = Object.keys(targets.fields) as CardFieldKey[]
-  if (targets.combinedExpiry) {
-    if (!requested.includes('expiryMonth')) requested.push('expiryMonth')
-    if (!requested.includes('expiryYear')) requested.push('expiryYear')
-  }
-  return requested
 }
 
 function combinedExpiryValue(input: HTMLInputElement, month: string, year: string): string {

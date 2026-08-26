@@ -28,13 +28,13 @@ function browserForCardPage(): Browser {
     scripting: {
       executeScript: vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
         if ('files' in details) return []
-        if (details.func.name === 'invokeCardInspection') {
+        if (details.func.name === 'invokeBridgeInspection') {
           return [
             { frameId: 0, result: { ok: true, origin: pageOrigin, fields: ['cardholderName'], embedded: false } },
             { frameId: 12, result: { ok: true, origin: stripeOrigin, fields: ['number', 'securityCode'], embedded: true } },
           ]
         }
-        const phase = details.args?.[3]
+        const phase = details.args?.[4]
         const frameId = details.target.frameIds?.[0]
         if (phase === 'prepare') {
           return frameId === 0
@@ -75,5 +75,23 @@ describe('card coordinator', () => {
       ['cardholderName', 'number', 'securityCode'],
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it('cancels the fill when the caller aborts while awaiting desktop approval', async () => {
+    const browser = browserForCardPage()
+    const coordinator = createCoordinator(browser)
+    const controller = new AbortController()
+    native.requestCardFill.mockImplementation(
+      (_browser: Browser, _origin: string, _fields: readonly string[], options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          options.signal?.addEventListener('abort', () => resolve({ ok: false, code: 'cancelled' }), { once: true })
+        }),
+    )
+
+    const pending = coordinator.fillCardActivePage(controller.signal)
+    controller.abort()
+    const result = await pending
+
+    expect(result).toEqual({ ok: false, code: 'cancelled' })
   })
 })

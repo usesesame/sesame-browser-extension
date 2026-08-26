@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fillCardSurface } from '../../src/content/card-writer'
-import { isVisible } from '../../src/content/field-writer'
+import { isVisibleInput } from '../../src/shared/dom'
 
 const origin = 'https://checkout.example.test'
 const token = 'card-fill-token-1234'
@@ -29,7 +29,7 @@ describe('fillCardSurface', () => {
   it('requests and fills both expiry values for a combined expiry field', () => {
     const input = prepareInput('<input autocomplete="cc-exp" maxlength="5">')
     expect(input.autocomplete).toBe('cc-exp')
-    expect(isVisible(input)).toBe(true)
+    expect(isVisibleInput(input)).toBe(true)
     expect(fillCardSurface(origin, token, null, 'prepare')).toEqual({
       ok: true,
       filledFields: ['expiryMonth', 'expiryYear'],

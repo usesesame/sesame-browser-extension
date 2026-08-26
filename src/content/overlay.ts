@@ -2,6 +2,8 @@
 import { OVERLAY_TOKEN_CSS } from './overlay-tokens'
 import { inspectIdentitySurfaceScoped } from './identity-detector'
 import { cardFieldsForInput } from './card-fields'
+import { isRecord } from '../shared/values'
+import { isVisibleInput } from '../shared/dom'
 import {
   fillRegistrationSurface,
   inspectPasswordSurface,
@@ -317,29 +319,21 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   }
 
   async function onFillCardClick() {
-    if (filling || !anchorField) return
-    filling = true
-    renderState()
-    if (status) status.textContent = ''
-    try {
-      const result = await options.onFillCardRequest()
-      if (status) status.textContent = cardFillMessage(result)
-    } catch {
-      if (status) status.textContent = 'Sesame could not fill this form.'
-    } finally {
-      filling = false
-      renderState()
-    }
+    await runFillRequest(options.onFillCardRequest, cardFillMessage)
   }
 
   async function onFillIdentityClick() {
+    await runFillRequest(options.onFillIdentityRequest, identityFillMessage)
+  }
+
+  async function runFillRequest(request: () => unknown, message: (result: unknown) => string) {
     if (filling || !anchorField) return
     filling = true
     renderState()
     if (status) status.textContent = ''
     try {
-      const result = await options.onFillIdentityRequest()
-      if (status) status.textContent = identityFillMessage(result)
+      const result = await request()
+      if (status) status.textContent = message(result)
     } catch {
       if (status) status.textContent = 'Sesame could not fill this form.'
     } finally {
@@ -469,7 +463,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 }
 
 function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
-  if (!isVisible(field)) return null
+  if (!isVisibleInput(field)) return null
   if (!isLoginField(field)) return cardFieldsForInput(field).length > 0 ? field : null
   const kind = inspectPasswordSurface()
   if (kind === 'none') return isSafeUsernameOnlyAnchor(field) ? field : null
@@ -484,7 +478,7 @@ function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
 
 function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
   if (field.type === 'password') return false
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)
+  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))
   const candidates = inputs.filter(
     (candidate) => candidate.type !== 'password' && isLoginField(candidate),
   )
@@ -516,7 +510,7 @@ function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
 
 function visiblePasswordFields(): HTMLInputElement[] {
   return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
-    isVisible,
+    (input) => isVisibleInput(input),
   )
 }
 
@@ -531,19 +525,6 @@ function isLoginField(field: HTMLInputElement): boolean {
     autocomplete === 'email' ||
     type === 'email' ||
     /user|login|email|account|identifier/.test(hint)
-  )
-}
-
-function isVisible(field: HTMLInputElement): boolean {
-  if (field.disabled || field.readOnly) return false
-  const style = getComputedStyle(field)
-  const bounds = field.getBoundingClientRect()
-  return (
-    style.display !== 'none' &&
-    style.visibility !== 'hidden' &&
-    Number(style.opacity) !== 0 &&
-    bounds.width > 0 &&
-    bounds.height > 0
   )
 }
 
@@ -578,13 +559,12 @@ export function cardAnchorFields(field: HTMLInputElement, isSignInField: boolean
 }
 
 export function cardFillMessage(result: unknown): string {
-  if (!result || typeof result !== 'object') return 'Sesame could not fill this form.'
-  const value = result as { ok?: unknown; code?: unknown; filledFields?: unknown }
-  if (value.ok === true) {
-    const count = Array.isArray(value.filledFields) ? value.filledFields.length : 0
+  if (!isRecord(result)) return 'Sesame could not fill this form.'
+  if (result.ok === true) {
+    const count = Array.isArray(result.filledFields) ? result.filledFields.length : 0
     return count === 1 ? 'Filled one card field.' : `Filled ${count} card fields.`
   }
-  const code = typeof value.code === 'string' ? value.code : ''
+  const code = recordString(result, 'code')
   if (code === 'no-fields') return 'No card fields to fill on this form.'
   if (code === 'untrusted-frame') return 'Sesame does not fill a card in this embedded frame.'
   if (code === 'insecure-page') return 'Sesame only fills a card on an https page.'
@@ -603,10 +583,6 @@ export function identityFillMessage(result: unknown): string {
   if (code === 'stale-document') return 'The page changed while filling. Try again.'
   if (code === 'field-write-failed') return 'This site blocked the field update. Nothing was submitted.'
   return 'Sesame could not fill this form.'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function registrationMessage(code: string): string {
