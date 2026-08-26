@@ -1,4 +1,5 @@
 import { IDENTITY_FIELD_KEYS, type IdentityFieldKey, type IdentityFields } from './native'
+import { isRecord } from '../shared/values'
 
 export interface LoginSurface {
   ok: true
@@ -101,10 +102,6 @@ export function normalizeFillOutcome(raw: unknown): FillOutcome | { ok: false; c
     usernameFilled: raw.usernameFilled,
     passwordFilled: raw.passwordFilled,
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function hasExactKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {

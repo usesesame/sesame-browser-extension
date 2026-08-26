@@ -1,5 +1,6 @@
 // Reports only origin and field kinds; never reads input values or page text.
 import type { IdentityFieldKey } from '../protocol/native'
+import { isVisibleInput } from '../shared/dom'
 
 export interface IdentitySurface {
   ok: true
@@ -25,7 +26,7 @@ const AUTOCOMPLETE_TO_FIELD: Readonly<Record<string, IdentityFieldKey>> = Object
 
 export function inspectIdentitySurface(): IdentityInspection {
   const fields = new Set<IdentityFieldKey>()
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
+  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input, { excludePassword: true }))) {
     for (const token of input.autocomplete.toLowerCase().split(/\s+/)) {
       const key = AUTOCOMPLETE_TO_FIELD[token]
       if (key) fields.add(key)
@@ -37,7 +38,7 @@ export function inspectIdentitySurface(): IdentityInspection {
 
 export function inspectIdentitySurfaceScoped(owner: Element): IdentityFieldKey[] {
   const fields = new Set<IdentityFieldKey>()
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
+  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input, { excludePassword: true }))) {
     if ((input.form ?? input.parentElement ?? input) !== owner) continue
     for (const token of input.autocomplete.toLowerCase().split(/\s+/)) {
       const key = AUTOCOMPLETE_TO_FIELD[token]
@@ -47,10 +48,3 @@ export function inspectIdentitySurfaceScoped(owner: Element): IdentityFieldKey[]
   return Array.from(fields)
 }
 
-function isVisible(input: HTMLInputElement): boolean {
-  if (input.disabled || input.readOnly || input.type === 'hidden' || input.type === 'password') return false
-  const style = getComputedStyle(input)
-  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
-  const rect = input.getBoundingClientRect()
-  return rect.width > 0 && rect.height > 0
-}

@@ -1,4 +1,6 @@
-import { isUsernameField, isVisible } from './field-detector'
+import { isUsernameField } from './field-detector'
+import { isVisibleInput } from '../shared/dom'
+import { isRecord } from '../shared/values'
 
 const REGISTRATION_VERSION = 1
 
@@ -114,7 +116,7 @@ export function captureSignupSubmission(): SignupCapture | null {
 
   const owner = passwordFields[0].form ?? passwordFields[0].parentElement ?? passwordFields[0]
   const usernameField = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
-    .filter((field) => field.type !== 'password' && isVisible(field) && isUsernameField(field))
+    .filter((field) => field.type !== 'password' && isVisibleInput(field, { rejectAriaHiddenAncestor: true, minimumSize: 1 }) && isUsernameField(field))
     .find((field) => (field.form ?? field.parentElement ?? field) === owner)
 
   return { origin: location.origin, username: usernameField?.value ?? '', password }
@@ -137,7 +139,7 @@ export function captureUpdateSubmission(): UpdateCapture | null {
 
   const owner = newPasswordField.form ?? newPasswordField.parentElement ?? newPasswordField
   const usernameField = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
-    .filter((field) => field.type !== 'password' && isVisible(field) && isUsernameField(field))
+    .filter((field) => field.type !== 'password' && isVisibleInput(field, { rejectAriaHiddenAncestor: true, minimumSize: 1 }) && isUsernameField(field))
     .find((field) => (field.form ?? field.parentElement ?? field) === owner)
 
   return { origin: location.origin, username: usernameField?.value ?? '', password }
@@ -208,8 +210,4 @@ function secureRandomIndex(maxExclusive: number, getRandomValues: RandomBytes): 
 
 function failure(code: string): RegistrationOutcome {
   return { version: REGISTRATION_VERSION, ok: false, code }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

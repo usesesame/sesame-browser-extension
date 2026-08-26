@@ -1,5 +1,6 @@
 import type { CardFieldKey } from '../protocol/native'
-import { isVisible, tokens } from './field-writer'
+import { tokens } from './field-writer'
+import { isVisibleInput } from '../shared/dom'
 
 const AUTOCOMPLETE_TO_FIELDS: Readonly<Record<string, readonly CardFieldKey[]>> = Object.freeze({
   'cc-name': ['cardholderName'],
@@ -48,7 +49,7 @@ export interface CardSurfaceTargets {
 // so they cannot disagree about what the page contains.
 export function scanCardSurface(): CardSurfaceTargets {
   const targets: CardSurfaceTargets = { fields: {} }
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)) {
+  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))) {
     if (hasCombinedExpiryField(input) && !targets.combinedExpiry) {
       targets.combinedExpiry = input
     }

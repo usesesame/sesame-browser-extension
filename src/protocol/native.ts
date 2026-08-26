@@ -1,4 +1,5 @@
 // Wire protocol shared with the desktop host: byte-for-byte compatible, response schemas closed.
+import { isRecord } from '../shared/values'
 export const NATIVE_HOST = 'app.usesesame.browser'
 export const PROTOCOL_VERSION = 1
 export const CARD_PROTOCOL_VERSION = 2
@@ -66,7 +67,7 @@ const ERROR_KEYS = new Set(['version', 'type', 'requestId', 'message'])
 const BASE_REQUEST_KEYS = new Set(['version', 'type', 'requestId'])
 const FILL_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin'])
 const FILL_FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
-const IDENTITY_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
+const ORIGIN_FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
 const CARD_KEYS = new Set(['version', 'type', 'requestId', 'card'])
 const SAVE_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'kind', 'password'])
 const UNAVAILABLE_CODES: Readonly<Record<string, string>> = Object.freeze({
@@ -128,7 +129,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && hasExactKeys(value, value.fields === undefined ? FILL_REQUEST_KEYS : FILL_FIELDS_REQUEST_KEYS)
   }
   if (value.type === 'identity') {
-    if (!hasExactKeys(value, IDENTITY_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') {
+    if (!hasExactKeys(value, ORIGIN_FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') {
       return false
     }
     const fields = value.fields.split(',')
@@ -137,7 +138,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && fields.every((field) => IDENTITY_FIELD_KEYS.includes(field as IdentityFieldKey))
   }
   if (value.type === 'card') {
-    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, IDENTITY_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
+    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, ORIGIN_FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
     const fields = value.fields.split(',')
     return fields.length > 0 && new Set(fields).size === fields.length && fields.every((field) => CARD_FIELD_KEYS.includes(field as CardFieldKey))
   }
@@ -198,11 +199,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (request.type === 'identity') {
     if (raw.type === 'identity-unavailable') {
-      if (!hasExactKeys(raw, UNAVAILABLE_KEYS)) return { ok: false, code: 'unsafe-response' }
-      if (typeof raw.reason !== 'string' || !UNAVAILABLE_CODES[raw.reason]) {
-        return { ok: false, code: 'invalid-response' }
-      }
-      return { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
+      return decodeUnavailable(raw)
     }
     if (raw.type !== 'identity') return { ok: false, code: 'invalid-response' }
     const requestedKeys = request.fields.split(',') as IdentityFieldKey[]
@@ -230,10 +227,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (request.type === 'card') {
     if (raw.type === 'card-unavailable') {
-      if (!hasExactKeys(raw, UNAVAILABLE_KEYS)) return { ok: false, code: 'unsafe-response' }
-      return typeof raw.reason === 'string' && UNAVAILABLE_CODES[raw.reason]
-        ? { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
-        : { ok: false, code: 'invalid-response' }
+      return decodeUnavailable(raw)
     }
     if (raw.type !== 'card' || !hasExactKeys(raw, CARD_KEYS) || !isRecord(raw.card)) return { ok: false, code: 'unsafe-response' }
     const requested = request.fields.split(',') as CardFieldKey[]
@@ -249,11 +243,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (request.type === 'save') {
     if (raw.type === 'save-unavailable') {
-      if (!hasExactKeys(raw, UNAVAILABLE_KEYS)) return { ok: false, code: 'unsafe-response' }
-      if (typeof raw.reason !== 'string' || !UNAVAILABLE_CODES[raw.reason]) {
-        return { ok: false, code: 'invalid-response' }
-      }
-      return { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
+      return decodeUnavailable(raw)
     }
     if (raw.type !== 'saved') return { ok: false, code: 'invalid-response' }
     if (!hasExactKeys(raw, SAVED_KEYS)) return { ok: false, code: 'unsafe-response' }
@@ -261,11 +251,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
   }
 
   if (raw.type === 'fill-unavailable') {
-    if (!hasExactKeys(raw, UNAVAILABLE_KEYS)) return { ok: false, code: 'unsafe-response' }
-    if (typeof raw.reason !== 'string' || !UNAVAILABLE_CODES[raw.reason]) {
-      return { ok: false, code: 'invalid-response' }
-    }
-    return { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
+    return decodeUnavailable(raw)
   }
   if (raw.type !== 'fill') return { ok: false, code: 'invalid-response' }
   const fields = request.fields ?? 'both'
@@ -285,6 +271,14 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
   return valid
     ? { ok: true, credential }
     : { ok: false, code: 'invalid-response' }
+}
+
+function decodeUnavailable(raw: Record<string, unknown>): NativeResult {
+  if (!hasExactKeys(raw, UNAVAILABLE_KEYS)) return { ok: false, code: 'unsafe-response' }
+  if (typeof raw.reason !== 'string' || !UNAVAILABLE_CODES[raw.reason]) {
+    return { ok: false, code: 'invalid-response' }
+  }
+  return { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
 }
 
 export function makeRequest(type: 'capabilities'): Extract<NativeRequest, { type: 'capabilities' }>
@@ -381,10 +375,6 @@ export function classifiesAsSecret(value: string): boolean {
   if (value.length === 0) return false
   if (/^(otpauth|ssh-|-----BEGIN|eyJ|[A-Za-z0-9+/]{40,}={0,2})/.test(value)) return true
   return /\b(password|passwd|secret|token|key|seed|private)\b/i.test(value) && value.length > 16
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isRequestId(value: unknown): value is string {

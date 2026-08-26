@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { cardFieldsForAutocomplete, cardFieldsForInput, hasCombinedExpiryAutocomplete } from '../../src/content/card-fields'
-import { inspectLoginSurface, isUsernameField, isVisible } from '../../src/content/field-detector'
+import { inspectLoginSurface, isUsernameField } from '../../src/content/field-detector'
+import { isVisibleInput } from '../../src/shared/dom'
 
 // happy-dom performs no layout, so every element measures zero.
 function layout(element: Element, box: { width: number; height: number }) {
@@ -76,32 +77,32 @@ describe('isUsernameField', () => {
 
 describe('isVisible', () => {
   it('accepts an ordinary rendered field', () => {
-    expect(isVisible(first('<input type="text">'))).toBe(true)
+    expect(isVisibleInput(first('<input type="text">'))).toBe(true)
   })
 
   it('rejects fields the page has taken out of use', () => {
-    expect(isVisible(first('<input type="text" disabled>'))).toBe(false)
-    expect(isVisible(first('<input type="text" readonly>'))).toBe(false)
-    expect(isVisible(first('<input type="hidden">'))).toBe(false)
+    expect(isVisibleInput(first('<input type="text" disabled>'))).toBe(false)
+    expect(isVisibleInput(first('<input type="text" readonly>'))).toBe(false)
+    expect(isVisibleInput(first('<input type="hidden">'))).toBe(false)
   })
 
   it('rejects a sign-up honeypot hidden from assistive technology', () => {
     render('<div aria-hidden="true"><input type="text" name="email"></div>')
     const input = document.querySelector('input')!
     layout(input, { width: 200, height: 30 })
-    expect(isVisible(input)).toBe(false)
+    expect(isVisibleInput(input, { rejectAriaHiddenAncestor: true, minimumSize: 1 })).toBe(false)
   })
 
   it('rejects a one-pixel field, which no person is filling in', () => {
     const input = first('<input type="text">')
     layout(input, { width: 1, height: 1 })
-    expect(isVisible(input)).toBe(false)
+    expect(isVisibleInput(input, { rejectAriaHiddenAncestor: true, minimumSize: 1 })).toBe(false)
   })
 
   it('rejects a field with no box at all', () => {
     const input = first('<input type="text">')
     layout(input, { width: 0, height: 0 })
-    expect(isVisible(input)).toBe(false)
+    expect(isVisibleInput(input, { rejectAriaHiddenAncestor: true, minimumSize: 1 })).toBe(false)
   })
 })
 

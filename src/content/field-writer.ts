@@ -1,4 +1,5 @@
 // Binds prepare/fill to the same document; never submits.
+import { isVisibleElement, isVisibleInput } from '../shared/dom'
 export interface Credential {
   username: string
   password: string
@@ -47,7 +48,7 @@ export function fillLoginSurface(
     preparedMode = pending.mode
   }
 
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter(isVisible)
+  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))
   const passwordFields = inputs.filter((input) => input.type.toLowerCase() === 'password')
   if (passwordFields.length === 0) {
     return fillUsernameOnlySurface(inputs, expectedOrigin, documentToken, credential, phase, preparedMode, isolated)
@@ -233,17 +234,6 @@ function fillUsernameOnlySurface(
   }
 }
 
-export function isVisible(input: HTMLInputElement): boolean {
-  return !input.disabled && !input.readOnly && input.type !== 'hidden' && isVisibleElement(input)
-}
-
-function isVisibleElement(element: HTMLElement): boolean {
-  const style = getComputedStyle(element)
-  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
-  const bounds = element.getBoundingClientRect()
-  return bounds.width > 0 && bounds.height > 0
-}
-
 export function tokens(value: unknown): string[] {
   return String(value ?? '').toLowerCase().split(/\s+/).filter(Boolean)
 }
@@ -255,14 +245,9 @@ function isNewPasswordField(field: HTMLInputElement): boolean {
 }
 
 function usernameScore(input: HTMLInputElement, passwordField: HTMLInputElement): number {
-  if (input === passwordField || input.type.toLowerCase() === 'password') return -1
-  const type = input.type.toLowerCase()
-  if (!['email', 'text', 'tel'].includes(type)) return -1
-  const autocomplete = tokens(input.autocomplete)
-  if (autocomplete.some((token) => [
-    'cc-number', 'current-password', 'new-password', 'one-time-code', 'organization', 'search',
-  ].includes(token))) return -1
-  const hint = `${input.name} ${input.id}`.toLowerCase()
+  const candidate = usernameCandidate(input)
+  if (input === passwordField || !candidate) return -1
+  const { type, autocomplete, hint } = candidate
   let score = type === 'email' ? 60 : 10
   if (autocomplete.includes('email')) score += 50
   if (autocomplete.includes('username')) score += 100
@@ -271,15 +256,20 @@ function usernameScore(input: HTMLInputElement, passwordField: HTMLInputElement)
 }
 
 function isUsernameOnlyCandidate(input: HTMLInputElement): boolean {
+  return usernameCandidate(input) !== undefined
+}
+
+function usernameCandidate(input: HTMLInputElement): { type: string; autocomplete: string[]; hint: string } | undefined {
   const type = input.type.toLowerCase()
-  if (!['email', 'text', 'tel'].includes(type)) return false
+  if (!['email', 'text', 'tel'].includes(type)) return undefined
   const autocomplete = tokens(input.autocomplete)
   if (autocomplete.some((token) => [
     'cc-number', 'current-password', 'new-password', 'one-time-code', 'organization', 'search',
-  ].includes(token))) return false
+  ].includes(token))) return undefined
   const hint = `${input.name} ${input.id}`.toLowerCase()
-  return autocomplete.includes('username') || autocomplete.includes('email') || type === 'email'
-    || /user|login|email|account|identifier/.test(hint)
+  if (!autocomplete.includes('username') && !autocomplete.includes('email') && type !== 'email'
+    && !/user|login|email|account|identifier/.test(hint)) return undefined
+  return { type, autocomplete, hint }
 }
 
 function descriptor(element: HTMLElement | null | undefined, includeControlLabel = false): string {

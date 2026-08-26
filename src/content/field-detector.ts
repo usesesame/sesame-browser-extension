@@ -1,4 +1,5 @@
 // Reports only origin and bounded booleans; never reads input values or page text.
+import { isVisibleInput } from '../shared/dom'
 export interface LoginSurface {
   ok: true
   origin: string
@@ -9,8 +10,9 @@ export type LoginInspection =
   | { ok: false; code: 'no-fields' }
 
 export function inspectLoginSurface(): LoginInspection {
+  // A sign-up honeypot is a real input no person can see, and filling it is what the page is watching for.
   const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
-    .filter(isVisible)
+    .filter((input) => isVisibleInput(input, { rejectAriaHiddenAncestor: true, minimumSize: 1 }))
   const passwordFields = inputs.filter((input) => input.type.toLowerCase() === 'password')
   const usernameFields = inputs.filter(isUsernameField)
 
@@ -60,15 +62,3 @@ export function isUsernameField(input: HTMLInputElement): boolean {
   return (type === 'text' || type === 'tel') && USERNAME_HINT.test(hints)
 }
 
-export function isVisible(input: HTMLInputElement): boolean {
-  if (input.disabled || input.readOnly || input.type === 'hidden') return false
-  // A sign-up honeypot is a real input no person can see, and filling it is
-  // what the page is watching for.
-  if (input.closest('[aria-hidden="true"]')) return false
-  const style = getComputedStyle(input)
-  if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
-  const opacity = Number.parseFloat(style.opacity)
-  if (Number.isFinite(opacity) && opacity === 0) return false
-  const rect = input.getBoundingClientRect()
-  return rect.width > 1 && rect.height > 1
-}
