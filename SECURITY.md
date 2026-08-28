@@ -1,8 +1,7 @@
 # Security policy
 
-This repository holds the Sesame browser extension for Chrome and Edge. It is
-part of a password manager in private beta and has not had an independent
-security audit.
+This repository holds the pre-release Sesame browser extension for Chrome and
+Edge. It has not had an independent security audit or store approval.
 
 The extension is the only Sesame surface that runs inside a page it does not
 control. When you report or fix anything here, treat every page as hostile.
@@ -48,12 +47,13 @@ a follow-up rather than assuming the report was received.
 
 ## Supported versions
 
-Only the current store release receives fixes. The extension version is
-independent from the desktop version.
+There is no supported store release yet. Findings should be reproduced against
+the latest tagged pre-release package or current source. The extension version
+is independent from the desktop version.
 
 | Version | Supported |
 | --- | --- |
-| Current Chrome and Edge store release | Yes |
+| Latest tagged pre-release | Yes |
 | Any earlier build | No. Update instead |
 
 ## Scope
@@ -72,7 +72,8 @@ In scope:
   bound document after approval.
 - Native-messaging protocol handling: accepting an unsafe response shape,
   accepting a mismatched `requestId`, or accepting a protocol version outside
-  the declared compatibility range in `contracts/browser/v1/contract.json`.
+  the operation-specific contracts in `contracts/browser/v1/contract.json`
+  and `contracts/browser/v2/contract.json`.
 - Permission escalation: obtaining host permissions the user did not grant, or
   keeping the inline control active on an origin the user paused.
 - The store manifests: an unexpected permission, an unexpected content-script

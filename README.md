@@ -1,9 +1,11 @@
 # Sesame browser extension
 
-The Sesame extension for Chrome and Edge, targeting Windows first. It owns its
-manifest, lockfile, version, license, security policy, token snapshot,
-commands, tests, dependency updates, and its CI, store release, and
-host-compatibility workflows, and it builds with no desktop source present.
+Sesame supports Chrome and Edge on Windows. The same source also builds an
+experimental Firefox package for compatibility work. Firefox is not a
+supported store release.
+
+This repository contains the extension's manifests, tests, release scripts,
+and native-host compatibility checks. It builds without desktop source code.
 
 It does not contain the vault, the desktop app, or the native messaging host.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for what lives where.
@@ -22,13 +24,12 @@ The extension asks for the minimum permissions by default:
 - `storage`: stores only the origins where the user explicitly pauses the
   inline control and the first-run onboarding preference.
 
-The inline field button is **optional**. First-run onboarding or the popup asks
-once for `https://*/*` through `optional_host_permissions`. After approval the
-control appears automatically on focused, unambiguous sign-in and registration
-fields and remains isolated from the page in a closed shadow root. The popup can
-pause it on the current exact origin, Options can manage those explicit local
-exceptions, and global permission can be revoked at any time. Popup filling and
-the `Ctrl+Shift+L` command remain explicit alternatives.
+The inline field button is **optional**. Onboarding or the popup asks once for
+`https://*/*` through `optional_host_permissions`. After approval, the control
+appears on focused, unambiguous sign-in and registration fields. It uses a
+closed shadow root. You can pause it for the current origin, manage exceptions
+in Options, or revoke the permission. The popup and `Ctrl+Shift+L` remain
+available.
 
 ## Build
 
@@ -57,25 +58,31 @@ terminates, the underlying native port closes and the request fails closed.
 
 ## Tests
 
-Unit, integration, and browser tests were removed in 2026-08 and are being
-rewritten. Until they land, the gates that still run are:
+The repository has unit coverage for detection, coordination, native protocol
+validation, and card and identity filling. The automated browser suite has no
+specs yet and its dedicated command prints a skip notice.
 
 ```powershell
 npm run check
 npm run lint
 npm run design:tokens:check
 npm run version:check
+npm run test:unit
 npm run build:chrome
 npm run build:edge
+npm run build:firefox
 npm run package:stores
 ```
 
-`npm run ci` runs those plus the browser suite, which currently skips because
-no specs exist yet.
+`npm run ci` runs the complete release gate. Run `npm run test:browser` after
+browser-integration changes. It builds the integration bundle, then reports
+that no browser specs exist.
 
 The extension version is independent from the desktop version. Change
-`package.json`, then run `npm run version:sync` to update both store manifests.
-`npm run version:check` fails if those three values disagree.
+`package.json`, then run `npm run version:sync` to update the Chrome and Edge
+manifests. The experimental Firefox manifest must match the package version too;
+`npm run package:stores` enforces that when it creates the archives.
+`npm run version:check` checks the package, Chrome, and Edge values.
 
 ## Store packages
 
@@ -83,32 +90,31 @@ The extension version is independent from the desktop version. Change
 npm run release:check
 ```
 
-That ends in `npm run package:stores`, which writes the Chrome and Edge upload
-archives, their SHA-256 digests, and a dependency SBOM to `store-packages/`.
+That ends in `npm run package:stores`, which writes Chrome, Edge, and
+experimental Firefox archives, their SHA-256 digests, and a dependency SBOM to
+`store-packages/`.
 Entry order, timestamps, and file modes are fixed, so the same commit and Node
 version reproduce the same digests. The packager refuses a package that carries
 the integration build's localhost host permissions, a stale manifest version, a
 widened permission set, a source map, or an extension identity the pinned
 native host would not answer.
 
-Verify both archives in a clean profile before uploading. Automated Chromium
-coverage is regression evidence; it does not replace either store's
-installation flow.
+Verify the Chrome and Edge archives in clean profiles before uploading. Unit
+tests and integration builds do not replace either store's installation flow.
 
 ## Browser protocol compatibility
 
-The desktop owns the native-messaging protocol. This repository vendors the
-tagged version 1 contract under `contracts/browser/v1/`, including closed JSON
-schemas, fictional conformance vectors, the desktop implementation source
-commit, and SHA-256 digests. Protocol version 1 is both the minimum and current
-compatible host version.
-Changing a wire shape requires a new tagged contract and an explicit
-compatibility-range decision; editing only the TypeScript types is not enough.
+The desktop owns the native-messaging protocol. This repository keeps closed
+schemas, fictional test vectors, source commits, and SHA-256 digests in
+`contracts/browser/`. Version 1 covers capabilities, activation, login and
+identity filling, and save requests. Version 2 covers card filling only.
 
-The protocol module's compatibility range is held to the declared contract
-rather than to the `PROTOCOL_VERSION` constant. Widening the range without
-teaching the protocol module to negotiate fails the store build, which cannot
-be recalled.
+Changing a wire shape needs a tagged contract and an explicit compatibility
+decision. Updating TypeScript types alone is not enough.
+
+Each request uses the version owned by its operation. The general operations
+remain on version 1 while card requests use version 2; neither version is a
+claim that every operation can negotiate between both contracts.
 
 ```powershell
 npm run compat:host

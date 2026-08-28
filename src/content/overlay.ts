@@ -44,9 +44,19 @@ export interface OverlayOptions {
   onFillCardRequest(): Promise<unknown> | unknown
 }
 
-const HOST_ID = 'sesame-inline-button'
 const CAPABILITY_TTL_MS = 15_000
 const GENERATED_PASSWORD_TTL_MS = 120_000
+
+let sharedHostId: string | undefined
+
+export function overlayHost(): HTMLDivElement | null {
+  return sharedHostId ? (document.getElementById(sharedHostId) as HTMLDivElement | null) : null
+}
+
+function ensureHostId(): string {
+  sharedHostId ??= `sesame-overlay-${crypto.randomUUID()}`
+  return sharedHostId
+}
 
 export function attachInlineButton(options: OverlayOptions): () => void {
   let stopped = false
@@ -73,10 +83,10 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   function ensureOverlay() {
     if (host) return
-    document.getElementById(HOST_ID)?.remove()
+    const hostId = ensureHostId()
+    document.getElementById(hostId)?.remove()
     host = document.createElement('div')
-    host.id = HOST_ID
-    host.dataset.sesameOverlay = 'closed'
+    host.id = hostId
     host.style.cssText = 'all:initial;position:absolute;z-index:2147483647;display:none;'
     const shadow = host.attachShadow({ mode: 'closed' })
     // Built from DOM nodes, never parsed from a string.
@@ -172,7 +182,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (status) status.textContent = ''
     if (copyButton && !registrationPassword) copyButton.hidden = true
     if (host) {
-      host.dataset.surface = kind
       host.style.display = 'block'
     }
     positionOverlay()
