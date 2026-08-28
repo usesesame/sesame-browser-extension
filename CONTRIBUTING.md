@@ -14,10 +14,10 @@ desktop app, and the native messaging host are not part of it.
 | Account API, admin portal, self-hosting | `usesesame/sesame-server` |
 | Marketing pages and public documentation | `usesesame/sesame-website` |
 
-The desktop owns the protocol because it owns the host. This repository keeps a
-tagged, digest-bound copy under `contracts/browser/v1/`. Editing the TypeScript
-types without first landing a new tagged contract is a bug rather than a
-protocol change.
+The desktop owns the protocol because it owns the host. This repository keeps
+tagged, digest-bound copies under `contracts/browser/v1/` and
+`contracts/browser/v2/`. Editing the TypeScript types without first landing a
+matching tagged contract is a bug rather than a protocol change.
 
 ## Your first change
 
@@ -66,7 +66,7 @@ are in `eslint.config.js`, each with its reason next to it. In short:
 | You changed | Run |
 | --- | --- |
 | Anything | `npm run release:check` |
-| `src/content/`, `src/background/`, or `src/permissions/` | `npm run ci`, including the browser tests |
+| `src/content/`, `src/background/`, or `src/permissions/` | `npm run release:check` and `npm run test:browser` |
 | `src/protocol/` or `contracts/` | `npm run ci` and `npm run compat:host` |
 | `manifests/` | `npm run release:check` and load both unpacked builds |
 
@@ -89,16 +89,17 @@ this extension.
 
 ## Releasing to the stores
 
-1. Set the version in `package.json`, then run `npm run version:sync`.
+1. Set the version in `package.json`, run `npm run version:sync`, and update the
+   experimental Firefox manifest to the same value.
 2. Open a pull request. `npm run ci` must pass.
-3. Tag `v<version>` on `main`. The release workflow builds both store packages,
-   records their SHA-256 digests, and generates the dependency SBOM.
+3. Tag `v<version>` on `main`. The release workflow builds the Chrome, Edge,
+   and experimental Firefox packages, records their SHA-256 digests, and
+   generates the dependency SBOM.
 4. Verify the Chrome and Edge packages by hand in a clean profile before
-   uploading. Automated Chromium coverage is regression evidence; it is not the
-   supported installation flow for either store.
-5. Chrome and Edge keep separate extension identities. The native host manifest
-   pins exact extension origins with no wildcards, so both identities must be
-   verified in every release.
+   uploading. Unit tests and integration builds do not replace either store's
+   installation flow.
+5. The native host pins the Chromium extension identity and the Firefox Gecko
+   id with no wildcards. Verify every packaged identity against that contract.
 
 ## Reporting a security issue
 

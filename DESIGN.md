@@ -39,12 +39,12 @@ Registration is handled separately from saved-login filling. Page inspection tel
 
 Every native message is versioned, request-bound, length-limited, and decoded with a closed schema.
 
-The desktop-owned canonical contract is
-`src-tauri/contracts/browser/v1/`. The independently buildable extension uses
-the byte-identical, source-commit-stamped snapshot under
-`extensions/sesame/contracts/browser/v1/`; it does not import the desktop
-implementation or download a contract at build or runtime. Protocol v1 is the
-declared minimum and current compatible host version.
+The desktop-owned canonical contracts are under
+`src-tauri/contracts/browser/`. The independently buildable extension uses the
+byte-identical, source-commit-stamped snapshots under
+`contracts/browser/v1/` and `contracts/browser/v2/`; it does not import the
+desktop implementation or download a contract at build or runtime. General
+operations use protocol v1. Card filling uses the narrow protocol v2 contract.
 
 - Capability request: `{version, type: "capabilities", requestId}`.
 - Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable, locked, fillAvailable}`.
@@ -58,6 +58,9 @@ declared minimum and current compatible host version.
   identity keys. A successful response is exactly `{version, type:
   "identity", requestId, identity}`, with a nested `identity` object whose keys
   exactly match that request.
+- Card request: `{version: 2, type: "card", requestId, origin, fields}`,
+  where `fields` is a unique comma-separated subset of the five allowlisted
+  card keys. The response contains exactly those requested card fields.
 - Save request: `{version, type: "save", requestId, origin, kind, password}`
   with optional bounded `title` and `username`; `kind` is exactly `new` or
   `update`. Success is exactly `{version, type: "saved", requestId, saved:
@@ -80,6 +83,14 @@ While the approved fill is delivered, credentials necessarily exist briefly as R
 
 ## Development and release limits
 
-The current helper targets unpacked Chrome and Edge on Windows. Ordinary site filling is restricted to HTTPS origins under the narrow bare-hostname/`www` equivalence described above; any loopback-only development exception is not a shipping guarantee. Firefox packaging, signed-store distribution, installer upgrade/removal tests, clean-profile verification, browser-version compatibility testing, accessibility testing, and an independent security assessment remain release gates.
+The supported helper targets Chrome and Edge on Windows. An experimental
+Firefox package is built and identity-checked, but Firefox store publication
+and native-host validation remain release gates. Ordinary site filling is
+restricted to HTTPS origins under the narrow bare-hostname/`www` equivalence
+described above; any loopback-only development exception is not a shipping
+guarantee. Signed-store distribution, installer upgrade and removal tests,
+clean-profile verification, browser-version compatibility testing,
+accessibility testing, and an independent security assessment remain release
+gates.
 
 Do not publish or recommend this development helper for primary credentials. Test it with disposable entries and keep an independent encrypted backup.

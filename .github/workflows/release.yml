@@ -1,9 +1,8 @@
 name: Store release packages
 
-# Builds the two upload packages and their evidence. It deliberately does not
-# upload to either store: Chrome and Edge keep separate listings and separate
-# review queues, and a package is verified by hand in a clean profile before a
-# person submits it.
+# Builds the Chrome, Edge, and experimental Firefox packages and their evidence.
+# It deliberately does not upload to a store: supported packages are verified
+# by hand in a clean profile before a person submits them.
 
 on:
   push:
@@ -61,7 +60,7 @@ jobs:
               "",
               `SBOM: ${record.sbom.filename}, ${record.sbom.components} locked components.`,
               "",
-              "Verify both packages in a clean profile before uploading. Chrome and Edge have separate listings.",
+              "Verify supported packages in a clean profile before uploading. Firefox remains experimental.",
             ].join("\n"))
           ' >> "$GITHUB_STEP_SUMMARY"
 
