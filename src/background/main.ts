@@ -128,6 +128,10 @@ chrome.runtime.onConnect.addListener((port) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false
+  const fromExtensionPage = typeof sender.url === 'string'
+    && sender.url.startsWith(chrome.runtime.getURL(''))
+  const frameAgnostic = message?.type === 'sesame:capture-signup' || message?.type === 'sesame:inline-policy'
+  if (!frameAgnostic && !fromExtensionPage && sender.frameId !== 0) return false
   if (message?.type === 'sesame:connect') {
     checkConnection(message?.force === true).then(sendResponse).catch(() => sendResponse({
       state: 'unavailable',

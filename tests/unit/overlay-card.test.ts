@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { attachInlineButton } from '../../src/content/overlay'
+import { attachInlineButton, overlayHost } from '../../src/content/overlay'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -33,7 +33,7 @@ function focusFirstInput() {
 describe('the inline control on a payment field', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    document.getElementById('sesame-inline-button')?.remove()
+    overlayHost()?.remove()
     document.body.innerHTML = ''
   })
 
@@ -99,7 +99,7 @@ function baseOptions() {
 describe('the card control matches the login control', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    document.getElementById('sesame-inline-button')?.remove()
+    overlayHost()?.remove()
     document.body.innerHTML = ''
   })
 
@@ -122,20 +122,25 @@ describe('the card control matches the login control', () => {
 describe('re-injecting the content script', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    document.getElementById('sesame-inline-button')?.remove()
+    overlayHost()?.remove()
     document.body.innerHTML = ''
   })
+
+  function hostCount(): number {
+    const id = overlayHost()?.id
+    return id ? document.querySelectorAll(`#${id}`).length : 0
+  }
 
   it('leaves one overlay in the page, not one per injection', () => {
     document.body.innerHTML = '<input autocomplete="cc-number" />'
     giveInputsLayout()
     const first = attachInlineButton(baseOptions())
     focusFirstInput()
-    expect(document.querySelectorAll('#sesame-inline-button')).toHaveLength(1)
+    expect(hostCount()).toBe(1)
 
     const second = attachInlineButton(baseOptions())
     focusFirstInput()
-    expect(document.querySelectorAll('#sesame-inline-button')).toHaveLength(1)
+    expect(hostCount()).toBe(1)
 
     second()
     first()
