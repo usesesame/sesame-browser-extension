@@ -6,8 +6,8 @@
     "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg/"
   ],
   "desktop_source": {
-    "repository_path": "src-tauri/src/adapters/platform/browser_host.rs",
-    "commit": "ec9dc8d39d0ea9874a15baa8164b5447d9d2cb52"
+    "repository_path": "src-tauri/src/adapters/platform/browser_host/mod.rs",
+    "commit": "c800688222ab33230e9d5d4347adea9820ae330e"
   },
   "firefox_extension_id": "sesame@usesesame.app",
   "allowed_extensions": [

@@ -1,21 +1,17 @@
 [CmdletBinding()]
-param()
+param(
+  [string]$HostPath
+)
 
 $ErrorActionPreference = 'Stop'
-$hostName = 'app.usesesame.browser'
-$manifestFolder = Join-Path $env:LOCALAPPDATA 'Sesame\native-messaging'
-$manifestPath = Join-Path $manifestFolder "$hostName.json"
-$firefoxManifestPath = Join-Path $manifestFolder "$hostName.firefox.json"
-
-@(
-  "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName",
-  "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName",
-  "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"
-) | ForEach-Object {
-  if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Force }
+if (-not $HostPath) {
+  throw 'Pass -HostPath for a desktop-owned browser host executable.'
 }
-@($manifestPath, $firefoxManifestPath) | ForEach-Object {
-  if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Force }
+$resolvedHost = (Resolve-Path -LiteralPath $HostPath -ErrorAction Stop).Path
+
+& $resolvedHost unregister
+if ($LASTEXITCODE -ne 0) {
+  throw 'The browser host could not remove its registration.'
 }
 
 Write-Host 'Sesame native-host registration removed.'
