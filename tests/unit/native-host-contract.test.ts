@@ -29,8 +29,10 @@ describe('native host contract', () => {
     expect(contract.host_name).toBe(NATIVE_HOST)
   })
 
-  it('points at a desktop source file that the installer script also references', () => {
-    expect(contract.desktop_source.repository_path).toMatch(/^src-tauri\/src\/.+browser_host\.rs$/)
+  it('points at the desktop module that owns registration', () => {
+    expect(contract.desktop_source.repository_path).toMatch(
+      /^src-tauri\/src\/.+browser_host\/mod\.rs$/,
+    )
     expect(contract.desktop_source.commit).toMatch(/^[0-9a-f]{40}$/)
   })
 

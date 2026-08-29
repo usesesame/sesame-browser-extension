@@ -160,13 +160,21 @@ For local development only, register an externally supplied desktop host path:
 .\install-native-host.ps1 -HostPath C:\path\to\sesame-browser-host.exe
 ```
 
-The helper refuses debug binaries unless `-AllowDebugHost` is explicit, and it
-cannot accept an arbitrary extension id. The host must be beside `sesame.exe`,
-which is required for the helper to authenticate the desktop broker. Full
-native-host launch and desktop approval tests are owned by the desktop product
-because they require its binary and vault. This extension's CI uses a protocol
-fixture and never receives a credential through an environment variable or test
-log.
+and remove that registration with:
+
+```powershell
+.\uninstall-native-host.ps1 -HostPath C:\path\to\sesame-browser-host.exe
+```
+
+The helpers carry no registration facts of their own: the host binary writes
+and removes the manifests and registry keys the desktop owns, for every browser
+that desktop supports. The install helper refuses debug binaries unless
+`-AllowDebugHost` is explicit, and it cannot accept an arbitrary extension id.
+The host must be beside `sesame.exe`, which is required for the helper to
+authenticate the desktop broker. Full native-host launch and desktop approval
+tests are owned by the desktop product because they require its binary and
+vault. This extension's CI uses a protocol fixture and never receives a
+credential through an environment variable or test log.
 
 ## Not in this beta
 
