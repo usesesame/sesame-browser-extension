@@ -11,19 +11,28 @@
   }[tone]
 </script>
 
-<section class="card {toneClass}">
+<section class="connection-status {toneClass}">
   <h2>{title}</h2>
   {#if message}<p>{message}</p>{/if}
 </section>
 
 <style>
-  .card {
+  .connection-status {
+    position: relative;
+    margin: 0 0 10px;
     border: 0;
-    border-radius: var(--radius-md);
-    padding: 12px;
-    margin-bottom: 12px;
-    background: var(--surface);
-    box-shadow: var(--shadow-panel);
+    padding: 9px 4px 9px 20px;
+    background: transparent;
+  }
+  .connection-status::before {
+    position: absolute;
+    top: 14px;
+    left: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-faint);
+    content: '';
   }
   h2 {
     margin: 0 0 4px;
@@ -36,10 +45,10 @@
     color: var(--text-muted);
     font-size: 12px;
   }
-  .status-success { background: var(--tint); }
+  .status-success::before { background: var(--ok-text); }
   .status-success h2 { color: var(--accent); }
-  .status-warning { background: var(--warn-bg); }
+  .status-warning::before { background: var(--warn-text); }
   .status-warning h2 { color: var(--warn-text); }
-  .status-error { background: var(--danger-tint); }
+  .status-error::before { background: var(--danger); }
   .status-error h2 { color: var(--danger); }
 </style>

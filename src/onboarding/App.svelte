@@ -38,7 +38,7 @@
 <main>
   <div class="card">
     <div class="brand">
-      <img class="logo" src="icons/48x48.png" alt="" />
+      <img class="logo" src="icons/48x48.png" alt="" width="48" height="48" />
       <span>Sesame</span>
     </div>
 
@@ -89,9 +89,9 @@
     margin: auto;
     padding: 40px;
     border: 0;
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     background: var(--surface);
-    box-shadow: var(--shadow-panel);
+    box-shadow: var(--shadow-lift);
   }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; color: var(--text-2); font-weight: 700; }
   .logo { width: 30px; height: 30px; }
@@ -111,7 +111,7 @@
   }
   button:active { transform: scale(.97); }
   button:disabled:active { transform: none; }
-  .primary { color: var(--on-accent); background: var(--accent); box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 3px 8px rgba(0, 0, 0, .1); }
+  .primary { color: var(--on-accent); background: var(--accent); box-shadow: none; }
   .primary:hover { background: var(--accent-hover); }
   .secondary { color: var(--accent-link); background: var(--surface-inset); }
   .secondary:hover { background: var(--tint); }

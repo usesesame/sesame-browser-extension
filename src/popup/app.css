@@ -28,7 +28,7 @@ body {
 
 button, summary { font: inherit; }
 button:focus-visible, summary:focus-visible, a:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--gold) 65%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 

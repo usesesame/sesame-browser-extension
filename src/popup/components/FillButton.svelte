@@ -29,8 +29,8 @@
     color: var(--on-accent);
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 3px 8px rgba(0, 0, 0, .1);
-    transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
+    box-shadow: none;
+    transition: background-color .16s ease, transform .1s ease;
   }
   .fill-button:hover:not(:disabled) { background: var(--accent-hover); }
   .fill-button:active:not(:disabled) { background: var(--accent-active); transform: scale(.97); }
@@ -58,4 +58,7 @@
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; }
+  }
 </style>

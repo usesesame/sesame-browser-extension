@@ -8,7 +8,7 @@
 
 <header class="topbar">
   <div class="brand">
-    <img class="logo" src="icons/32x32.png" alt="" />
+    <img class="logo" src="icons/32x32.png" alt="" width="32" height="32" />
     <div class="brand-copy">
       <span class="brand-name">Sesame</span>
       {#if subtitle}
@@ -50,7 +50,7 @@
   .brand-name { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-heading); letter-spacing: -.01em; }
   .brand-meta { color: var(--text-muted); font-size: 11px; }
   .topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-  .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--text-muted); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
+  .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: var(--radius-sm); padding: 0; color: var(--text-muted); background: transparent; cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
   .icon-button:hover { color: var(--text); background: var(--tint); }
   .icon-button:active { transform: scale(.9); }
   .icon-button:disabled { cursor: wait; opacity: .62; }

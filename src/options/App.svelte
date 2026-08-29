@@ -76,7 +76,6 @@
 
 <main class="options">
   <h1>Settings</h1>
-  <p class="intro">Enable once. Sesame then appears automatically on safe sign-in and registration fields across HTTPS websites.</p>
 
   <section class="setting">
     <div>
@@ -88,16 +87,16 @@
     </button>
   </section>
 
-  <p class="privacy">Sesame detects field structure but never reads existing values. Filling still requires desktop approval and never submits the form.</p>
+  <p class="privacy">Sesame never reads existing field values. Every fill needs desktop approval.</p>
 
   <section class="setting">
-    <div><strong>Suggest cards on checkout forms</strong><p>{cardSuggestionsEnabled ? 'Available on HTTPS top-level forms. Each fill needs desktop confirmation.' : 'Disabled. Sesame will not offer saved cards in the browser.'}</p></div>
+    <div><strong>Suggest cards on checkout forms</strong><p>{cardSuggestionsEnabled ? 'Each fill needs desktop confirmation.' : 'Disabled.'}</p></div>
     <button class:danger={cardSuggestionsEnabled} type="button" disabled={working} on:click={toggleCardSuggestions}>{cardSuggestionsEnabled ? 'Turn off' : 'Turn on'}</button>
   </section>
 
   <section class="paused">
     <div class="section-heading">
-      <div><strong>Paused inline controls</strong><p>Only sites where you explicitly hid the inline control are stored here.</p></div>
+      <div><strong>Paused inline controls</strong><p>Sites where you hid the inline control.</p></div>
       {#if pausedOrigins.length > 1}<button type="button" on:click={resumeAll}>Resume all</button>{/if}
     </div>
     {#if pausedOrigins.length === 0}
@@ -111,31 +110,30 @@
     {/if}
   </section>
 
-  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> on a login page. Browser shortcut conflicts can be changed from the browser's extension shortcut settings.</p></section>
+  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> on a login page.</p></section>
   {#if status}<p class="status" role="status">{status}</p>{/if}
 </main>
 
 <style>
-  .options { box-sizing: border-box; max-width: 680px; margin: 40px auto; padding: 32px; background: var(--surface); border-radius: var(--radius-xl); border: 0; box-shadow: var(--shadow-panel); }
-  h1 { margin: 0; color: var(--text-heading); font: 600 27px var(--font-display); }
-  .intro { max-width: 560px; color: var(--text-muted); line-height: 1.5; }
+  .options { box-sizing: border-box; max-width: 760px; margin: 40px auto; padding: 32px; background: var(--surface); border-radius: var(--radius-lg); border: 0; box-shadow: var(--shadow-raised); }
+  h1 { margin: 0 0 12px; color: var(--text-heading); font: 600 27px var(--font-display); }
   .setting, .section-heading, li { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-  .setting { margin-top: 24px; padding: 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-inset); }
+  .setting { margin-top: 24px; padding: 12px 0; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent; }
   strong { font-size: 14px; color: var(--text-heading); } p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
-  button { border: 0; border-radius: var(--radius-pill); padding: 8px 14px; color: var(--accent-link); background: var(--tint); font-weight: 700; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
+  button { border: 0; border-radius: var(--radius-sm); padding: 8px 14px; color: var(--accent-link); background: var(--tint); font-weight: 700; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
   button:hover { background: var(--tint-hover); }
   button:active { transform: scale(.96); }
   button.danger { color: var(--warn-text); background: var(--warn-bg); }
   button:disabled { cursor: wait; opacity: .6; }
   button:disabled:active { transform: none; }
-  .privacy, .shortcut { margin-top: 16px; padding: 13px; border-radius: var(--radius-md); background: var(--tint); line-height: 1.5; }
+  .privacy { margin: 14px 0 0; padding: 0; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
   .paused { margin-top: 28px; }
   .section-heading > button { font-size: 11px; }
   ul { margin: 12px 0 0; padding: 0; list-style: none; }
   li { padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
   li button { padding: 5px 10px; font-size: 11px; }
-  .empty { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-inset); }
-  .shortcut { background: var(--surface-inset); }
+  .empty { margin-top: 12px; padding: 12px; border-radius: var(--radius-md); background: var(--surface-inset); }
+  .shortcut { margin-top: 24px; padding: var(--space-3) var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-inset); line-height: 1.5; }
   kbd { border-radius: 5px; padding: 2px 6px; background: var(--surface); color: var(--text-2); font: 600 11px var(--font-code); }
   .status { margin-top: 18px; color: var(--accent); font-weight: 650; }
 </style>

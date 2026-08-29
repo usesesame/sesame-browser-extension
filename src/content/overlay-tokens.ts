@@ -6,11 +6,11 @@
 
 export const OVERLAY_TOKEN_CSS = `:host {
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-  --font-display: "Sitka Text", Sitka, Constantia, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-display: var(--font-ui);
   --surface: #fffefa;
   --text-heading: #273329;
-  --text-muted: #758075;
-  --text-faint: #8b9588;
+  --text-muted: #667267;
+  --text-faint: #727d72;
   --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
   --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
   --accent: #2e4735;
@@ -18,19 +18,19 @@ export const OVERLAY_TOKEN_CSS = `:host {
   --on-accent: #fffdf6;
   --gold: #eabf52;
   --gold-mark-text: #28352a;
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
   --shadow-pop: 0 12px 28px rgba(39, 53, 42, .13);
 }
 
 @media (prefers-color-scheme: dark) {
   :host {
     --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-    --font-display: "Sitka Text", Sitka, Constantia, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --font-display: var(--font-ui);
     --surface: #201e15;
     --text-heading: #e9efe1;
-    --text-muted: #8a9683;
-    --text-faint: #6f7d69;
+    --text-muted: #9aa595;
+    --text-faint: #8d9989;
     --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
     --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
     --accent: #3d6a4b;
@@ -38,8 +38,8 @@ export const OVERLAY_TOKEN_CSS = `:host {
     --on-accent: #f1f7ec;
     --gold: #e6bf58;
     --gold-mark-text: #21301f;
-    --radius-sm: 0.5rem;
-    --radius-md: 0.75rem;
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
     --shadow-pop: 0 12px 28px rgba(0, 0, 0, .5);
   }
 }`

@@ -544,6 +544,12 @@
 <main>
   <Header title={phase.name} subtitle={$popupState.hostname ? `for ${$popupState.hostname}` : ''} {refreshing} onRefresh={refreshAll} onOpenSettings={openSettings} />
 
+  <section class="page-context" class:success={pageCard.tone === 'success'} class:warning={pageCard.tone === 'warning'} aria-live="polite">
+    <span class="page-icon" aria-hidden="true">S</span>
+    <div><strong>{pageCard.title}</strong><p>{pageCard.message}</p></div>
+    <span class="page-badge">{pageCard.badge}</span>
+  </section>
+
   {#if phase.name === 'initial' || phase.name === 'checking'}
     <StatusCard title="Finding the desktop app" message="Checking the private connection on this device." />
   {:else if phase.name === 'unavailable'}
@@ -553,31 +559,9 @@
   {:else if phase.name === 'locked'}
     <StatusCard title={phase.title} message={phase.message} />
   {:else if phase.name === 'ready'}
-    <StatusCard title="Connected" message={desktopFillAvailable ? '' : 'Page filling is unavailable in this desktop build.'} tone="success" />
+    <StatusCard title="Desktop connected" message={desktopFillAvailable ? '' : 'Page filling is unavailable in this desktop build.'} tone="success" />
   {/if}
   {#if reconnectScheduled}<p class="retry-note" role="status">Trying the desktop connection again while this window is open.</p>{/if}
-
-  <section class="page-context" class:success={pageCard.tone === 'success'} class:warning={pageCard.tone === 'warning'} aria-live="polite">
-    <span class="page-icon" aria-hidden="true">S</span>
-    <div><strong>{pageCard.title}</strong><p>{pageCard.message}</p></div>
-    <span class="page-badge">{pageCard.badge}</span>
-  </section>
-
-  {#if !inlineGlobalEnabled}
-    <section class="inline-access">
-      <div><strong>Show Sesame on login fields</strong><p>{inlineLegacyAccess ? 'Upgrade the older site-by-site setup with one approval.' : 'Enable once for every HTTPS website—no site-by-site setup.'}</p></div>
-      <button type="button" disabled={inlineWorking} on:click={enableInlineEverywhere}>{inlineWorking ? 'Enabling…' : 'Enable'}</button>
-      {#if inlineFeedback}<p class="inline-feedback" role="status">{inlineFeedback}</p>{/if}
-    </section>
-  {:else}
-    <section class="inline-access active-everywhere">
-      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L.'}</p></div>
-      {#if activeOrigin}
-        <button type="button" class:enabled={!inlineSitePaused} disabled={inlineWorking} on:click={toggleSitePause}>{inlineSitePaused ? 'Resume' : 'Pause here'}</button>
-      {/if}
-      {#if inlineFeedback}<p class="inline-feedback" role="status">{inlineFeedback}</p>{/if}
-    </section>
-  {/if}
 
   {#if page.kind === 'registration'}
     <button class="generate-button" type="button" disabled={registrationWorking} on:click={generateAndFillPassword}>{registrationWorking ? 'Creating…' : 'Create password'}</button>
@@ -609,6 +593,25 @@
   {/if}
   {#if cardFeedback}<p class="fill-feedback" role="status">{cardFeedback}</p>{/if}
 
+  <details class="website-controls">
+    <summary>Website controls <span>{inlineGlobalEnabled ? inlineSitePaused ? 'Paused here' : 'Enabled' : 'Not enabled'}</span></summary>
+    {#if !inlineGlobalEnabled}
+      <section class="inline-access">
+        <div><strong>Show Sesame on login fields</strong><p>{inlineLegacyAccess ? 'Upgrade to site-wide access with one approval.' : 'Allow access to HTTPS pages. Every fill still needs desktop approval.'}</p></div>
+        <button type="button" disabled={inlineWorking} on:click={enableInlineEverywhere}>{inlineWorking ? 'Enabling…' : 'Enable'}</button>
+        {#if inlineFeedback}<p class="inline-feedback" role="status">{inlineFeedback}</p>{/if}
+      </section>
+    {:else}
+      <section class="inline-access active-everywhere">
+        <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L.'}</p></div>
+        {#if activeOrigin}
+          <button type="button" class:enabled={!inlineSitePaused} disabled={inlineWorking} on:click={toggleSitePause}>{inlineSitePaused ? 'Resume' : 'Pause here'}</button>
+        {/if}
+        {#if inlineFeedback}<p class="inline-feedback" role="status">{inlineFeedback}</p>{/if}
+      </section>
+    {/if}
+  </details>
+
   <Diagnostics diagnostic={$popupState.diagnostic} pageDiagnostic={$popupState.pageDiagnostic} />
   <footer>Version {chrome.runtime.getManifest().version}</footer>
 </main>
@@ -616,7 +619,7 @@
 <style>
   main { padding: 14px; background: var(--bg); }
   .retry-note { margin: -4px 2px 10px; color: var(--warn-text); font-size: 10px; }
-  .page-context { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-panel); }
+  .page-context { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
   .page-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--radius-md); color: var(--gold-text); background: var(--gold-soft-bg); font: 700 17px var(--font-display); }
   .page-context.success .page-icon { color: var(--accent); background: var(--tint); }
   .page-context.warning .page-icon { color: var(--warn-text); background: var(--warn-bg); }
@@ -625,21 +628,24 @@
   .page-badge { max-width: 84px; padding: 4px 7px; border-radius: var(--radius-pill); color: var(--text-muted); background: var(--surface-inset); font-size: 9px; font-weight: 700; text-align: center; }
   .page-context.success .page-badge { color: var(--accent); background: var(--tint); }
   .page-context.warning .page-badge { color: var(--warn-text); background: var(--warn-bg); }
-  .inline-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-panel); }
+  .website-controls { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 9px; }
+  .website-controls summary { display: flex; align-items: center; justify-content: space-between; color: var(--text-muted); font-size: 10px; font-weight: 650; cursor: pointer; }
+  .website-controls summary span { color: var(--text-faint); font-weight: 500; }
+  .inline-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-top: 9px; padding: 10px 0; border: 0; background: transparent; box-shadow: none; }
   .inline-access strong { font-size: 11px; }
-  .inline-access > button { min-width: 62px; border: 0; border-radius: var(--radius-pill); padding: 6px 10px; color: var(--text); background: var(--surface-inset); font-size: 10px; font-weight: 700; cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
+  .inline-access > button { min-width: 62px; border: 0; border-radius: var(--radius-sm); padding: 6px 10px; color: var(--text); background: var(--surface-inset); font-size: 10px; font-weight: 700; cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
   .inline-access > button:active { transform: scale(.95); }
   .inline-access > button.enabled { color: var(--accent); background: var(--tint); }
   .inline-access > button:disabled { cursor: wait; opacity: .6; }
   .inline-access > button:disabled:active { transform: none; }
   .inline-feedback { grid-column: 1 / -1; }
-  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: 650; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 3px 8px rgba(0, 0, 0, .1); transition: background-color .16s ease, transform .1s ease; }
+  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: 650; cursor: pointer; box-shadow: none; transition: background-color .16s ease, transform .1s ease; }
   .generate-button:hover:not(:disabled) { background: var(--accent-hover); }
   .generate-button:active:not(:disabled) { background: var(--accent-active); transform: scale(.97); }
   .generate-button:disabled { cursor: wait; opacity: .65; }
   .generated-password { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 8px; border-radius: var(--radius-sm); background: var(--surface-inset); }
   .generated-password code { flex: 1; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .generated-password button { border: 0; border-radius: 6px; padding: 5px 8px; color: var(--text); background: var(--surface); font-size: 10px; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
+  .generated-password button { border: 0; border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text); background: var(--surface); font-size: 10px; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
   .generated-password button:hover { background: var(--tint); }
   .generated-password button:active { transform: scale(.95); }
   .fill-feedback { min-height: 15px; margin: 7px 3px 0; }
