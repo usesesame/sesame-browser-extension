@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
         name: 'manifest',
         generateBundle() {
           const manifest = JSON.parse(
-            readFileSync(resolve(__dirname, 'manifests', manifestName), 'utf8')
+            readFileSync(resolve(import.meta.dirname, 'manifests', manifestName), 'utf8')
           )
           if (mode === 'integration') {
             manifest.host_permissions = ['http://127.0.0.1/*', 'http://localhost/*']
@@ -38,10 +38,10 @@ export default defineConfig(({ mode }) => {
       modulePreload: false,
       rollupOptions: {
         input: {
-          popup: resolve(__dirname, 'popup.html'),
-          options: resolve(__dirname, 'options.html'),
-          onboarding: resolve(__dirname, 'onboarding.html'),
-          background: resolve(__dirname, 'src/background/main.ts'),
+          popup: resolve(import.meta.dirname, 'popup.html'),
+          options: resolve(import.meta.dirname, 'options.html'),
+          onboarding: resolve(import.meta.dirname, 'onboarding.html'),
+          background: resolve(import.meta.dirname, 'src/background/main.ts'),
         },
         output: {
           entryFileNames: '[name].js',

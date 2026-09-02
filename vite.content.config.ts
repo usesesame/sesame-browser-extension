@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => ({
     outDir: `dist/${mode}`,
     emptyOutDir: false,
     lib: {
-      entry: resolve(__dirname, 'src/content/main.ts'),
+      entry: resolve(import.meta.dirname, 'src/content/main.ts'),
       formats: ['iife'],
       name: 'SesameContentBridge',
       fileName: () => 'content.js',

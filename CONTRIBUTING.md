@@ -27,7 +27,7 @@ npm run ci
 ```
 
 `npm run ci` runs from a fresh clone that has no desktop app, no vault, and no
-native host installed. It needs Node.js 24.13. If it fails before you have
+native host installed. It needs Node.js 24.20. If it fails before you have
 touched anything, the problem is your toolchain rather than your change.
 
 Then read:
