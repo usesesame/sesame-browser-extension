@@ -59,8 +59,14 @@ terminates, the underlying native port closes and the request fails closed.
 ## Tests
 
 The repository has unit coverage for detection, coordination, native protocol
-validation, and card and identity filling. The automated browser suite has no
-specs yet and its dedicated command prints a skip notice.
+validation, and card and identity filling. `npm run test:browser` builds the
+integration bundle and drives it in a real Chromium through `tests/browser`. It
+asserts sign-in form inspection, origin and document-token binding, fail-closed
+behavior when a document is replaced between approval and fill, overlay
+detachment when a site is paused, and the fill port staying closed to non-popup
+callers. Set `SESAME_BROWSER_TEST_EXECUTABLE` when Chromium is not on a
+standard path. Desktop approval needs the desktop binary, so it stays covered
+by the desktop repository.
 
 ```powershell
 npm run check
@@ -75,8 +81,9 @@ npm run package:stores
 ```
 
 `npm run ci` runs the complete release gate. Run `npm run test:browser` after
-browser-integration changes. It builds the integration bundle, then reports
-that no browser specs exist.
+browser-integration changes. It builds the integration bundle, then runs the
+real-browser suite against the local Chromium and fails when the browser or
+the built extension is unavailable.
 
 The extension version is independent from the desktop version. Change
 `package.json`, then run `npm run version:sync` to update the Chrome and Edge
