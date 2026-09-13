@@ -23,7 +23,7 @@
     padding: 12px;
     margin-bottom: 12px;
     background: var(--surface);
-    box-shadow: var(--shadow-panel);
+    box-shadow: var(--shadow-raised);
   }
   h2 {
     margin: 0 0 4px;

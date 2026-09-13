@@ -558,14 +558,16 @@
   {#if reconnectScheduled}<p class="retry-note" role="status">Trying the desktop connection again while this window is open.</p>{/if}
 
   <section class="page-context" class:success={pageCard.tone === 'success'} class:warning={pageCard.tone === 'warning'} aria-live="polite">
-    <span class="page-icon" aria-hidden="true">S</span>
+    <span class="page-icon" aria-hidden="true">
+      <svg viewBox="0 0 512 512" width="17" height="17" focusable="false"><circle cx="256" cy="207" r="58" fill="currentColor" /><path d="M226 247h60l27 126a22 22 0 0 1-22 27h-70a22 22 0 0 1-22-27l27-126Z" fill="currentColor" /><path d="M118 138c-18 32-27 67-28 105" fill="none" stroke="var(--gold-soft-bg)" stroke-width="26" stroke-linecap="round" opacity=".9" /></svg>
+    </span>
     <div><strong>{pageCard.title}</strong><p>{pageCard.message}</p></div>
     <span class="page-badge">{pageCard.badge}</span>
   </section>
 
   {#if !inlineGlobalEnabled}
     <section class="inline-access">
-      <div><strong>Show Sesame on login fields</strong><p>{inlineLegacyAccess ? 'Upgrade the older site-by-site setup with one approval.' : 'Enable once for every HTTPS website—no site-by-site setup.'}</p></div>
+      <div><strong>Show Sesame on login fields</strong><p>{inlineLegacyAccess ? 'Upgrade the older site-by-site setup with one approval.' : 'Enable once for every HTTPS website. No site-by-site setup.'}</p></div>
       <button type="button" disabled={inlineWorking} on:click={enableInlineEverywhere}>{inlineWorking ? 'Enabling…' : 'Enable'}</button>
       {#if inlineFeedback}<p class="inline-feedback" role="status">{inlineFeedback}</p>{/if}
     </section>
@@ -615,33 +617,33 @@
 
 <style>
   main { padding: 14px; background: var(--bg); }
-  .retry-note { margin: -4px 2px 10px; color: var(--warn-text); font-size: 10px; }
-  .page-context { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-panel); }
-  .page-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--radius-md); color: var(--gold-text); background: var(--gold-soft-bg); font: 700 17px var(--font-display); }
+  .retry-note { margin: -4px 2px 10px; color: var(--warn-text); font-size: var(--type-1); }
+  .page-context { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
+  .page-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--radius-md); color: var(--gold-text); background: var(--gold-soft-bg); }
   .page-context.success .page-icon { color: var(--accent); background: var(--tint); }
   .page-context.warning .page-icon { color: var(--warn-text); background: var(--warn-bg); }
-  .page-context strong { display: block; overflow: hidden; font-family: var(--font-display); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
-  .page-context p, .inline-access p, .fill-feedback { margin: 2px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
-  .page-badge { max-width: 84px; padding: 4px 7px; border-radius: var(--radius-pill); color: var(--text-muted); background: var(--surface-inset); font-size: 9px; font-weight: 700; text-align: center; }
+  .page-context strong { display: block; overflow: hidden; font-family: var(--font-display); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
+  .page-context p, .inline-access p, .fill-feedback { margin: 2px 0 0; color: var(--text-muted); font-size: var(--type-1); line-height: 1.45; }
+  .page-badge { max-width: 84px; padding: 4px 7px; border-radius: var(--radius-pill); color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-1); font-weight: 700; text-align: center; }
   .page-context.success .page-badge { color: var(--accent); background: var(--tint); }
   .page-context.warning .page-badge { color: var(--warn-text); background: var(--warn-bg); }
-  .inline-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-panel); }
-  .inline-access strong { font-size: 11px; }
-  .inline-access > button { min-width: 62px; border: 0; border-radius: var(--radius-pill); padding: 6px 10px; color: var(--text); background: var(--surface-inset); font-size: 10px; font-weight: 700; cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
+  .inline-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
+  .inline-access strong { font-size: var(--type-1); }
+  .inline-access > button { min-width: 62px; border: 0; border-radius: var(--radius-pill); padding: 6px 10px; color: var(--text); background: var(--surface-inset); font-size: var(--type-1); font-weight: 700; cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
   .inline-access > button:active { transform: scale(.95); }
   .inline-access > button.enabled { color: var(--accent); background: var(--tint); }
   .inline-access > button:disabled { cursor: wait; opacity: .6; }
   .inline-access > button:disabled:active { transform: none; }
   .inline-feedback { grid-column: 1 / -1; }
-  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: 650; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 3px 8px rgba(0, 0, 0, .1); transition: background-color .16s ease, transform .1s ease; }
+  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: 650; cursor: pointer; box-shadow: inset 0 1px 0 var(--button-edge); transition: background-color .16s ease, transform .1s ease; }
   .generate-button:hover:not(:disabled) { background: var(--accent-hover); }
   .generate-button:active:not(:disabled) { background: var(--accent-active); transform: scale(.97); }
   .generate-button:disabled { cursor: wait; opacity: .65; }
   .generated-password { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 8px; border-radius: var(--radius-sm); background: var(--surface-inset); }
-  .generated-password code { flex: 1; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .generated-password button { border: 0; border-radius: 6px; padding: 5px 8px; color: var(--text); background: var(--surface); font-size: 10px; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
+  .generated-password code { flex: 1; overflow: hidden; font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
+  .generated-password button { border: 0; border-radius: 6px; padding: 5px 8px; color: var(--text); background: var(--surface); font-size: var(--type-1); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
   .generated-password button:hover { background: var(--tint); }
   .generated-password button:active { transform: scale(.95); }
   .fill-feedback { min-height: 15px; margin: 7px 3px 0; }
-  footer { margin-top: 12px; color: var(--text-faint); font-size: 9px; text-align: center; }
+  footer { margin-top: 12px; color: var(--text-faint); font-size: var(--type-1); text-align: center; }
 </style>
