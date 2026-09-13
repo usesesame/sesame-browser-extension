@@ -323,14 +323,139 @@ describe('extension browser suite', () => {
     expect(guard.messages).toBe(0)
   })
 
-  it('reports the desktop as unavailable in the popup without a native host', async () => {
+  it('reports a missing desktop app in the popup with install and retry actions', async () => {
     const extensionId = new URL(worker.url()).host
     const popup = await context.newPage()
     await popup.goto(`chrome-extension://${extensionId}/popup.html`)
     await expect.poll(
       async () => popup.evaluate(() => document.body.innerText),
       { timeout: 10000 },
-    ).toMatch(/desktop app is not running/)
-    expect(await popup.evaluate(() => document.body.innerText)).toMatch(/Open Sesame/)
-  })
+    ).toMatch(/Sesame desktop app not found/)
+    const body = await popup.evaluate(() => document.body.innerText)
+    expect(body).not.toMatch(/desktop app is not running/)
+    await expect.poll(
+      async () => popup.getByRole('button', { name: 'Get Sesame' }).isVisible(),
+      { timeout: 5000 },
+    ).toBe(true)
+    await expect.poll(
+      async () => popup.getByRole('button', { name: /check desktop connection and page again/ }).isEnabled(),
+      { timeout: 5000 },
+    ).toBe(true)
+    await popup.close()
+  }, 15000)
+
+  it('does not claim readiness in onboarding without the desktop app', async () => {
+    const extensionId = new URL(worker.url()).host
+    const onboarding = await context.newPage()
+    await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => onboarding.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/Sesame desktop app not found/)
+    const body = await onboarding.evaluate(() => document.body.innerText)
+    expect(body).not.toMatch(/Sesame is ready/)
+    await expect.poll(
+      async () => onboarding.locator('section[aria-live="polite"]').isVisible(),
+      { timeout: 5000 },
+    ).toBe(true)
+    const install = onboarding.getByRole('link', { name: 'Get Sesame' })
+    await expect.poll(async () => install.isVisible(), { timeout: 5000 }).toBe(true)
+    expect(await install.getAttribute('href')).toBe('https://github.com/usesesame/sesame-desktop/releases/latest')
+    await expect.poll(
+      async () => onboarding.getByRole('button', { name: 'Enable on websites' }).isVisible(),
+      { timeout: 5000 },
+    ).toBe(true)
+    await expect.poll(
+      async () => onboarding.getByRole('button', { name: 'Check again' }).isEnabled(),
+      { timeout: 5000 },
+    ).toBe(true)
+    await onboarding.close()
+  }, 15000)
+
+  it('rechecks the desktop connection from onboarding and keeps the not-ready state', async () => {
+    const extensionId = new URL(worker.url()).host
+    const onboarding = await context.newPage()
+    await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => onboarding.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/Sesame desktop app not found/)
+    await onboarding.getByRole('button', { name: 'Check again' }).click()
+    await expect.poll(
+      async () => onboarding.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/still not connected/)
+    expect(await onboarding.evaluate(() => document.body.innerText)).not.toMatch(/Sesame is ready/)
+    await onboarding.close()
+  }, 15000)
+
+  it('stays not ready when website access is rejected in onboarding', async () => {
+    const extensionId = new URL(worker.url()).host
+    const onboarding = await context.newPage()
+    await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => onboarding.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/Sesame desktop app not found/)
+    await onboarding.evaluate(() => {
+      const permissions = chrome.permissions as {
+        request: (details: { origins: string[] }) => Promise<boolean>
+      }
+      permissions.request = async () => false
+    })
+    await onboarding.getByRole('button', { name: 'Enable on websites' }).press('Enter')
+    await expect.poll(
+      async () => onboarding.evaluate(() => document.body.innerText),
+      { timeout: 5000 },
+    ).toMatch(/Website access was not granted/)
+    expect(await onboarding.evaluate(() => document.body.innerText)).not.toMatch(/Sesame is ready/)
+    await onboarding.close()
+  }, 15000)
+
+  it('recomputes the onboarding state after reopening', async () => {
+    const extensionId = new URL(worker.url()).host
+    const first = await context.newPage()
+    await first.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => first.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/Sesame desktop app not found/)
+    await first.close()
+    const second = await context.newPage()
+    await second.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => second.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/Sesame desktop app not found/)
+    expect(await second.evaluate(() => document.body.innerText)).not.toMatch(/Sesame is ready/)
+    await second.close()
+  }, 20000)
+
+  it('maps mocked desktop states to the right primary action', async () => {
+    const extensionId = new URL(worker.url()).host
+    const cases = [
+      { reply: { state: 'locked', diagnostic: { code: 'connected' } }, action: 'Unlock Sesame' },
+      { reply: { state: 'desktop-offline', diagnostic: { code: 'connected' } }, action: 'Open Sesame' },
+      { reply: { state: 'unavailable', diagnostic: { code: 'protocol-mismatch' } }, action: 'Update Sesame' },
+      { reply: { state: 'unavailable', diagnostic: { code: 'host-not-found' } }, action: 'Get Sesame' },
+    ]
+    for (const testCase of cases) {
+      const popup = await context.newPage()
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await popup.evaluate((reply) => {
+        const runtime = chrome.runtime as {
+          sendMessage: (message: { type?: string }) => Promise<unknown>
+        }
+        runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+          ? reply
+          : { state: 'unavailable', code: 'page-check-failed' }
+      }, testCase.reply)
+      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: testCase.action, exact: true }).isVisible(),
+        { timeout: 5000 },
+      ).toBe(true)
+      await popup.close()
+    }
+  }, 30000)
 })
