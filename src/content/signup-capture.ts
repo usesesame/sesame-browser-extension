@@ -1,35 +1,37 @@
 import { captureSignupSubmission, captureUpdateSubmission } from './registration'
 
-export type CredentialCapture =
-  | { kind: 'new'; origin: string; username: string; password: string }
-  | { kind: 'update'; origin: string; username: string; password: string }
+export type SaveActionOutcome = { ok: true } | { ok: false; code: string }
 
-export interface SignupCaptureOptions {
-  onCapture(payload: CredentialCapture): void
-}
-
-// Capture-phase, never preventDefault(); isTrusted gates forged submits.
-export function attachSignupCapture(options: SignupCaptureOptions): () => void {
-  function onSubmit(event: Event) {
-    if (!event.isTrusted) return
-    const signup = captureSignupSubmission()
-    if (signup) {
-      options.onCapture({ kind: 'new', ...signup })
-      return
+export async function saveCurrentLogin(): Promise<SaveActionOutcome> {
+  const registration = captureSignupSubmission()
+  const update = registration ? null : captureUpdateSubmission()
+  const capture = registration
+    ? { kind: 'new' as const, origin: registration.origin, username: registration.username, password: registration.password }
+    : update
+      ? { kind: 'update' as const, origin: update.origin, username: update.username, password: update.password }
+      : null
+  if (!capture) return { ok: false, code: 'no-password' }
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'sesame:capture-signup', ...capture }) as unknown
+    if (typeof response === 'object' && response !== null && (response as { ok?: unknown }).ok === true) {
+      return { ok: true }
     }
-    const update = captureUpdateSubmission()
-    if (update) options.onCapture({ kind: 'update', ...update })
+    const code = typeof response === 'object' && response !== null && typeof (response as { code?: unknown }).code === 'string'
+      ? (response as { code: string }).code
+      : 'save-failed'
+    return { ok: false, code }
+  } catch {
+    return { ok: false, code: 'save-failed' }
+  } finally {
+    capture.username = ''
+    capture.password = ''
+    if (registration) {
+      registration.username = ''
+      registration.password = ''
+    }
+    if (update) {
+      update.username = ''
+      update.password = ''
+    }
   }
-  document.addEventListener('submit', onSubmit, true)
-  return () => document.removeEventListener('submit', onSubmit, true)
-}
-
-export function ensureSignupCapture(): (() => void) | undefined {
-  const current = globalThis as typeof globalThis & {
-    sesameAttachSignupCapture?: () => (() => void) | undefined
-    sesameDetachSignupCapture?: (() => void) | undefined
-  }
-  current.sesameDetachSignupCapture?.()
-  current.sesameDetachSignupCapture = current.sesameAttachSignupCapture?.()
-  return current.sesameDetachSignupCapture
 }

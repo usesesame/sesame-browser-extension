@@ -6,15 +6,9 @@ export interface SignupCapturePayload {
   origin: string
   username: string
   password: string
-  /// Content script decides kind from the form.
   kind: 'new' | 'update'
 }
 
-interface PendingCapture extends SignupCapturePayload {
-  timer: ReturnType<typeof setTimeout>
-}
-
-// Origin from the delivering frame, never the message.
 export function safeSignupCapturePayload(
   message: unknown,
   senderUrl: string | undefined,
@@ -39,54 +33,75 @@ function originOf(value: string): string | null {
   }
 }
 
-const CAPTURE_TTL_MS = 5 * 60_000
+const ARM_TTL_MS = 10 * 60_000
 
-export interface SignupCaptureController {
-  capture(tabId: number, payload: SignupCapturePayload): void
+export interface SaveSessionController {
+  arm(tabId: number, origin: string): void
+  isArmed(tabId: number): boolean
   handleTabUpdated(tabId: number, changeInfo: { url?: string }): void
   handleTabRemoved(tabId: number): void
+  save(
+    browser: Browser,
+    tabId: number,
+    payload: SignupCapturePayload,
+    options?: { requestTimeoutMs?: number },
+  ): Promise<{ ok: true } | { ok: false; code: string }>
 }
 
-// In-memory only, never chrome.storage: a restart drops the capture.
-export function createSignupCaptureController(
-  browser: Browser,
-  options: { ttlMs?: number; requestTimeoutMs?: number } = {},
-): SignupCaptureController {
-  const ttlMs = options.ttlMs ?? CAPTURE_TTL_MS
-  const pending = new Map<number, PendingCapture>()
+export function createSaveSessionController(options: { ttlMs?: number } = {}): SaveSessionController {
+  const ttlMs = options.ttlMs ?? ARM_TTL_MS
+  const armed = new Map<number, { origin: string; timer: ReturnType<typeof setTimeout> }>()
+  const saving = new Set<number>()
 
-  function discard(tabId: number) {
-    const capture = pending.get(tabId)
-    if (!capture) return
-    clearTimeout(capture.timer)
-    capture.username = ''
-    capture.password = ''
-    pending.delete(tabId)
+  function disarm(tabId: number) {
+    const entry = armed.get(tabId)
+    if (entry !== undefined) clearTimeout(entry.timer)
+    armed.delete(tabId)
   }
 
   return {
-    capture(tabId, payload) {
-      discard(tabId)
-      pending.set(tabId, {
-        ...payload,
-        timer: setTimeout(() => discard(tabId), ttlMs),
+    arm(tabId, origin) {
+      disarm(tabId)
+      armed.set(tabId, {
+        origin,
+        timer: setTimeout(() => armed.delete(tabId), ttlMs),
       })
+    },
+
+    isArmed(tabId) {
+      return armed.has(tabId)
     },
 
     handleTabUpdated(tabId, changeInfo) {
       if (typeof changeInfo.url !== 'string') return
-      const capture = pending.get(tabId)
-      if (!capture) return
-      clearTimeout(capture.timer)
-      pending.delete(tabId)
-      const { origin, username, password, kind } = capture
-      void requestSave(browser, origin, { username, password, kind }, { timeoutMs: options.requestTimeoutMs }).catch(() => {})
-      capture.username = ''
-      capture.password = ''
+      const entry = armed.get(tabId)
+      if (!entry) return
+      const nextOrigin = originOf(changeInfo.url)
+      if (nextOrigin !== entry.origin) disarm(tabId)
     },
 
     handleTabRemoved(tabId) {
-      discard(tabId)
+      disarm(tabId)
+      saving.delete(tabId)
+    },
+
+    async save(browser, tabId, payload, saveOptions) {
+      if (!armed.has(tabId)) return { ok: false, code: 'save-not-armed' }
+      if (saving.has(tabId)) return { ok: false, code: 'save-in-progress' }
+      saving.add(tabId)
+      try {
+        const result = await requestSave(browser, payload.origin, {
+          username: payload.username,
+          password: payload.password,
+          kind: payload.kind,
+        }, { timeoutMs: saveOptions?.requestTimeoutMs })
+        if (result.ok) disarm(tabId)
+        return result.ok ? { ok: true } : { ok: false, code: result.code }
+      } catch {
+        return { ok: false, code: 'save-failed' }
+      } finally {
+        saving.delete(tabId)
+      }
     },
   }
 }

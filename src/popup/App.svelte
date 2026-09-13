@@ -48,6 +48,25 @@
     'vault-locked': 'Unlock your vault in the Sesame desktop app.',
   }
 
+  const SAVE_MESSAGES: Record<string, string> = {
+    'approval-declined': 'Nothing was saved. The request was declined in Sesame.',
+    'approval-timeout': 'The save approval expired. Choose Save this login again.',
+    'approval-unavailable': 'Sesame could not show the save approval. Bring the desktop app forward and retry.',
+    'desktop-unavailable': 'Open Sesame, then choose Save this login again.',
+    'host-disconnected': 'The desktop connection closed. Keep Sesame open and retry.',
+    'host-exited': 'Sesame stopped the connection. Open it again and retry.',
+    'host-forbidden': 'Reload the extension, restart Sesame, then choose Save this login again.',
+    'host-not-found': 'Open Sesame, then choose Save this login again.',
+    'invalid-capture': 'Sesame could not verify that form. Nothing was saved.',
+    'no-password': 'No new password to read on this page. Fill the form with Sesame first.',
+    'protocol-mismatch': 'Update Sesame and the extension, then choose Save this login again.',
+    'save-failed': 'Sesame could not save this login.',
+    'save-in-progress': 'A save request is already open.',
+    'save-not-armed': 'Fill the form with Sesame before saving.',
+    'timeout': 'The save did not answer in time. Choose Save this login again.',
+    'vault-locked': 'Unlock your vault in the Sesame desktop app, then choose Save this login again.',
+  }
+
   type PageKind = 'checking' | 'restricted' | 'none' | 'username' | 'login' | 'registration' | 'password-change' | 'ambiguous'
   interface PageState {
     kind: PageKind
@@ -107,6 +126,9 @@
   let fillFeedback = ''
   let generatedPassword = ''
   let registrationWorking = false
+  let saveArmed = false
+  let saveWorking = false
+  let saveFeedback = ''
   let copiedPassword = false
   let generatedExpiryTimer: ReturnType<typeof setTimeout> | null = null
   let copyHandle: TemporaryCopyHandle | null = null
@@ -249,6 +271,9 @@
       cardFields = []
       page = { ...page, kind: 'restricted', code: 'page-restricted' }
     }
+    const saveSurface = page.kind === 'registration' || page.kind === 'password-change'
+    saveArmed = saveSurface && activeTabId !== null ? await querySaveState(activeTabId) : false
+    saveFeedback = ''
     setPageDiagnostic({
       code: page.code,
       hasUsernameField: page.hasUsernameField,
@@ -367,10 +392,10 @@
     })
     fillWorking = false
     if (result?.state === 'filled') {
-      if (activeTabId !== null) await armSignupCapture(activeTabId)
+      if (activeTabId !== null) await armSave(activeTabId)
       fillFeedback = result.usernameFilled && result.passwordFilled
-        ? 'Username and password filled. Review the page before signing in. When you submit, Sesame will offer to save the login.'
-        : 'Sign-in field filled. Review the page before continuing. When you submit, Sesame will offer to save the login.'
+        ? 'Username and password filled. Review the page before signing in.'
+        : 'Sign-in field filled. Review the page before continuing.'
     } else {
       fillFeedback = result?.code === 'no-match' && page.hostname
         ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
@@ -444,10 +469,10 @@
       })
       const outcome = normalizeRegistrationOutcome(injection?.result)
       if (!outcome.ok) throw new Error(outcome.code)
-      await armSignupCapture(activeTabId)
+      await armSave(activeTabId)
       fillFeedback = outcome.fieldsFilled === 1
-        ? 'Password filled. Copy it before completing registration.'
-        : 'Password and confirmation filled. Copy it before completing registration.'
+        ? 'Password filled. Choose Save this login after the site accepts it.'
+        : 'Password and confirmation filled. Choose Save this login after the site accepts it.'
       generatedExpiryTimer = setTimeout(clearGeneratedPassword, REGISTRATION_EXPIRY_MS)
     } catch (error) {
       const code = error instanceof Error ? error.message : ''
@@ -469,15 +494,62 @@
       : { version: 1, ok: false, code: 'registration-fill-failed' }
   }
 
-  function invokeEnsureSignupCapture(): unknown {
-    const ensure = (globalThis as typeof globalThis & { sesameEnsureSignupCapture?: () => unknown }).sesameEnsureSignupCapture
-    return typeof ensure === 'function' ? ensure() : false
+  function invokeSaveCurrentLogin(): unknown {
+    const save = (globalThis as typeof globalThis & { sesameSaveCurrentLogin?: () => unknown }).sesameSaveCurrentLogin
+    return typeof save === 'function' ? save() : { ok: false, code: 'save-failed' }
   }
 
-  async function armSignupCapture(tabId: number) {
+  function normalizeSaveOutcome(value: unknown): { ok: true } | { ok: false; code: string } {
+    if (typeof value !== 'object' || value === null) return { ok: false, code: 'save-failed' }
+    const record = value as { ok?: unknown; code?: unknown }
+    if (record.ok === true) return { ok: true }
+    return { ok: false, code: typeof record.code === 'string' ? record.code : 'save-failed' }
+  }
+
+  async function querySaveState(tabId: number): Promise<boolean> {
     try {
-      await chrome.scripting.executeScript({ target: { tabId }, func: invokeEnsureSignupCapture })
-    } catch { /* noop */ }
+      const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:save-state', tabId }), 4_000)
+      return response?.armed === true
+    } catch {
+      return false
+    }
+  }
+
+  async function armSave(tabId: number) {
+    if (!activeOrigin) {
+      saveArmed = false
+      return
+    }
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'sesame:arm-save', tabId, origin: activeOrigin })
+      saveArmed = response?.armed === true && (page.kind === 'registration' || page.kind === 'password-change')
+    } catch {
+      saveArmed = false
+    }
+  }
+
+  async function saveLogin() {
+    if (saveWorking || activeTabId === null || !saveArmed) return
+    saveWorking = true
+    saveFeedback = 'Waiting for approval in Sesame…'
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content.js'] })
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId: activeTabId },
+        func: invokeSaveCurrentLogin,
+      })
+      const outcome = normalizeSaveOutcome(injection?.result)
+      if (outcome.ok) {
+        saveArmed = false
+        saveFeedback = 'Login saved in Sesame.'
+      } else {
+        saveFeedback = SAVE_MESSAGES[outcome.code] ?? 'Sesame could not save this login.'
+      }
+    } catch {
+      saveFeedback = 'Sesame could not save this login.'
+    } finally {
+      saveWorking = false
+    }
   }
 
   async function copyGeneratedPassword() {
@@ -486,7 +558,7 @@
       copyHandle?.cancel()
       copyHandle = await copyTemporarily(generatedPassword, { onExpired: () => { copiedPassword = false } })
       copiedPassword = true
-      fillFeedback = 'Copied temporarily. Save the login in Sesame after registration succeeds.'
+      fillFeedback = 'Copied temporarily. Choose Save this login in the popup after registration succeeds.'
     } catch {
       fillFeedback = 'Clipboard access is unavailable. The password remains filled in the form.'
     }
@@ -585,6 +657,10 @@
       <div class="generated-password"><code>{generatedPassword}</code><button type="button" on:click={copyGeneratedPassword}>{copiedPassword ? 'Copied' : 'Copy temporarily'}</button></div>
     {/if}
   {/if}
+  {#if saveArmed}
+    <FillButton onClick={saveLogin} loading={saveWorking} loadingLabel="Saving…" label="Save this login" secondary={page.kind === 'registration'} />
+  {/if}
+  {#if saveFeedback}<p class="fill-feedback" role="status">{saveFeedback}</p>{/if}
   {#if desktopNeedsOpening}
     {#if connection.action === 'install' || connection.action === 'update'}
       <FillButton onClick={openDesktopDownload} label={connection.actionLabel} secondary={page.kind === 'registration'} />

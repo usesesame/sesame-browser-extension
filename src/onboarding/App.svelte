@@ -154,7 +154,7 @@
     {/if}
 
     <ul>
-      <li>Existing field values are never read.</li>
+      <li>Sesame reads a new password only when you choose Save in the popup after filling the form.</li>
       <li>Every login fill still requires your approval in the desktop app.</li>
       <li>Sesame never submits or advances a form.</li>
     </ul>

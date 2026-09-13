@@ -1,15 +1,15 @@
 import { createCoordinator } from './coordinator'
 import { chromeBrowser } from '../platform/chrome'
-import { NATIVE_HOST } from '../protocol/native'
+import { NATIVE_HOST, normalizeFillOrigin } from '../protocol/native'
 import { createInlineRegistrationSync, syncInlineContentScript } from './inline-registration'
 import { handleExtensionCommand } from './command-handler'
 import { INLINE_SETTINGS_KEY, loadInlineSettings, normalizePausedOrigins } from '../permissions/inline-access'
 import { publicFillResult } from './fill-result'
 import { openDesktop } from './native-connection'
-import { createSignupCaptureController, safeSignupCapturePayload } from './signup-capture'
+import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
 
 const coordinator = createCoordinator(chromeBrowser)
-const signupCapture = createSignupCaptureController(chromeBrowser)
+const saveSession = createSaveSessionController()
 const CONNECTION_CACHE_MS = 4_000
 let cachedConnection: { checkedAt: number; value: Awaited<ReturnType<typeof coordinator.checkConnection>> } | undefined
 let connectionCheck: Promise<Awaited<ReturnType<typeof coordinator.checkConnection>>> | undefined
@@ -67,8 +67,8 @@ chrome.runtime.onStartup.addListener(() => { void syncInlineAccess() })
 chrome.commands.onCommand.addListener((command) => { void handleExtensionCommand(command, coordinator) })
 void refreshInlineRegistration()
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => signupCapture.handleTabUpdated(tabId, changeInfo))
-chrome.tabs.onRemoved.addListener((tabId) => signupCapture.handleTabRemoved(tabId))
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => saveSession.handleTabUpdated(tabId, changeInfo))
+chrome.tabs.onRemoved.addListener((tabId) => saveSession.handleTabRemoved(tabId))
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== chrome.runtime.getURL('popup.html')) {
@@ -193,7 +193,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender.tab?.id
     // Origin from the delivering frame, never the message.
     const payload = Number.isInteger(tabId) ? safeSignupCapturePayload(message, sender.url) : null
-    if (payload) signupCapture.capture(tabId!, payload)
+    if (!payload) {
+      sendResponse({ ok: false, code: 'invalid-capture' })
+      return false
+    }
+    saveSession.save(chromeBrowser, tabId!, payload)
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false, code: 'save-failed' }))
+    return true
+  }
+  if (message?.type === 'sesame:arm-save') {
+    const tabId = message?.tabId
+    const origin = normalizeFillOrigin(message?.origin)
+    if (typeof tabId !== 'number' || !Number.isInteger(tabId) || !origin) {
+      sendResponse({ armed: false })
+      return false
+    }
+    saveSession.arm(tabId, origin)
+    sendResponse({ armed: true })
+    return false
+  }
+  if (message?.type === 'sesame:save-state') {
+    const tabId = message?.tabId
+    sendResponse({ armed: typeof tabId === 'number' && Number.isInteger(tabId) ? saveSession.isArmed(tabId) : false })
     return false
   }
   if (message?.type === 'sesame:open-desktop') {

@@ -106,7 +106,6 @@ export interface SignupCapture {
   password: string
 }
 
-// The one read exception: on a genuine submit, only the registration form's own fields.
 export function captureSignupSubmission(): SignupCapture | null {
   if (inspectPasswordSurface() !== 'registration') return null
   const passwordFields = visiblePasswordFields()
@@ -128,7 +127,6 @@ export interface UpdateCapture {
   password: string
 }
 
-// Same read-on-submit exception: reads only the new password field.
 export function captureUpdateSubmission(): UpdateCapture | null {
   if (inspectPasswordSurface() !== 'password-change') return null
   const passwordFields = visiblePasswordFields()

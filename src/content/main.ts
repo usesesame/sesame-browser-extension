@@ -6,7 +6,7 @@ import { inspectCardSurface } from './card-detector'
 import { fillCardSurface } from './card-writer'
 import { attachInlineButton } from './overlay'
 import { fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
-import { attachSignupCapture, ensureSignupCapture } from './signup-capture'
+import { saveCurrentLogin } from './signup-capture'
 
 type GlobalApi = {
   sesameInspectLoginSurface: typeof inspectLoginSurface
@@ -18,11 +18,9 @@ type GlobalApi = {
   sesameFillRegistrationSurface: typeof fillRegistrationSurface
   sesameInspectRegistrationSurface: typeof inspectRegistrationSurface
   sesameInspectPasswordSurface: typeof inspectPasswordSurface
+  sesameSaveCurrentLogin: typeof saveCurrentLogin
   sesameAttachInlineButton: () => (() => void) | undefined
   sesameDetachInlineButton: (() => void) | undefined
-  sesameAttachSignupCapture: () => (() => void) | undefined
-  sesameDetachSignupCapture: (() => void) | undefined
-  sesameEnsureSignupCapture: () => (() => void) | undefined
 }
 
 const api: GlobalApi = {
@@ -35,6 +33,7 @@ const api: GlobalApi = {
   sesameFillRegistrationSurface: fillRegistrationSurface,
   sesameInspectRegistrationSurface: inspectRegistrationSurface,
   sesameInspectPasswordSurface: inspectPasswordSurface,
+  sesameSaveCurrentLogin: saveCurrentLogin,
   sesameAttachInlineButton: () => {
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return undefined
     return attachInlineButton({
@@ -46,22 +45,11 @@ const api: GlobalApi = {
     })
   },
   sesameDetachInlineButton: undefined,
-  sesameAttachSignupCapture: () => {
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return undefined
-    return attachSignupCapture({
-      onCapture: (payload) => {
-        void chrome.runtime.sendMessage({ type: 'sesame:capture-signup', ...payload })
-      },
-    })
-  },
-  sesameDetachSignupCapture: undefined,
-  sesameEnsureSignupCapture: () => ensureSignupCapture(),
 }
 
 const live = window as unknown as Partial<GlobalApi>
 Object.assign(window as unknown as Record<string, unknown>, api, {
   sesameDetachInlineButton: live.sesameDetachInlineButton,
-  sesameDetachSignupCapture: live.sesameDetachSignupCapture,
 })
 
 export {
@@ -74,7 +62,6 @@ export {
   fillRegistrationSurface,
   inspectRegistrationSurface,
   inspectPasswordSurface,
+  saveCurrentLogin,
   attachInlineButton,
-  attachSignupCapture,
-  ensureSignupCapture,
 }

@@ -71,11 +71,25 @@ const cardPage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const registrationPage = `<!doctype html><html><body>
+<form id="signup-form" action="/signup" method="post">
+<h1>Create account</h1>
+<label for="email">Email</label>
+<input id="email" name="email" type="email" autocomplete="username">
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="new-password">
+<label for="confirm">Confirm password</label>
+<input id="confirm" name="confirm" type="password" autocomplete="new-password">
+<button type="submit" id="create">Create account</button>
+</form>
+</body></html>`
+
 function pageBody(path: string): string {
   return path === '/username' ? usernameStepPage
     : path === '/password' ? passwordStepPage
       : path === '/identity' ? identityPage
-        : path === '/card' ? cardPage : loginPage
+        : path === '/card' ? cardPage
+          : path === '/registration' ? registrationPage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -280,12 +294,17 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
 
 async function mockNativeHostInWorker(): Promise<void> {
   await worker.evaluate(() => {
-    const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+    const target = globalThis as typeof globalThis & {
+      __sesameTestRestore?: () => void
+      __sesameSaveRequests?: number
+    }
     const runtime = chrome.runtime as unknown as { connectNative: unknown }
     const original = runtime.connectNative
     const previous = target.__sesameTestRestore
+    target.__sesameSaveRequests = 0
     target.__sesameTestRestore = () => {
       runtime.connectNative = original
+      delete target.__sesameSaveRequests
       previous?.()
     }
     runtime.connectNative = () => {
@@ -312,6 +331,13 @@ async function mockNativeHostInWorker(): Promise<void> {
                 username: 'jamie@example.test',
                 password: 'fictional-inline-pass',
               }))
+            } else if (request?.type === 'save') {
+              target.__sesameSaveRequests = (target.__sesameSaveRequests ?? 0) + 1
+              messageListeners.forEach((listener) => listener({
+                ...base,
+                type: 'saved',
+                saved: true,
+              }))
             } else {
               disconnectListeners.forEach((listener) => listener())
             }
@@ -329,6 +355,27 @@ async function mockNativeHostInWorker(): Promise<void> {
       }
     }
   })
+}
+
+async function countNativeSaves(): Promise<number> {
+  return worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameSaveRequests?: number }
+    return target.__sesameSaveRequests ?? 0
+  })
+}
+
+async function overrideWorkerTab(tabId: number, url: string): Promise<void> {
+  await worker.evaluate(({ tabId: expectedTabId, url: expectedUrl }) => {
+    const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+    const tabs = chrome.tabs as unknown as { query: unknown }
+    const originalQuery = tabs.query
+    const previous = target.__sesameTestRestore
+    target.__sesameTestRestore = () => {
+      tabs.query = originalQuery
+      previous?.()
+    }
+    tabs.query = async () => [{ id: expectedTabId, url: expectedUrl }]
+  }, { tabId, url })
 }
 
 async function restoreWorkerMocks(): Promise<void> {
@@ -1051,6 +1098,96 @@ describe('extension browser suite', () => {
         { timeout: 15000 },
       ).toEqual({ username: 'jamie@example.test', password: 'fictional-inline-pass' })
     } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('saves a registration only after the popup action', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/registration')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Create password', exact: true }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Save this login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      expect(await countNativeSaves()).toBe(0)
+      await popup.getByRole('button', { name: 'Save this login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/Login saved in Sesame/)
+      expect(await countNativeSaves()).toBe(1)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('does not read or save when the registration form is submitted', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/registration')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Create password', exact: true }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Save this login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await current.evaluate(() => (document.getElementById('signup-form') as HTMLFormElement).requestSubmit())
+      await expect.poll(
+        async () => new URL(current.url()).pathname,
+        { timeout: 5000 },
+      ).toBe('/signup')
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      expect(await countNativeSaves()).toBe(0)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('does not offer a save before a Sesame fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const fresh = await context.newPage()
+    await fresh.goto(`${primaryOrigin}/registration`)
+    await injectBridge(fresh)
+    const fixtureUrl = fresh.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      expect(await popup.getByRole('button', { name: 'Save this login', exact: true }).count()).toBe(0)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      if (!fresh.isClosed()) await fresh.close()
       await restoreWorkerMocks()
     }
   }, 30000)
