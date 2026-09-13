@@ -116,8 +116,8 @@
 </main>
 
 <style>
-  .options { box-sizing: border-box; max-width: 680px; margin: 40px auto; padding: 32px; background: var(--surface); border-radius: var(--radius-xl); border: 0; box-shadow: var(--shadow-panel); }
-  h1 { margin: 0; color: var(--text-heading); font: 600 27px var(--font-display); }
+  .options { box-sizing: border-box; max-width: 680px; margin: 40px auto; padding: 32px; background: var(--surface); border-radius: var(--radius-xl); border: 0; box-shadow: var(--shadow-raised); }
+  h1 { margin: 0; color: var(--text-heading); font: 550 var(--type-6)/1.2 var(--font-display); font-variation-settings: var(--font-display-settings); }
   .intro { max-width: 560px; color: var(--text-muted); line-height: 1.5; }
   .setting, .section-heading, li { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
   .setting { margin-top: 24px; padding: 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-inset); }

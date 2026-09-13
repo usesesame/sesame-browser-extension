@@ -29,7 +29,7 @@
     color: var(--on-accent);
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 3px 8px rgba(0, 0, 0, .1);
+    box-shadow: inset 0 1px 0 var(--button-edge);
     transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
   }
   .fill-button:hover:not(:disabled) { background: var(--accent-hover); }

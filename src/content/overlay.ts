@@ -19,11 +19,11 @@ const OVERLAY_CSS = `
           font-family:var(--font-ui);background:var(--surface);color:var(--text-heading);
           border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-pop)}
         .mark{display:inline-grid;place-items:center;width:22px;height:22px;flex:0 0 22px;border-radius:6px;
-          background:var(--gold);color:var(--gold-mark-text);font-family:var(--font-display);
-          font-size:14px;font-weight:700}
+          background:var(--gold);color:var(--gold-mark-text)}
+        .mark svg{display:block;width:15px;height:15px}
         button{font-family:inherit}
         .fill{border:0;border-radius:var(--radius-sm);padding:6px 12px;cursor:pointer;
-          background:var(--accent);color:var(--on-accent);
+          background:var(--accent);color:var(--on-accent);box-shadow:inset 0 1px 0 var(--button-edge);
           font-size:13px;font-weight:600;white-space:nowrap}
         .fill:hover{background:var(--accent-hover)}.fill:disabled{opacity:.6;cursor:default}
         .copy{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
@@ -34,7 +34,8 @@ const OVERLAY_CSS = `
           cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}.identity[hidden]{display:none}
         .identity:disabled{opacity:.6;cursor:default}
         .status{max-width:220px;color:var(--text-muted);font-size:12px;line-height:1.3}
-        .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px}`
+        .card button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+        .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:15px;line-height:1;display:inline-grid;place-items:center;width:24px;height:24px;padding:0}`
 
 export interface OverlayOptions {
   onFillRequest(): Promise<unknown> | unknown
@@ -100,7 +101,26 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     const mark = document.createElement('span')
     mark.className = 'mark'
     mark.setAttribute('aria-hidden', 'true')
-    mark.textContent = 'S'
+    const svgNamespace = 'http://www.w3.org/2000/svg'
+    const icon = document.createElementNS(svgNamespace, 'svg')
+    icon.setAttribute('viewBox', '0 0 512 512')
+    const seedHead = document.createElementNS(svgNamespace, 'circle')
+    seedHead.setAttribute('cx', '256')
+    seedHead.setAttribute('cy', '207')
+    seedHead.setAttribute('r', '58')
+    seedHead.setAttribute('fill', 'currentColor')
+    const seedBody = document.createElementNS(svgNamespace, 'path')
+    seedBody.setAttribute('d', 'M226 247h60l27 126a22 22 0 0 1-22 27h-70a22 22 0 0 1-22-27l27-126Z')
+    seedBody.setAttribute('fill', 'currentColor')
+    const sprout = document.createElementNS(svgNamespace, 'path')
+    sprout.setAttribute('d', 'M118 138c-18 32-27 67-28 105')
+    sprout.setAttribute('fill', 'none')
+    sprout.setAttribute('stroke', 'var(--gold-soft-bg)')
+    sprout.setAttribute('stroke-width', '26')
+    sprout.setAttribute('stroke-linecap', 'round')
+    sprout.setAttribute('opacity', '.9')
+    icon.append(seedHead, seedBody, sprout)
+    mark.append(icon)
 
     const fill = document.createElement('button')
     fill.className = 'fill'
@@ -202,8 +222,16 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   function positionOverlay() {
     if (!host || !anchorField) return
     const bounds = anchorField.getBoundingClientRect()
-    host.style.top = `${window.scrollY + bounds.bottom + 5}px`
-    host.style.left = `${window.scrollX + bounds.left}px`
+    const gap = 5
+    const margin = 8
+    const width = host.offsetWidth
+    const height = host.offsetHeight
+    let left = bounds.left
+    if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin
+    let top = bounds.bottom + gap
+    if (top + height > window.innerHeight - margin) top = bounds.top - height - gap
+    host.style.top = `${window.scrollY + Math.max(margin, top)}px`
+    host.style.left = `${window.scrollX + Math.max(margin, left)}px`
   }
 
   function renderState() {
@@ -312,7 +340,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
         const result = await options.onFillRequest()
         if (status) status.textContent = fillMessage(result)
         if (recordString(result, 'state') === 'filled') {
-          hideTimer = setTimeout(hideOverlay, 2_200)
+          hideTimer = setTimeout(hideOverlay, 4_000)
         } else {
           capability = undefined
           capabilityAt = 0

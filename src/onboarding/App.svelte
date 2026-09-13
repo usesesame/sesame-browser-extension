@@ -91,11 +91,11 @@
     border: 0;
     border-radius: var(--radius-xl);
     background: var(--surface);
-    box-shadow: var(--shadow-panel);
+    box-shadow: var(--shadow-raised);
   }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; color: var(--text-2); font-weight: 700; }
   .logo { width: 30px; height: 30px; }
-  h1 { margin: 0; color: var(--text-heading); font: 600 30px/1.18 var(--font-display); }
+  h1 { margin: 0; color: var(--text-heading); font: 550 30px/1.18 var(--font-display); font-variation-settings: var(--font-display-settings); }
   .lead { margin: 14px 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
   ul { margin: 22px 0 28px; padding-left: 20px; color: var(--text); font-size: var(--type-2); line-height: 1.75; }
   li::marker { color: var(--text-faint); }
@@ -111,10 +111,10 @@
   }
   button:active { transform: scale(.97); }
   button:disabled:active { transform: none; }
-  .primary { color: var(--on-accent); background: var(--accent); box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 3px 8px rgba(0, 0, 0, .1); }
+  .primary { color: var(--on-accent); background: var(--accent); box-shadow: inset 0 1px 0 var(--button-edge); }
   .primary:hover { background: var(--accent-hover); }
-  .secondary { color: var(--accent-link); background: var(--surface-inset); }
-  .secondary:hover { background: var(--tint); }
+  .secondary { border: 1px solid var(--border-soft); color: var(--accent-link); background: var(--surface-inset); }
+  .secondary:hover { border-color: var(--border-strong); background: var(--tint); }
   button:disabled { cursor: wait; opacity: .65; }
   .success { margin-bottom: 18px; padding: 13px 16px; border-radius: var(--radius-md); color: var(--ok-text); background: var(--ok-bg); font-weight: 600; }
   .status, .shortcut { color: var(--text-muted); font-size: var(--type-2); }

@@ -10,7 +10,7 @@
   <div class="brand">
     <img class="logo" src="icons/32x32.png" alt="" />
     <div class="brand-copy">
-      <span class="brand-name">Sesame</span>
+      <h1 class="brand-name">Sesame</h1>
       {#if subtitle}
         <span class="brand-meta">{subtitle}</span>
       {/if}
@@ -47,7 +47,7 @@
     flex: 0 0 30px;
   }
   .brand-copy { display: grid; gap: 1px; }
-  .brand-name { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-heading); letter-spacing: -.01em; }
+  .brand-name { margin: 0; font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-heading); letter-spacing: -.01em; }
   .brand-meta { color: var(--text-muted); font-size: 11px; }
   .topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--text-muted); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }

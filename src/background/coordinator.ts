@@ -214,7 +214,7 @@ export function createCoordinator(browser: Browser): Coordinator {
 }
 
 // Owns the concurrency guard and the abort wiring for every fill entry point,
-// so a surface cannot ship without both — the way the card path once did.
+// so a surface cannot ship without both, the way the card path once did.
 async function withFillGuard<T>(
   activeControllers: Set<AbortController>,
   externalSignal: AbortSignal | undefined,
