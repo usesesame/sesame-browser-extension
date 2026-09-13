@@ -32,6 +32,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Install the browser test runtime
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Locate the browser test runtime
+        run: |
+          executable="$(node -e 'console.log(require("playwright-core").chromium.executablePath())')"
+          echo "SESAME_BROWSER_TEST_EXECUTABLE=$executable" >> "$GITHUB_ENV"
+
       - name: Require an exact source-version tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |

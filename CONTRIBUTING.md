@@ -27,8 +27,11 @@ npm run ci
 ```
 
 `npm run ci` runs from a fresh clone that has no desktop app, no vault, and no
-native host installed. It needs Node.js 24.20. If it fails before you have
-touched anything, the problem is your toolchain rather than your change.
+native host installed. It needs Node.js 24.20 and a Chromium for the
+real-browser suite. Install one with `npx playwright-core install chromium`,
+and set `SESAME_BROWSER_TEST_EXECUTABLE` if it is not on a standard path. Use
+`npm run release:check` for a browser-free pass. If the gate fails before you
+have touched anything, the problem is your toolchain rather than your change.
 
 Then read:
 
@@ -65,10 +68,9 @@ are in `eslint.config.js`, each with its reason next to it. In short:
 
 | You changed | Run |
 | --- | --- |
-| Anything | `npm run release:check` |
-| `src/content/`, `src/background/`, or `src/permissions/` | `npm run release:check` and `npm run test:browser` |
+| Anything | `npm run ci` |
 | `src/protocol/` or `contracts/` | `npm run ci` and `npm run compat:host` |
-| `manifests/` | `npm run release:check` and load both unpacked builds |
+| `manifests/` | `npm run ci` and load both unpacked builds |
 
 Name the exact commands in the pull request. "Tested" is not an answer.
 

@@ -1,7 +1,8 @@
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import http from 'node:http'
+import https from 'node:https'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type BrowserContext, type Page, type Worker } from 'playwright-core'
@@ -23,6 +24,65 @@ const loginPage = `<!doctype html><html><body>
 <button type="submit" id="signin">Sign in</button>
 </form>
 </body></html>`
+
+const usernameStepPage = `<!doctype html><html><body>
+<form id="login-form" action="/signin" method="post">
+<h1>Sign in</h1>
+<label for="username">Username</label>
+<input id="username" name="username" type="email" autocomplete="username" required>
+<button type="submit" id="signin">Next</button>
+</form>
+</body></html>`
+
+const passwordStepPage = `<!doctype html><html><body>
+<form id="login-form" action="/signin" method="post">
+<h1>Enter your password</h1>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit" id="signin">Sign in</button>
+</form>
+</body></html>`
+
+const identityPage = `<!doctype html><html><body>
+<form id="checkout">
+<h1>Contact details</h1>
+<label for="name">Full name</label>
+<input id="name" name="name" type="text" autocomplete="name">
+<label for="email">Email</label>
+<input id="email" name="email" type="email" autocomplete="email">
+<label for="phone">Phone</label>
+<input id="phone" name="phone" type="tel" autocomplete="tel">
+<label for="postal">Postal code</label>
+<input id="postal" name="postal" type="text" autocomplete="postal-code">
+</form>
+</body></html>`
+
+const cardPage = `<!doctype html><html><body>
+<form id="payment">
+<h1>Payment</h1>
+<label for="cardname">Name on card</label>
+<input id="cardname" name="cardname" type="text" autocomplete="cc-name">
+<label for="cardnumber">Card number</label>
+<input id="cardnumber" name="cardnumber" type="text" autocomplete="cc-number">
+<label for="expiry">Expiry</label>
+<input id="expiry" name="expiry" type="text" autocomplete="cc-exp">
+<label for="cvc">Security code</label>
+<input id="cvc" name="cvc" type="text" autocomplete="cc-csc">
+</form>
+</body></html>`
+
+function pageBody(path: string): string {
+  return path === '/username' ? usernameStepPage
+    : path === '/password' ? passwordStepPage
+      : path === '/identity' ? identityPage
+        : path === '/card' ? cardPage : loginPage
+}
+
+function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
+  const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
+  response.writeHead(200, { 'content-type': 'text/html' })
+  response.end(pageBody(path))
+}
 
 function findChromiumExecutable(): string {
   const configured = process.env.SESAME_BROWSER_TEST_EXECUTABLE
@@ -55,10 +115,7 @@ function findChromiumExecutable(): string {
 
 function startServer(): Promise<{ server: http.Server; origin: string }> {
   return new Promise((resolveServer, rejectServer) => {
-    const server = http.createServer((_request, response) => {
-      response.writeHead(200, { 'content-type': 'text/html' })
-      response.end(loginPage)
-    })
+    const server = http.createServer(handlePage)
     server.once('error', rejectServer)
     server.listen(0, '127.0.0.1', () => {
       const address = server.address()
@@ -71,17 +128,52 @@ function startServer(): Promise<{ server: http.Server; origin: string }> {
   })
 }
 
+function startTlsServer(directory: string): Promise<{ server: https.Server; origin: string }> {
+  execFileSync('openssl', [
+    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', join(directory, 'key.pem'),
+    '-out', join(directory, 'cert.pem'),
+    '-days', '2',
+    '-subj', '/CN=127.0.0.1',
+    '-addext', 'subjectAltName=IP:127.0.0.1',
+  ], { stdio: 'ignore' })
+  return new Promise((resolveServer, rejectServer) => {
+    const server = https.createServer({
+      key: readFileSync(join(directory, 'key.pem')),
+      cert: readFileSync(join(directory, 'cert.pem')),
+    }, handlePage)
+    server.once('error', rejectServer)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (address === null || typeof address === 'string') {
+        rejectServer(new Error('unexpected listen address'))
+        return
+      }
+      resolveServer({ server, origin: `https://127.0.0.1:${address.port}` })
+    })
+  })
+}
+
 let context!: BrowserContext
 let worker!: Worker
 let page!: Page
 let primaryServer!: http.Server
 let secondaryServer!: http.Server
+let tlsServer!: https.Server
 let primaryOrigin = ''
 let secondaryOrigin = ''
+let tlsOrigin = ''
+let tlsDirectory = ''
 let profileDir = ''
 
 async function openFixture(path = '/login'): Promise<Page> {
   await page.goto(`${primaryOrigin}${path}`)
+  await injectBridge(page)
+  return page
+}
+
+async function openTlsFixture(path: string): Promise<Page> {
+  await page.goto(`${tlsOrigin}${path}`)
   await injectBridge(page)
   return page
 }
@@ -117,6 +209,136 @@ async function callBridge(target: Page, name: string, ...args: unknown[]): Promi
   }, [url, name, args])
 }
 
+async function findTabId(url: string): Promise<number> {
+  return worker.evaluate(async (expected) => {
+    const tabs = await chrome.tabs.query({})
+    return tabs.find((tab) => tab.url === expected)?.id ?? -1
+  }, url)
+}
+
+async function openReadyPopup(extensionId: string, tabId: number, url: string): Promise<Page> {
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+  await popup.evaluate(({ tabId: expectedTabId, url: expectedUrl }) => {
+    const runtime = chrome.runtime as unknown as {
+      sendMessage: (message: { type?: string }) => Promise<unknown>
+    }
+    const tabs = chrome.tabs as unknown as { query: unknown }
+    const original = runtime.sendMessage.bind(chrome.runtime)
+    runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+      ? {
+          state: 'ready',
+          title: 'Connected',
+          message: 'Ready to fill from this browser.',
+          capabilities: { desktopAvailable: true, locked: false, fillAvailable: true },
+          diagnostic: { code: 'connected' },
+        }
+      : original(message)
+    tabs.query = async () => [{ id: expectedTabId, url: expectedUrl }]
+  }, { tabId, url })
+  return popup
+}
+
+interface CdpNode {
+  nodeId: number
+  parentId?: number
+  nodeName: string
+  nodeValue?: string
+  shadowRoots?: CdpNode[]
+  children?: CdpNode[]
+  contentDocument?: CdpNode
+}
+
+function findTextNode(node: CdpNode, text: string): CdpNode | undefined {
+  if (node.nodeName === '#text' && node.nodeValue === text) return node
+  for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
+    const found = findTextNode(child, text)
+    if (found) return found
+  }
+  return node.contentDocument ? findTextNode(node.contentDocument, text) : undefined
+}
+
+async function clickClosedShadowText(target: Page, text: string): Promise<void> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const textNode = findTextNode(root, text)
+    if (!textNode?.parentId) throw new Error(`closed shadow text not found: ${text}`)
+    const { object } = await cdp.send('DOM.resolveNode', { nodeId: textNode.parentId }) as {
+      object: { objectId?: string }
+    }
+    if (!object.objectId) throw new Error(`closed shadow node did not resolve: ${text}`)
+    await cdp.send('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: 'function () { this.click() }',
+      returnByValue: true,
+    })
+  } finally {
+    await cdp.detach()
+  }
+}
+
+async function mockNativeHostInWorker(): Promise<void> {
+  await worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+    const runtime = chrome.runtime as unknown as { connectNative: unknown }
+    const original = runtime.connectNative
+    const previous = target.__sesameTestRestore
+    target.__sesameTestRestore = () => {
+      runtime.connectNative = original
+      previous?.()
+    }
+    runtime.connectNative = () => {
+      const messageListeners: Array<(message: unknown) => void> = []
+      const disconnectListeners: Array<() => void> = []
+      return {
+        name: 'app.usesesame.browser',
+        postMessage(request: { type?: string; requestId?: string; version?: number }) {
+          queueMicrotask(() => {
+            const base = { version: request?.version ?? 1, requestId: request?.requestId }
+            if (request?.type === 'capabilities') {
+              messageListeners.forEach((listener) => listener({
+                ...base,
+                type: 'capabilities',
+                installed: true,
+                desktopAvailable: true,
+                locked: false,
+                fillAvailable: true,
+              }))
+            } else if (request?.type === 'fill') {
+              messageListeners.forEach((listener) => listener({
+                ...base,
+                type: 'fill',
+                username: 'jamie@example.test',
+                password: 'fictional-inline-pass',
+              }))
+            } else {
+              disconnectListeners.forEach((listener) => listener())
+            }
+          })
+        },
+        disconnect() {},
+        onMessage: {
+          addListener: (callback: (message: unknown) => void) => { messageListeners.push(callback) },
+          removeListener: () => {},
+        },
+        onDisconnect: {
+          addListener: (callback: () => void) => { disconnectListeners.push(callback) },
+          removeListener: () => {},
+        },
+      }
+    }
+  })
+}
+
+async function restoreWorkerMocks(): Promise<void> {
+  await worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+    target.__sesameTestRestore?.()
+    delete target.__sesameTestRestore
+  })
+}
+
 beforeAll(async () => {
   if (!existsSync(extensionDir)) {
     throw new Error('dist/integration is missing: run npm run build:integration first')
@@ -127,6 +349,10 @@ beforeAll(async () => {
   secondaryServer = secondary.server
   primaryOrigin = primary.origin
   secondaryOrigin = secondary.origin
+  tlsDirectory = mkdtempSync(join(tmpdir(), 'sesame-browser-tls-'))
+  const tls = await startTlsServer(tlsDirectory)
+  tlsServer = tls.server
+  tlsOrigin = tls.origin
   profileDir = mkdtempSync(join(tmpdir(), 'sesame-browser-tests-'))
   context = await chromium.launchPersistentContext(profileDir, {
     executablePath: findChromiumExecutable(),
@@ -134,6 +360,7 @@ beforeAll(async () => {
       '--headless=new',
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      '--ignore-certificate-errors',
       `--disable-extensions-except=${extensionDir}`,
       `--load-extension=${extensionDir}`,
     ],
@@ -157,7 +384,9 @@ afterAll(async () => {
   await context?.close()
   primaryServer?.close()
   secondaryServer?.close()
+  tlsServer?.close()
   if (profileDir) rmSync(profileDir, { recursive: true, force: true })
+  if (tlsDirectory) rmSync(tlsDirectory, { recursive: true, force: true })
 })
 
 describe('extension browser suite', () => {
@@ -272,6 +501,165 @@ describe('extension browser suite', () => {
     expect(new URL(current.url()).pathname).toBe('/login')
   })
 
+  it('fills only the username on a username-only step', async () => {
+    const current = await openFixture('/username')
+    const prepared = await callBridge(
+      current,
+      'sesameFillLoginSurface',
+      primaryOrigin,
+      documentToken,
+      null,
+      'prepare',
+    )
+    expect(prepared).toMatchObject({ ok: true, usernameFilled: true, passwordFilled: false })
+    const filled = await callBridge(
+      current,
+      'sesameFillLoginSurface',
+      primaryOrigin,
+      documentToken,
+      approved,
+      'fill',
+    )
+    expect(filled).toMatchObject({ ok: true, usernameFilled: true, passwordFilled: false })
+    const values = await current.evaluate(() => ({
+      username: (document.getElementById('username') as HTMLInputElement).value,
+      inputs: Array.from(document.querySelectorAll('input')).map((input) => input.value),
+      text: document.body.innerText,
+    }))
+    expect(values.username).toBe(approved.username)
+    expect(values.inputs).not.toContain(approved.password)
+    expect(values.text).not.toContain(approved.password)
+  })
+
+  it('fills only the password on a password-only step', async () => {
+    const current = await openFixture('/password')
+    const prepared = await callBridge(
+      current,
+      'sesameFillLoginSurface',
+      primaryOrigin,
+      documentToken,
+      null,
+      'prepare',
+    )
+    expect(prepared).toMatchObject({ ok: true, usernameFilled: false, passwordFilled: true })
+    const filled = await callBridge(
+      current,
+      'sesameFillLoginSurface',
+      primaryOrigin,
+      documentToken,
+      approved,
+      'fill',
+    )
+    expect(filled).toMatchObject({ ok: true, usernameFilled: false, passwordFilled: true })
+    const values = await current.evaluate(() => ({
+      password: (document.getElementById('password') as HTMLInputElement).value,
+      inputs: Array.from(document.querySelectorAll('input')).map((input) => input.value),
+      text: document.body.innerText,
+    }))
+    expect(values.password).toBe(approved.password)
+    expect(values.inputs).not.toContain(approved.username)
+    expect(values.text).not.toContain(approved.username)
+  })
+
+  it('fills only the approved identity fields after a matching prepare', async () => {
+    const approvedIdentity = {
+      fullName: 'Jamie Example',
+      email: 'jamie@example.test',
+      phone: '+31 20 555 0100',
+    }
+    const current = await openFixture('/identity')
+    const prepared = await callBridge(
+      current,
+      'sesameFillIdentitySurface',
+      primaryOrigin,
+      documentToken,
+      null,
+      'prepare',
+    )
+    expect(prepared).toMatchObject({ ok: true })
+    expect((prepared as { filledFields: string[] }).filledFields)
+      .toEqual(expect.arrayContaining(['fullName', 'email', 'phone']))
+    const filled = await callBridge(
+      current,
+      'sesameFillIdentitySurface',
+      primaryOrigin,
+      documentToken,
+      approvedIdentity,
+      'fill',
+    )
+    expect(filled).toMatchObject({ ok: true })
+    expect((filled as { filledFields: string[] }).filledFields)
+      .toEqual(expect.arrayContaining(['fullName', 'email', 'phone']))
+    const values = await current.evaluate(() => ({
+      fullName: (document.getElementById('name') as HTMLInputElement).value,
+      email: (document.getElementById('email') as HTMLInputElement).value,
+      phone: (document.getElementById('phone') as HTMLInputElement).value,
+      postalCode: (document.getElementById('postal') as HTMLInputElement).value,
+    }))
+    expect(values).toEqual({
+      fullName: approvedIdentity.fullName,
+      email: approvedIdentity.email,
+      phone: approvedIdentity.phone,
+      postalCode: '',
+    })
+  })
+
+  it('refuses card fill on an insecure page', async () => {
+    const current = await openFixture()
+    const prepared = await callBridge(
+      current,
+      'sesameFillCardSurface',
+      primaryOrigin,
+      documentToken,
+      null,
+      'prepare',
+    )
+    expect(prepared).toMatchObject({ ok: false, code: 'insecure-page' })
+  })
+
+  it('fills only the approved card fields on a secure page', async () => {
+    const approvedCard = {
+      cardholderName: 'Jamie Example',
+      number: '4242 4242 4242 4242',
+      expiryMonth: '12',
+      expiryYear: '2030',
+      securityCode: '123',
+    }
+    const current = await openTlsFixture('/card')
+    const prepared = await callBridge(
+      current,
+      'sesameFillCardSurface',
+      tlsOrigin,
+      documentToken,
+      null,
+      'prepare',
+    )
+    expect(prepared).toMatchObject({ ok: true })
+    expect((prepared as { filledFields: string[] }).filledFields)
+      .toEqual(expect.arrayContaining(['cardholderName', 'number', 'securityCode']))
+    const filled = await callBridge(
+      current,
+      'sesameFillCardSurface',
+      tlsOrigin,
+      documentToken,
+      approvedCard,
+      'fill',
+    )
+    expect(filled).toMatchObject({ ok: true })
+    const values = await current.evaluate(() => ({
+      cardholderName: (document.getElementById('cardname') as HTMLInputElement).value,
+      number: (document.getElementById('cardnumber') as HTMLInputElement).value,
+      expiry: (document.getElementById('expiry') as HTMLInputElement).value,
+      securityCode: (document.getElementById('cvc') as HTMLInputElement).value,
+    }))
+    expect(values).toEqual({
+      cardholderName: approvedCard.cardholderName,
+      number: approvedCard.number,
+      expiry: '12/2030',
+      securityCode: approvedCard.securityCode,
+    })
+  })
+
   it('detaches the inline overlay when the site is paused', async () => {
     const current = await openFixture()
     await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
@@ -306,6 +694,11 @@ describe('extension browser suite', () => {
       async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') === null),
       { timeout: 10000 },
     ).toBe(true)
+    await worker.evaluate(async () => {
+      const stored = await chrome.storage.local.get('inlineSettingsV1')
+      const settings = (stored['inlineSettingsV1'] as Record<string, unknown> | undefined) ?? {}
+      await chrome.storage.local.set({ inlineSettingsV1: { ...settings, pausedOrigins: [] } })
+    })
   })
 
   it('closes the fill port for callers other than the popup', async () => {
@@ -343,6 +736,45 @@ describe('extension browser suite', () => {
     ).toBe(true)
     await popup.close()
   }, 15000)
+
+  it('shows optional website access without implying the desktop is ready', async () => {
+    const extensionId = new URL(worker.url()).host
+    const popup = await context.newPage()
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+    await expect.poll(
+      async () => popup.evaluate(() => document.body.innerText),
+      { timeout: 10000 },
+    ).toMatch(/Sesame desktop app not found/)
+    await popup.evaluate(() => {
+      const permissions = chrome.permissions as { getAll: () => Promise<{ origins?: string[] }> }
+      permissions.getAll = async () => ({ origins: ['https://*/*'] })
+    })
+    await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+    await expect.poll(
+      async () => popup.evaluate(() => document.body.innerText),
+      { timeout: 5000 },
+    ).toMatch(/Available on login fields/)
+    expect(await popup.evaluate(() => document.body.innerText)).toMatch(/Sesame desktop app not found/)
+    await popup.evaluate(() => {
+      const permissions = chrome.permissions as {
+        getAll: () => Promise<{ origins?: string[] }>
+        request: (details: { origins: string[] }) => Promise<boolean>
+      }
+      permissions.getAll = async () => ({ origins: [] })
+      permissions.request = async () => false
+    })
+    await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+    await expect.poll(
+      async () => popup.getByRole('button', { name: 'Enable', exact: true }).isVisible(),
+      { timeout: 5000 },
+    ).toBe(true)
+    await popup.getByRole('button', { name: 'Enable', exact: true }).press('Enter')
+    await expect.poll(
+      async () => popup.evaluate(() => document.body.innerText),
+      { timeout: 5000 },
+    ).toMatch(/Website access was not granted/)
+    await popup.close()
+  }, 20000)
 
   it('does not claim readiness in onboarding without the desktop app', async () => {
     const extensionId = new URL(worker.url()).host
@@ -456,6 +888,170 @@ describe('extension browser suite', () => {
         { timeout: 5000 },
       ).toBe(true)
       await popup.close()
+    }
+  }, 30000)
+
+  it('reports a desktop decline when the fill approval is cancelled', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await worker.evaluate(({ tabId: expectedTabId, url }) => {
+      const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+      const runtime = chrome.runtime as unknown as { connectNative: unknown }
+      const tabs = chrome.tabs as unknown as { query: unknown }
+      const originalConnect = runtime.connectNative
+      const originalQuery = tabs.query
+      target.__sesameTestRestore = () => {
+        runtime.connectNative = originalConnect
+        tabs.query = originalQuery
+      }
+      runtime.connectNative = () => {
+        const messageListeners: Array<(message: unknown) => void> = []
+        const disconnectListeners: Array<() => void> = []
+        return {
+          name: 'app.usesesame.browser',
+          postMessage(request: { requestId?: string; version?: number }) {
+            queueMicrotask(() => {
+              messageListeners.forEach((listener) => listener({
+                version: request?.version ?? 1,
+                type: 'fill-unavailable',
+                requestId: request?.requestId,
+                reason: 'approvalDeclined',
+              }))
+            })
+          },
+          disconnect() {},
+          onMessage: {
+            addListener: (callback: (message: unknown) => void) => { messageListeners.push(callback) },
+            removeListener: () => {},
+          },
+          onDisconnect: {
+            addListener: (callback: () => void) => { disconnectListeners.push(callback) },
+            removeListener: () => {},
+          },
+        }
+      }
+      tabs.query = async () => [{ id: expectedTabId, url }]
+    }, { tabId, url: fixtureUrl })
+
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/declined in Sesame/)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await worker.evaluate(() => {
+        const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+        target.__sesameTestRestore?.()
+        delete target.__sesameTestRestore
+      })
+    }
+  }, 30000)
+
+  it('fails closed when the fill port closes before an answer', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await worker.evaluate(({ tabId: expectedTabId, url }) => {
+      const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+      const tabs = chrome.tabs as unknown as { query: unknown }
+      const originalQuery = tabs.query
+      target.__sesameTestRestore = () => { tabs.query = originalQuery }
+      tabs.query = async () => [{ id: expectedTabId, url }]
+    }, { tabId, url: fixtureUrl })
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.evaluate(() => {
+        const runtime = chrome.runtime as unknown as { connect: unknown }
+        runtime.connect = () => {
+          const disconnectListeners: Array<() => void> = []
+          return {
+            name: 'sesame:fill',
+            postMessage() {
+              queueMicrotask(() => disconnectListeners.forEach((listener) => listener()))
+            },
+            disconnect() {},
+            onMessage: { addListener: () => {}, removeListener: () => {} },
+            onDisconnect: {
+              addListener: (callback: () => void) => { disconnectListeners.push(callback) },
+              removeListener: () => {},
+            },
+          }
+        }
+      })
+      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/desktop connection closed/)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await worker.evaluate(() => {
+        const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+        target.__sesameTestRestore?.()
+        delete target.__sesameTestRestore
+      })
+    }
+  }, 30000)
+
+  it('fills from the inline control on the page', async () => {
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await worker.evaluate(({ tabId: expectedTabId, url }) => {
+      const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+      const tabs = chrome.tabs as unknown as { query: unknown }
+      const originalQuery = tabs.query
+      const previous = target.__sesameTestRestore
+      target.__sesameTestRestore = () => {
+        tabs.query = originalQuery
+        previous?.()
+      }
+      tabs.query = async () => [{ id: expectedTabId, url }]
+    }, { tabId, url: fixtureUrl })
+    await mockNativeHostInWorker()
+    try {
+      const extensionId = new URL(worker.url()).host
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await expect.poll(
+        async () => current.evaluate(() => ({
+          username: (document.getElementById('username') as HTMLInputElement).value,
+          password: (document.getElementById('password') as HTMLInputElement).value,
+        })),
+        { timeout: 15000 },
+      ).toEqual({ username: 'jamie@example.test', password: 'fictional-inline-pass' })
+    } finally {
+      await restoreWorkerMocks()
     }
   }, 30000)
 })
