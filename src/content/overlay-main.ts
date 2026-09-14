@@ -3,7 +3,6 @@ import './main'
 type OverlayApi = typeof globalThis & {
   sesameAttachInlineButton?: () => (() => void) | undefined
   sesameDetachInlineButton?: (() => void) | undefined
-  sesameEnsureSignupCapture?: () => (() => void) | undefined
   sesameOverlayLoadGeneration?: number
 }
 
@@ -20,7 +19,6 @@ async function attach() {
   }
   api.sesameDetachInlineButton?.()
   api.sesameDetachInlineButton = api.sesameAttachInlineButton?.()
-  api.sesameEnsureSignupCapture?.()
 }
 
 if (document.readyState === 'loading') {
