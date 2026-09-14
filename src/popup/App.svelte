@@ -8,6 +8,9 @@
   import { copyTemporarily, type TemporaryCopyHandle } from '../content/temporary-copy'
   import { normalizeFillOrigin } from '../protocol/native'
   import {
+    CHECKING_PRESENTATION, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
+  } from '../protocol/connection-presentation'
+  import {
     GLOBAL_HTTPS_PATTERN, inlinePermissionMode, loadInlineSettings, originPattern, setSitePaused,
   } from '../permissions/inline-access'
   import Header from './components/Header.svelte'
@@ -18,22 +21,6 @@
   const RECONNECT_DELAY_MS = 4_000
   const POPUP_RESPONSE_TIMEOUT_MS = 9_000
   const REGISTRATION_EXPIRY_MS = 120_000
-
-  const CONNECTION_MESSAGES: Record<string, [string, string]> = {
-    'host-not-found': ['Desktop helper not found', 'Open or restart Sesame. This extension will reconnect automatically.'],
-    'host-forbidden': ['Connection needs a refresh', 'Reload the unpacked extension once, then restart Sesame.'],
-    'host-exited': ['Desktop helper stopped', 'Keep Sesame open. We will try the connection again.'],
-    'host-communication-failed': ['Connection was interrupted', 'Keep Sesame open. We will try the connection again.'],
-    'host-disconnected': ['Desktop helper disconnected', 'Keep Sesame open. We will try the connection again.'],
-    'protocol-mismatch': ['Update needed', 'The desktop app and extension use different connection versions.'],
-    'request-mismatch': ['Response could not be verified', 'Reload the extension and try once more.'],
-    'unsafe-response': ['Response was blocked', 'Sesame rejected an unexpected response to protect your vault.'],
-    'invalid-response': ['Desktop response was not understood', 'Restart Sesame and try again.'],
-    'host-rejected-request': ['Desktop helper declined the check', 'Update or restart Sesame and try again.'],
-    'host-unavailable': ['Desktop helper is unavailable', 'Open or restart Sesame.'],
-    'timeout': ['Sesame is taking too long', 'Keep the desktop app open. We will retry automatically.'],
-    'native-runtime-error': ['Browser connection failed', 'Reload this extension and try again.'],
-  }
 
   const FILL_MESSAGES: Record<string, string> = {
     'approval-declined': 'Nothing was filled. The request was declined in Sesame.',
@@ -110,6 +97,7 @@
   let inlineFeedback = ''
   let desktopState = 'checking'
   let desktopFillAvailable = false
+  let connection: ConnectionPresentation = CHECKING_PRESENTATION
   let checkingDesktop = false
   let refreshing = false
   let reconnectScheduled = false
@@ -153,10 +141,11 @@
     } catch {
       desktopState = 'unavailable'
       desktopFillAvailable = false
+      connection = presentConnection('extension-response-timeout')
       setUnavailable(
         'extension-response-timeout',
-        automatic ? 'Still looking for Sesame' : 'Extension did not answer',
-        'Keep Sesame open. This window will try the private connection again.',
+        connection.title,
+        connection.message,
         { code: 'extension-response-timeout', checkedAt: new Date().toISOString(), extensionVersion: chrome.runtime.getManifest().version },
       )
       scheduleReconnect()
@@ -170,18 +159,23 @@
     desktopFillAvailable = desktopState === 'ready' && response?.capabilities?.fillAvailable === true
     if (response?.diagnostic?.code && response.diagnostic.code !== 'connected') {
       const code = response.diagnostic.code as string
-      const [title, message] = CONNECTION_MESSAGES[code] ?? CONNECTION_MESSAGES['native-runtime-error']
-      setUnavailable(code, title, message, response.diagnostic)
+      connection = presentConnection(code)
+      setUnavailable(code, connection.title, connection.message, response.diagnostic)
       return
     }
     if (desktopState === 'desktop-offline') {
-      setDesktopOffline(response.title, response.message)
+      connection = presentConnection('desktop-unavailable')
+      setDesktopOffline(connection.title, connection.message)
     } else if (desktopState === 'locked') {
-      setLocked(response.title, response.message)
+      connection = presentConnection('vault-locked')
+      setLocked(connection.title, connection.message)
     } else if (desktopState === 'ready') {
+      connection = presentConnection('connected')
       setReady(desktopFillAvailable, false)
     } else {
-      setUnavailable(response?.diagnostic?.code ?? 'extension-error', response?.title ?? 'Desktop connection unavailable', response?.message ?? 'Reload this extension and try again.', response?.diagnostic)
+      const code = response?.diagnostic?.code ?? 'extension-error'
+      connection = presentConnection(code)
+      setUnavailable(code, connection.title, connection.message, response?.diagnostic)
     }
   }
 
@@ -349,6 +343,10 @@
     } finally {
       desktopOpening = false
     }
+  }
+
+  function openDesktopDownload() {
+    void chrome.tabs.create({ url: DESKTOP_RELEASES_URL })
   }
 
   async function fill() {
@@ -588,14 +586,18 @@
     {/if}
   {/if}
   {#if desktopNeedsOpening}
-    <FillButton
-      onClick={openDesktop}
-      disabled={checkingDesktop}
-      loading={desktopOpening}
-      loadingLabel={desktopState === 'locked' ? 'Opening Sesame…' : 'Starting Sesame…'}
-      label={desktopState === 'locked' ? 'Unlock Sesame' : 'Open Sesame'}
-      secondary={page.kind === 'registration'}
-    />
+    {#if connection.action === 'install' || connection.action === 'update'}
+      <FillButton onClick={openDesktopDownload} label={connection.actionLabel} secondary={page.kind === 'registration'} />
+    {:else if connection.action === 'open-desktop'}
+      <FillButton
+        onClick={openDesktop}
+        disabled={checkingDesktop}
+        loading={desktopOpening}
+        loadingLabel={desktopState === 'locked' ? 'Opening Sesame…' : 'Starting Sesame…'}
+        label={connection.actionLabel}
+        secondary={page.kind === 'registration'}
+      />
+    {/if}
   {:else if pageFillable}
     <FillButton onClick={fill} disabled={desktopState !== 'ready' || !desktopFillAvailable} loading={fillWorking} label={page.kind === 'username' ? 'Fill username' : 'Fill login'} />
   {/if}

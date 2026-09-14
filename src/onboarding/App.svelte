@@ -1,27 +1,100 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { dismissOnboarding, GLOBAL_HTTPS_PATTERN } from '../permissions/inline-access'
+  import { DESKTOP_RELEASES_URL } from '../protocol/connection-presentation'
+  import { desktopStateFromResponse, onboardingView, type DesktopState, type PermissionState } from './readiness'
 
-  let enabled = false
+  const CONNECTION_TIMEOUT_MS = 9_000
+  const POPUP_HINT = 'The popup and the keyboard shortcut keep working without website access.'
+
+  let permission: PermissionState = 'not-granted'
+  let desktop: DesktopState = { status: 'checking' }
   let working = false
+  let checking = false
+  let opening = false
   let status = ''
 
-  onMount(async () => {
-    enabled = await chrome.permissions.contains({ origins: [GLOBAL_HTTPS_PATTERN] })
+  $: view = onboardingView(permission, desktop)
+
+  onMount(() => {
+    void initialize()
+    const recheck = () => {
+      if (desktop.status !== 'ready') void checkDesktop(true)
+    }
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
   })
+
+  async function initialize() {
+    try {
+      const granted = await chrome.permissions.contains({ origins: [GLOBAL_HTTPS_PATTERN] })
+      permission = granted ? 'granted' : 'not-granted'
+    } catch {
+      permission = 'not-granted'
+    }
+    await checkDesktop(true)
+  }
+
+  async function checkDesktop(force: boolean) {
+    if (checking) return
+    checking = true
+    try {
+      const response = await withTimeout(
+        chrome.runtime.sendMessage({ type: 'sesame:connect', force }),
+        CONNECTION_TIMEOUT_MS,
+      )
+      desktop = desktopStateFromResponse(response)
+    } catch {
+      desktop = { status: 'blocked', code: 'extension-response-timeout' }
+    } finally {
+      checking = false
+    }
+  }
+
+  async function retry() {
+    status = ''
+    await checkDesktop(true)
+    status = desktop.status === 'ready'
+      ? 'Sesame is connected.'
+      : desktop.status === 'locked'
+        ? 'Sesame is locked. Unlock it in the desktop app, then check again.'
+        : 'Sesame is still not connected. Install or open the desktop app, then check again.'
+  }
+
+  async function openDesktop() {
+    if (opening) return
+    opening = true
+    status = ''
+    try {
+      const result = await withTimeout(
+        chrome.runtime.sendMessage({ type: 'sesame:open-desktop' }),
+        CONNECTION_TIMEOUT_MS,
+      )
+      status = result?.state === 'opened'
+        ? 'Sesame is opening. Unlock it, then check again.'
+        : 'Sesame could not be opened. Start the desktop app once, then check again.'
+    } catch {
+      status = 'Sesame could not be opened. Start the desktop app once, then check again.'
+    } finally {
+      opening = false
+    }
+  }
 
   async function enableEverywhere() {
     if (working) return
     working = true
     status = ''
     try {
-      enabled = await chrome.permissions.request({ origins: [GLOBAL_HTTPS_PATTERN] })
-      if (enabled) {
-        await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
-        status = 'Sesame is ready on HTTPS login fields.'
-      } else {
+      const granted = await chrome.permissions.request({ origins: [GLOBAL_HTTPS_PATTERN] })
+      if (!granted) {
         status = 'Website access was not granted. You can enable it later from the Sesame popup.'
+        return
       }
+      permission = 'granted'
+      await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
+      status = desktop.status === 'ready'
+        ? 'Sesame is ready on HTTPS login fields.'
+        : 'Website access is on. Sesame starts filling once the desktop app is connected.'
     } catch {
       status = 'The browser could not change website access.'
     } finally {
@@ -33,6 +106,16 @@
     await dismissOnboarding()
     window.close()
   }
+
+  function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('extension response timeout')), timeoutMs)
+      promise.then(
+        (value) => { clearTimeout(timer); resolve(value) },
+        (error) => { clearTimeout(timer); reject(error) },
+      )
+    })
+  }
 </script>
 
 <main>
@@ -42,14 +125,33 @@
       <span>Sesame</span>
     </div>
 
-    <h1>{enabled ? 'Sesame is ready' : 'Welcome to Sesame'}</h1>
-    <p class="lead">
-      {#if enabled}
-        Focus a sign-in field on any HTTPS site and the Sesame fill control appears next to it.
-      {:else}
-        One permission is left. Allow Sesame on HTTPS sites and its fill control will appear when you focus a sign-in or registration field.
+    <h1>{view.headline}</h1>
+    <p class="lead">{view.lead}</p>
+
+    {#if view.ready}
+      <div class="success" role="status">Sesame is enabled on HTTPS websites.</div>
+      <button class="primary" type="button" on:click={finish}>Close this tab</button>
+    {:else}
+      <section class="connection" class:ok={view.connection.state === 'ready'} aria-live="polite">
+        <strong>{view.connection.title}</strong>
+        {#if view.connection.message}<p>{view.connection.message}</p>{/if}
+      </section>
+
+      {#if view.showConnectionAction}
+        <div class="actions">
+          {#if view.connection.action === 'install' || view.connection.action === 'update'}
+            <a class="primary" href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">{view.connection.actionLabel}</a>
+          {:else if view.connection.action === 'open-desktop'}
+            <button class="primary" type="button" disabled={opening} on:click={openDesktop}>
+              {opening ? 'Opening…' : view.connection.actionLabel}
+            </button>
+          {/if}
+          <button class="secondary" type="button" disabled={checking} on:click={retry}>
+            {checking ? 'Checking…' : 'Check again'}
+          </button>
+        </div>
       {/if}
-    </p>
+    {/if}
 
     <ul>
       <li>Existing field values are never read.</li>
@@ -57,19 +159,24 @@
       <li>Sesame never submits or advances a form.</li>
     </ul>
 
-    {#if enabled}
-      <div class="success" role="status">Sesame is enabled on HTTPS websites.</div>
-      <button class="primary" type="button" on:click={finish}>Close this tab</button>
-    {:else}
-      <div class="actions">
+    {#if view.showPermissionStep}
+      <section class="permission">
+        <div>
+          <strong>Show Sesame on login fields</strong>
+          <p>Allow Sesame on HTTPS sites. The fill control appears when you focus a sign-in or registration field.</p>
+        </div>
         <button class="primary" type="button" disabled={working} on:click={enableEverywhere}>
           {working ? 'Waiting for the browser…' : 'Enable on websites'}
         </button>
-        <button class="secondary" type="button" on:click={finish}>Not now</button>
-      </div>
+      </section>
     {/if}
+
+    {#if !view.ready}
+      <button class="secondary not-now" type="button" on:click={finish}>Not now</button>
+    {/if}
+
     {#if status}<p class="status" role="status">{status}</p>{/if}
-    <p class="shortcut">Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> to fill without opening the popup.</p>
+    <p class="shortcut">{POPUP_HINT} Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> to fill without opening the popup.</p>
   </div>
 </main>
 
@@ -99,8 +206,13 @@
   .lead { margin: 14px 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
   ul { margin: 22px 0 28px; padding-left: 20px; color: var(--text); font-size: var(--type-2); line-height: 1.75; }
   li::marker { color: var(--text-faint); }
-  .actions { display: flex; align-items: center; gap: 10px; }
-  button {
+  .connection { margin: 18px 0; padding: 13px 16px; border-radius: var(--radius-md); background: var(--warn-bg); }
+  .connection.ok { background: var(--ok-bg); }
+  .connection strong { display: block; color: var(--warn-text); font-size: var(--type-2); }
+  .connection.ok strong { color: var(--ok-text); }
+  .connection p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
+  button, a.primary {
     border: 0;
     border-radius: var(--radius-md);
     padding: 13px 18px;
@@ -109,13 +221,18 @@
     cursor: pointer;
     transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
   }
-  button:active { transform: scale(.97); }
+  button:active, a.primary:active { transform: scale(.97); }
   button:disabled:active { transform: none; }
+  a.primary { display: inline-block; text-decoration: none; }
   .primary { color: var(--on-accent); background: var(--accent); box-shadow: inset 0 1px 0 var(--button-edge); }
   .primary:hover { background: var(--accent-hover); }
   .secondary { border: 1px solid var(--border-soft); color: var(--accent-link); background: var(--surface-inset); }
   .secondary:hover { border-color: var(--border-strong); background: var(--tint); }
   button:disabled { cursor: wait; opacity: .65; }
+  .permission { display: grid; gap: 10px; margin: 0 0 22px; padding: 13px 16px; border-radius: var(--radius-md); background: var(--surface-inset); }
+  .permission strong { font-size: var(--type-2); }
+  .permission p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .not-now { margin-top: 4px; }
   .success { margin-bottom: 18px; padding: 13px 16px; border-radius: var(--radius-md); color: var(--ok-text); background: var(--ok-bg); font-weight: 600; }
   .status, .shortcut { color: var(--text-muted); font-size: var(--type-2); }
   .status { margin-top: 12px; }
