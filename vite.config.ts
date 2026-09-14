@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
             readFileSync(resolve(import.meta.dirname, 'manifests', manifestName), 'utf8')
           )
           if (mode === 'integration') {
-            manifest.host_permissions = ['http://127.0.0.1/*', 'http://localhost/*']
+            manifest.host_permissions = ['http://127.0.0.1/*', 'https://127.0.0.1/*', 'http://localhost/*']
           }
           this.emitFile({
             type: 'asset',

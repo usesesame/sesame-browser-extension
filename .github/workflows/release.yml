@@ -32,6 +32,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Install the browser test runtime
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Locate the browser test runtime
+        run: |
+          executable="$(node -e 'console.log(require("playwright-core").chromium.executablePath())')"
+          echo "SESAME_BROWSER_TEST_EXECUTABLE=$executable" >> "$GITHUB_ENV"
+
       - name: Require an exact source-version tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -64,9 +72,13 @@ jobs:
             ].join("\n"))
           ' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Name the package artifact
+        id: package-artifact
+        run: echo "name=sesame-extension-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sesame-extension-${{ github.ref_name }}
+          name: ${{ steps.package-artifact.outputs.name }}
           path: store-packages
           if-no-files-found: error
           retention-days: 90

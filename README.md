@@ -63,8 +63,10 @@ validation, and card and identity filling. `npm run test:browser` builds the
 integration bundle and drives it in a real Chromium through `tests/browser`. It
 asserts sign-in form inspection, origin and document-token binding, fail-closed
 behavior when a document is replaced between approval and fill, overlay
-detachment when a site is paused, and the fill port staying closed to non-popup
-callers. Set `SESAME_BROWSER_TEST_EXECUTABLE` when Chromium is not on a
+detachment when a site is paused, the fill port staying closed to non-popup
+callers, and the onboarding and popup connection states and actions. Install a
+test browser with `npx playwright-core install chromium`; the lockfile pins the
+browser build. Set `SESAME_BROWSER_TEST_EXECUTABLE` when Chromium is not on a
 standard path. Desktop approval needs the desktop binary, so it stays covered
 by the desktop repository.
 
@@ -80,10 +82,9 @@ npm run build:firefox
 npm run package:stores
 ```
 
-`npm run ci` runs the complete release gate. Run `npm run test:browser` after
-browser-integration changes. It builds the integration bundle, then runs the
-real-browser suite against the local Chromium and fails when the browser or
-the built extension is unavailable.
+`npm run ci` runs the complete release gate, including the real-browser suite
+through `npm run test:browser`. It fails when the browser or the built
+extension is unavailable, so a release cannot pass without browser assertions.
 
 The extension version is independent from the desktop version. Change
 `package.json`, then run `npm run version:sync` to update the Chrome and Edge
