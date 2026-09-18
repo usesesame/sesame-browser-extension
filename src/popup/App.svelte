@@ -599,8 +599,8 @@
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
     if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }
     if (current.kind === 'login') return { title: current.hostname || 'This page', message: current.hasUsernameField
-      ? inlineGlobalEnabled && !inlineSitePaused ? 'Username and password are ready. Sesame offers to save the login when you submit.' : 'Username and password are ready.'
-      : inlineGlobalEnabled && !inlineSitePaused ? 'A password field is ready. Sesame offers to save the login when you submit.' : 'A password field is ready.', badge: 'Ready', tone: 'success' as const }
+      ? inlineGlobalEnabled && !inlineSitePaused ? 'Username and password are ready. After the fill, you can choose Save this login for a new password.' : 'Username and password are ready.'
+      : inlineGlobalEnabled && !inlineSitePaused ? 'A password field is ready. After the fill, you can choose Save this login for a new password.' : 'A password field is ready.', badge: 'Ready', tone: 'success' as const }
     if (current.kind === 'username') return { title: current.hostname || 'This page', message: 'A possible username field was found.', badge: 'Username', tone: 'neutral' as const }
     return { title: current.hostname || 'This page', message: 'No visible sign-in fields were found.', badge: 'No form', tone: 'neutral' as const }
   }
