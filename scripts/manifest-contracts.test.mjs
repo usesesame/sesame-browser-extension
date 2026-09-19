@@ -8,7 +8,7 @@ import test from 'node:test'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
-const PINNED_ID = 'idbkfhhjnniibleeanchljhakfhecnlg'
+const PINNED_ID = JSON.parse(read('contracts', 'native-host.json')).official_extension_id
 const PERMISSIONS = ['activeTab', 'nativeMessaging', 'scripting', 'storage']
 
 function idFor(publicKeyBase64) {
