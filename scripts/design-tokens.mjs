@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -48,6 +48,15 @@ function block(css, pattern) {
     }
   }
   throw new Error(`unterminated block matching ${pattern}`)
+}
+
+function sourceFiles(directory) {
+  return readdirSync(directory).flatMap((name) => {
+    if (['node_modules', 'dist', 'test-results'].includes(name)) return []
+    const full = join(directory, name)
+    if (statSync(full).isDirectory()) return sourceFiles(full)
+    return /\.(css|svelte)$/.test(name) ? [full] : []
+  })
 }
 
 function collect() {
@@ -101,7 +110,52 @@ if (mode === 'sync') {
     console.error('design tokens: overlay-tokens.ts does not match design/tokens.css. Run npm run design:tokens:sync.')
     process.exit(1)
   }
-  console.log('design tokens: overlay-tokens.ts matches the extension snapshot')
+
+  for (const retired of ['--border-input-focus', '--focus-glow', '--field-border-focus']) {
+    if (readFileSync(source, 'utf8').includes(`${retired}:`)) {
+      console.error(`design tokens: ${retired} is declared again. Focus is --field-ring alone; hover is --field-border-hover.`)
+      process.exit(1)
+    }
+  }
+
+  const overlay = readFileSync(join(root, 'src', 'content', 'overlay.ts'), 'utf8')
+  if (!/import \{ OVERLAY_TOKEN_CSS \} from '\.\/overlay-tokens'/.test(overlay) || !/\$\{OVERLAY_TOKEN_CSS\}/.test(overlay)) {
+    console.error('design tokens: overlay.ts must import and interpolate OVERLAY_TOKEN_CSS from ./overlay-tokens.')
+    process.exit(1)
+  }
+  const hardcoded = overlay.match(/#[0-9a-fA-F]{6}/g)
+  if (hardcoded) {
+    console.error(`design tokens: overlay.ts hardcodes ${hardcoded.join(', ')}. Add the token to design/tokens.css and run npm run design:tokens:sync.`)
+    process.exit(1)
+  }
+
+  const files = sourceFiles(join(root, 'src'))
+  const local = declarations(readFileSync(source, 'utf8'))
+  for (const file of files) for (const name of declarations(readFileSync(file, 'utf8')).keys()) local.set(name, '')
+
+  const undefinedTokens = []
+  const whiteOnTheme = []
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8')
+    for (const match of text.matchAll(/var\(\s*--([a-z0-9-]+)\s*\)/g)) {
+      if (!local.has(match[1])) undefinedTokens.push(`${relative(root, file)} uses --${match[1]}`)
+    }
+    for (const line of text.split('\n')) {
+      if (!/color:\s*(#fff\b|#ffffff\b|white\b)/i.test(line)) continue
+      if (!/background(-color)?:\s*var\(--/.test(line)) continue
+      whiteOnTheme.push(`${relative(root, file)}: ${line.trim().slice(0, 90)}`)
+    }
+  }
+  if (undefinedTokens.length) {
+    console.error(`design tokens: the extension references custom properties nothing defines, so those declarations silently do not apply:\n  ${undefinedTokens.join('\n  ')}`)
+    process.exit(1)
+  }
+  if (whiteOnTheme.length) {
+    console.error(`design tokens: hardcoded white over a themed background:\n  ${whiteOnTheme.join('\n  ')}`)
+    process.exit(1)
+  }
+
+  console.log('design tokens: overlay-tokens.ts matches the extension snapshot and the overlay uses it')
 } else {
   console.error('Usage: node scripts/design-tokens.mjs sync|check')
   process.exit(2)
