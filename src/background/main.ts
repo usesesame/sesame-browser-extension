@@ -203,6 +203,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (message?.type === 'sesame:arm-save') {
+    if (sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ armed: false })
+      return false
+    }
     const tabId = message?.tabId
     const origin = normalizeFillOrigin(message?.origin)
     if (typeof tabId !== 'number' || !Number.isInteger(tabId) || !origin) {
