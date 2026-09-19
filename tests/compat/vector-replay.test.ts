@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PROTOCOL_VERSION, isNativeRequest, safeNativeResponse, type NativeRequest } from '../../src/protocol/native'
+import {
+  CARD_PROTOCOL_VERSION,
+  PROTOCOL_VERSION,
+  isNativeRequest,
+  safeNativeResponse,
+  type NativeRequest,
+} from '../../src/protocol/native'
 
 interface RequestCase {
   name: string
@@ -14,7 +20,7 @@ interface ResponseCase {
   hostValid: boolean
   request: NativeRequest
   message: unknown
-  extensionResult: unknown
+  extensionResult?: unknown
 }
 
 interface Vectors {
@@ -25,14 +31,20 @@ interface Vectors {
 }
 
 const root = resolve(import.meta.dirname, '..', '..')
-const downloaded = join(root, '.host-compat', 'vectors.json')
-const vendored = join(root, 'contracts', 'browser', 'v1', 'vectors.json')
-const source = existsSync(downloaded) ? downloaded : vendored
-const vectors: Vectors = JSON.parse(readFileSync(source, 'utf8'))
 
-describe(`browser protocol vectors (${source === downloaded ? 'downloaded' : 'vendored'})`, () => {
+const CONTRACTS = [
+  { directory: 'v1', protocolVersion: PROTOCOL_VERSION },
+  { directory: 'v2', protocolVersion: CARD_PROTOCOL_VERSION },
+]
+
+describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {
+  const downloaded = join(root, '.host-compat', directory, 'vectors.json')
+  const vendored = join(root, 'contracts', 'browser', directory, 'vectors.json')
+  const source = existsSync(downloaded) ? downloaded : vendored
+  const vectors: Vectors = JSON.parse(readFileSync(source, 'utf8'))
+
   it('replays a protocol version this extension speaks', () => {
-    expect(vectors.protocolVersion).toBe(PROTOCOL_VERSION)
+    expect(vectors.protocolVersion).toBe(protocolVersion)
   })
 
   it('carries cases in both directions', () => {
@@ -48,7 +60,14 @@ describe(`browser protocol vectors (${source === downloaded ? 'downloaded' : 've
 
   describe.each(vectors.responseCases)('response: $name', (testCase) => {
     it('produces the result the desktop contract records', () => {
-      expect(safeNativeResponse(testCase.message, testCase.request)).toEqual(testCase.extensionResult)
+      const result = safeNativeResponse(testCase.message, testCase.request)
+      // The v1 vectors record the exact extension result; the v2 card vectors
+      // record only whether the host accepts the response.
+      if (testCase.extensionResult !== undefined) {
+        expect(result).toEqual(testCase.extensionResult)
+        return
+      }
+      expect(result).toMatchObject({ ok: testCase.hostValid })
     })
   })
 })
