@@ -77,7 +77,7 @@ These checks reduce accidental exposure and cross-process confusion. They do not
 
 ## Secret handling limits
 
-Passwords are returned only after desktop approval and only for the pending request. The extension does not write credentials to extension storage, the clipboard, diagnostics, or logs. Candidate lists remain in the desktop app and contain only login id, title, and username.
+Passwords are returned only after desktop approval and only for the pending request. The extension does not write credentials to extension storage, diagnostics, or logs. A generated password reaches the clipboard only through the person's explicit temporary copy action, and that copy clears after 30 seconds. Candidate lists remain in the desktop app and contain only login id, title, and username.
 
 While the approved fill is delivered, credentials necessarily exist briefly as Rust and JavaScript values. Rust response buffers use zeroizing wrappers where practical, but JavaScript strings cannot be reliably wiped. The design therefore promises no persistence or intentional logging, rather than perfect memory erasure.
 
