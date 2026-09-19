@@ -1,6 +1,7 @@
 # Contributing to the Sesame browser extension
 
-This repository holds a single product: the Chrome and Edge extension. It carries
+This repository holds a single product: the Chrome and Edge extension with an
+experimental Firefox package. It carries
 its own version, lockfile, release cadence, and store review. The vault, the
 desktop app, and the native messaging host are not part of it.
 
