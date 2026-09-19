@@ -16,6 +16,16 @@ function idFor(publicKeyBase64) {
   return [...digest].map((byte) => 'abcdefghijklmnop'[byte >> 4] + 'abcdefghijklmnop'[byte & 0x0f]).join('')
 }
 
+test('the integration build uses a development identity the native host does not allow', () => {
+  const integrationKey = read('manifests', 'integration-public-key.txt').trim()
+  assert.notEqual(idFor(integrationKey), PINNED_ID, 'the integration build reuses the shipping identity')
+  assert.match(
+    read('vite.config.ts'),
+    /manifests', 'integration-public-key\.txt'/,
+    'the integration build no longer reads the development key',
+  )
+})
+
 test('the shipping extension pins its identity and a minimal permission set', () => {
   for (const browser of ['chrome', 'edge']) {
     const manifest = JSON.parse(read('manifests', `${browser}.json`))
