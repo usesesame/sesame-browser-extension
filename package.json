@@ -22,7 +22,8 @@
     "compat:host:download": "node scripts/host-compatibility.mjs",
     "compat:host": "npm run compat:host:download && vitest run tests/compat",
     "release:check": "npm run version:check && npm run design:tokens:check && npm run lint && npm run check && npm run test:unit && npm run build:chrome && npm run build:edge && npm run build:firefox && npm run package:stores",
-    "ci": "npm run release:check && npm run test:browser"
+    "governance:contract": "node --test scripts/governance-contracts.test.mjs",
+    "ci": "npm run governance:contract && npm run release:check && npm run test:browser"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
