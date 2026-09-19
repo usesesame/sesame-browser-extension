@@ -104,6 +104,8 @@ function findChromiumExecutable(): string {
     if (existsSync(configured)) return configured
     throw new Error(`SESAME_BROWSER_TEST_EXECUTABLE points at a missing file: ${configured}`)
   }
+  const pinned = chromium.executablePath()
+  if (pinned && existsSync(pinned)) return pinned
   const candidates = [
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
@@ -357,6 +359,17 @@ async function mockNativeHostInWorker(): Promise<void> {
   })
 }
 
+// The suite runs on machines with and without a registered native host, so the
+// missing-host state is an input the suite installs rather than the environment.
+async function installMissingNativeHost(): Promise<void> {
+  await worker.evaluate(() => {
+    const runtime = chrome.runtime as unknown as { connectNative: unknown }
+    runtime.connectNative = () => {
+      throw new Error('Specified native messaging host not found.')
+    }
+  })
+}
+
 async function countNativeSaves(): Promise<number> {
   return worker.evaluate(() => {
     const target = globalThis as typeof globalThis & { __sesameSaveRequests?: number }
@@ -413,6 +426,7 @@ beforeAll(async () => {
     ],
   })
   worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 15000 })
+  await installMissingNativeHost()
   await waitForInlineRegistration()
   page = await context.newPage()
 })
