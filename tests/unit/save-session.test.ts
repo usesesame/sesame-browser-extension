@@ -70,6 +70,18 @@ describe('save session controller', () => {
     expect(native.requestSave).not.toHaveBeenCalled()
   })
 
+  it('refuses a save whose payload origin differs from the armed origin', async () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test')
+
+    await expect(controller.save({} as Browser, 3, { ...payload, origin: 'https://other.test' })).resolves.toEqual({
+      ok: false,
+      code: 'save-origin-mismatch',
+    })
+    expect(native.requestSave).not.toHaveBeenCalled()
+    expect(controller.isArmed(3)).toBe(true)
+  })
+
   it('sends the armed values through the native save request and disarms the tab', async () => {
     const controller = createSaveSessionController()
     controller.arm(3, 'https://example.test')
