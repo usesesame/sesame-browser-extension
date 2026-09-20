@@ -13,6 +13,8 @@ const inlineScriptId = 'sesame-inline-button'
 const documentToken = 'fictional-document-token-0123456789'
 const replacedToken = 'fictional-document-token-0123456789-replaced'
 const approved = { username: 'jamie@example.test', password: 'fictional-pass-1' }
+const nativeHostRegistered = process.env.SESAME_NATIVE_HOST_TEST === '1'
+const manualNativeFill = nativeHostRegistered && process.env.SESAME_MANUAL_NATIVE_FILL === '1'
 
 const loginPage = `<!doctype html><html><body>
 <form id="login-form" action="/signin" method="post">
@@ -250,6 +252,16 @@ async function openReadyPopup(extensionId: string, tabId: number, url: string): 
           diagnostic: { code: 'connected' },
         }
       : original(message)
+    tabs.query = async () => [{ id: expectedTabId, url: expectedUrl }]
+  }, { tabId, url })
+  return popup
+}
+
+async function openInstalledPopup(extensionId: string, tabId: number, url: string): Promise<Page> {
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+  await popup.evaluate(({ tabId: expectedTabId, url: expectedUrl }) => {
+    const tabs = chrome.tabs as unknown as { query: unknown }
     tabs.query = async () => [{ id: expectedTabId, url: expectedUrl }]
   }, { tabId, url })
   return popup
@@ -1233,4 +1245,75 @@ describe('extension browser suite', () => {
       if (!fresh.isClosed()) await fresh.close()
     }
   }, 15000)
+
+  it.skipIf(!nativeHostRegistered)('answers through the registered Windows native host', async () => {
+    const extensionId = new URL(worker.url()).host
+    const popup = await context.newPage()
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+    try {
+      const connection = await popup.evaluate(async () => chrome.runtime.sendMessage({
+        type: 'sesame:connect',
+        force: true,
+      }) as { state?: string; diagnostic?: { code?: string; host?: string } })
+      expect(connection?.diagnostic?.host).toBe('app.usesesame.browser')
+      expect(connection?.diagnostic?.code).toBe('connected')
+      expect(['desktop-offline', 'locked', 'ready']).toContain(connection?.state)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+    }
+  }, 30000)
+
+  it.skipIf(!manualNativeFill)('saves and fills a disposable login through the registered Windows native host', async () => {
+    const extensionId = new URL(worker.url()).host
+    const fixture = await openFixture('/registration')
+    await fixture.fill('#email', 'jamie@example.test')
+    const registrationUrl = fixture.url()
+    const registrationTabId = await findTabId(registrationUrl)
+    expect(registrationTabId).toBeGreaterThan(0)
+    await overrideWorkerTab(registrationTabId, registrationUrl)
+    const savePopup = await openInstalledPopup(extensionId, registrationTabId, registrationUrl)
+    let generated = ''
+    try {
+      await savePopup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => savePopup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
+        { timeout: 30000 },
+      ).toBe(true)
+      await savePopup.getByRole('button', { name: 'Create password', exact: true }).click()
+      generated = await savePopup.locator('.generated-password code').innerText()
+      expect(generated.length).toBeGreaterThan(0)
+      await savePopup.getByRole('button', { name: 'Save this login', exact: true }).click()
+      await expect.poll(
+        async () => savePopup.evaluate(() => document.body.innerText),
+        { timeout: 300000 },
+      ).toMatch(/Login saved in Sesame/)
+    } finally {
+      if (!savePopup.isClosed()) await savePopup.close()
+      await restoreWorkerMocks()
+    }
+
+    await fixture.goto(`${primaryOrigin}/login`)
+    await injectBridge(fixture)
+    const loginUrl = fixture.url()
+    const loginTabId = await findTabId(loginUrl)
+    expect(loginTabId).toBeGreaterThan(0)
+    await overrideWorkerTab(loginTabId, loginUrl)
+    const fillPopup = await openInstalledPopup(extensionId, loginTabId, loginUrl)
+    try {
+      await fillPopup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await expect.poll(
+        async () => fillPopup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 30000 },
+      ).toBe(true)
+      await fillPopup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => fixture.evaluate(() => (document.getElementById('username') as HTMLInputElement).value),
+        { timeout: 300000 },
+      ).toBe('jamie@example.test')
+      expect(await fixture.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe(generated)
+    } finally {
+      if (!fillPopup.isClosed()) await fillPopup.close()
+      await restoreWorkerMocks()
+    }
+  }, 660000)
 })
