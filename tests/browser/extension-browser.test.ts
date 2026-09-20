@@ -359,8 +359,6 @@ async function mockNativeHostInWorker(): Promise<void> {
   })
 }
 
-// The suite runs on machines with and without a registered native host, so the
-// missing-host state is an input the suite installs rather than the environment.
 async function installMissingNativeHost(): Promise<void> {
   await worker.evaluate(() => {
     const runtime = chrome.runtime as unknown as { connectNative: unknown }

@@ -22,8 +22,6 @@ export default defineConfig(({ mode }) => {
             readFileSync(resolve(import.meta.dirname, 'manifests', manifestName), 'utf8')
           )
           if (mode === 'integration') {
-            // A distinct key keeps the development id out of the native-host
-            // allowlist, so the shipping host cannot answer a test build.
             manifest.key = readFileSync(
               resolve(import.meta.dirname, 'manifests', 'integration-public-key.txt'),
               'utf8'

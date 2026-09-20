@@ -78,15 +78,4 @@ export type FillEvent =
   | { type: 'expired'; code: string }
   | { type: 'failed'; code: string }
 
-export function isTerminal(phase: FillPhase): boolean {
-  return (
-    phase.name === 'complete' ||
-    phase.name === 'cancelled' ||
-    phase.name === 'expired' ||
-    phase.name === 'failed'
-  )
-}
 
-export function isActive(phase: FillPhase): boolean {
-  return phase.name === 'inspecting' || phase.name === 'awaiting-approval' || phase.name === 'filling'
-}

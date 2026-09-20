@@ -41,6 +41,14 @@ test('a workflow that writes says so at the job that writes', () => {
   }
   const release = read('.github', 'workflows', 'release.yml')
   assert.match(release, /environment: store-release/, 'the package job should run behind its protected environment')
+
+  for (const workflow of workflows) {
+    assert.doesNotMatch(
+      read(workflow),
+      /permissions:\s*(read-all|write-all)/,
+      `${workflow} must name scopes explicitly rather than grant every scope`,
+    )
+  }
 })
 
 test('every job a workflow depends on exists in that workflow', () => {
