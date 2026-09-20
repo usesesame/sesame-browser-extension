@@ -22,7 +22,9 @@
     "compat:host:download": "node scripts/host-compatibility.mjs",
     "compat:host": "npm run compat:host:download && vitest run tests/compat",
     "release:check": "npm run version:check && npm run design:tokens:check && npm run lint && npm run check && npm run test:unit && npm run build:chrome && npm run build:edge && npm run build:firefox && npm run package:stores",
-    "ci": "npm run release:check && npm run test:browser"
+    "governance:contract": "node --test scripts/governance-contracts.test.mjs",
+    "manifest:contract": "node --test scripts/manifest-contracts.test.mjs",
+    "ci": "npm run governance:contract && npm run manifest:contract && npm run release:check && npm run test:browser"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -30,6 +32,7 @@
     "@tsconfig/svelte": "^5.0.8",
     "@types/chrome": "^0.2.8",
     "@types/node": "^26.5.1",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "eslint": "^10.9.1",
     "eslint-plugin-svelte": "^3.23.0",
     "globals": "^17.12.0",
@@ -38,7 +41,7 @@
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
     "svelte-eslint-parser": "^1.8.1",
-    "typescript": "~6.0.2",
+    "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-eslint": "^8.70.0",
     "vite": "^8.2.2",
     "vitest": "^5.0.0"

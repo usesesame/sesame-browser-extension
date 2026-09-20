@@ -4,7 +4,6 @@ import {
   CARD_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
   PROTOCOL_VERSION,
-  classifiesAsSecret,
   isCapabilities,
   isCredential,
   isNativeRequest,
@@ -220,19 +219,7 @@ describe('isCredential', () => {
   })
 })
 
-describe('classifiesAsSecret', () => {
-  it('spots the material a support form must never receive', () => {
-    expect(classifiesAsSecret('otpauth://totp/Example')).toBe(true)
-    expect(classifiesAsSecret('-----BEGIN PRIVATE KEY-----')).toBe(true)
-    expect(classifiesAsSecret('ssh-ed25519 AAAAC3Nz')).toBe(true)
-    expect(classifiesAsSecret('my password is hunter2hunter2')).toBe(true)
-  })
 
-  it('leaves ordinary prose alone', () => {
-    expect(classifiesAsSecret('')).toBe(false)
-    expect(classifiesAsSecret('The fill button does nothing on this page.')).toBe(false)
-  })
-})
 
 describe('protocol constants', () => {
   it('lists identity keys the desktop mirrors, with no duplicates', () => {

@@ -66,8 +66,7 @@ const SAVED_KEYS = new Set(['version', 'type', 'requestId', 'saved'])
 const ERROR_KEYS = new Set(['version', 'type', 'requestId', 'message'])
 const BASE_REQUEST_KEYS = new Set(['version', 'type', 'requestId'])
 const FILL_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin'])
-const FILL_FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
-const ORIGIN_FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
+const FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
 const CARD_KEYS = new Set(['version', 'type', 'requestId', 'card'])
 const SAVE_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'kind', 'password'])
 const UNAVAILABLE_CODES: Readonly<Record<string, string>> = Object.freeze({
@@ -126,10 +125,10 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       || value.fields === 'both'
     return fieldsValid
       && isWireOrigin(value.origin)
-      && hasExactKeys(value, value.fields === undefined ? FILL_REQUEST_KEYS : FILL_FIELDS_REQUEST_KEYS)
+      && hasExactKeys(value, value.fields === undefined ? FILL_REQUEST_KEYS : FIELDS_REQUEST_KEYS)
   }
   if (value.type === 'identity') {
-    if (!hasExactKeys(value, ORIGIN_FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') {
+    if (!hasExactKeys(value, FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') {
       return false
     }
     const fields = value.fields.split(',')
@@ -138,7 +137,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && fields.every((field) => IDENTITY_FIELD_KEYS.includes(field as IdentityFieldKey))
   }
   if (value.type === 'card') {
-    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, ORIGIN_FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
+    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
     const fields = value.fields.split(',')
     return fields.length > 0 && new Set(fields).size === fields.length && fields.every((field) => CARD_FIELD_KEYS.includes(field as CardFieldKey))
   }
@@ -369,12 +368,6 @@ export function normalizeFillOrigin(value: unknown): string | null {
   } catch {
     return null
   }
-}
-
-export function classifiesAsSecret(value: string): boolean {
-  if (value.length === 0) return false
-  if (/^(otpauth|ssh-|-----BEGIN|eyJ|[A-Za-z0-9+/]{40,}={0,2})/.test(value)) return true
-  return /\b(password|passwd|secret|token|key|seed|private)\b/i.test(value) && value.length > 16
 }
 
 function isRequestId(value: unknown): value is string {

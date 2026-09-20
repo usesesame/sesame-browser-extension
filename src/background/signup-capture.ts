@@ -86,7 +86,9 @@ export function createSaveSessionController(options: { ttlMs?: number } = {}): S
     },
 
     async save(browser, tabId, payload, saveOptions) {
-      if (!armed.has(tabId)) return { ok: false, code: 'save-not-armed' }
+      const entry = armed.get(tabId)
+      if (!entry) return { ok: false, code: 'save-not-armed' }
+      if (payload.origin !== entry.origin) return { ok: false, code: 'save-origin-mismatch' }
       if (saving.has(tabId)) return { ok: false, code: 'save-in-progress' }
       saving.add(tabId)
       try {

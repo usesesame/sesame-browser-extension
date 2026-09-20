@@ -152,7 +152,9 @@ upgrade and removal:
   `sesame.exe`, writes the host manifest under the app's local data directory,
   and creates the registry key
   `HKCU\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser`
-  pointing to that manifest.
+  pointing to that manifest. The desktop app also re-registers the native
+  messaging host when it starts, so startup repairs a missing or stale
+  registration.
 - **Upgrade**: the installer increments the host manifest `version`, stops the
   running host process, replaces the binary, and updates the registry path if it
   changed.

@@ -106,6 +106,8 @@ function findChromiumExecutable(): string {
     if (existsSync(configured)) return configured
     throw new Error(`SESAME_BROWSER_TEST_EXECUTABLE points at a missing file: ${configured}`)
   }
+  const pinned = chromium.executablePath()
+  if (pinned && existsSync(pinned)) return pinned
   const candidates = [
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
@@ -369,6 +371,15 @@ async function mockNativeHostInWorker(): Promise<void> {
   })
 }
 
+async function installMissingNativeHost(): Promise<void> {
+  await worker.evaluate(() => {
+    const runtime = chrome.runtime as unknown as { connectNative: unknown }
+    runtime.connectNative = () => {
+      throw new Error('Specified native messaging host not found.')
+    }
+  })
+}
+
 async function countNativeSaves(): Promise<number> {
   return worker.evaluate(() => {
     const target = globalThis as typeof globalThis & { __sesameSaveRequests?: number }
@@ -425,6 +436,7 @@ beforeAll(async () => {
     ],
   })
   worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 15000 })
+  await installMissingNativeHost()
   await waitForInlineRegistration()
   page = await context.newPage()
 })
@@ -1203,6 +1215,36 @@ describe('extension browser suite', () => {
       await restoreWorkerMocks()
     }
   }, 30000)
+
+  it('refuses to arm a save session from a page context', async () => {
+    const fresh = await context.newPage()
+    try {
+      await fresh.goto(`${primaryOrigin}/registration`)
+      await injectBridge(fresh)
+      const tabId = await findTabId(fresh.url())
+      expect(tabId).toBeGreaterThan(0)
+      const armed = await worker.evaluate(async ({ tabId: expectedTabId, origin }) => {
+        const [injection] = await chrome.scripting.executeScript({
+          target: { tabId: expectedTabId },
+          func: (tab, claimedOrigin) => chrome.runtime.sendMessage({ type: 'sesame:arm-save', tabId: tab, origin: claimedOrigin }),
+          args: [expectedTabId, origin],
+        })
+        return injection?.result ?? null
+      }, { tabId, origin: primaryOrigin })
+      expect(armed).toEqual({ armed: false })
+      const state = await worker.evaluate(async ({ tabId: expectedTabId }) => {
+        const [injection] = await chrome.scripting.executeScript({
+          target: { tabId: expectedTabId },
+          func: (tab) => chrome.runtime.sendMessage({ type: 'sesame:save-state', tabId: tab }),
+          args: [expectedTabId],
+        })
+        return injection?.result ?? null
+      }, { tabId })
+      expect(state).toEqual({ armed: false })
+    } finally {
+      if (!fresh.isClosed()) await fresh.close()
+    }
+  }, 15000)
 
   it.skipIf(!nativeHostRegistered)('answers through the registered Windows native host', async () => {
     const extensionId = new URL(worker.url()).host
