@@ -1,14 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import http from 'node:http'
 import https from 'node:https'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type BrowserContext, type Page, type Worker } from 'playwright-core'
 
 const root = resolve(import.meta.dirname, '..', '..')
-const extensionDir = join(root, 'dist', 'integration')
+let extensionDir = join(root, 'dist', 'integration')
+let extensionTempRoot = ''
 const inlineScriptId = 'sesame-inline-button'
 const documentToken = 'fictional-document-token-0123456789'
 const replacedToken = 'fictional-document-token-0123456789-replaced'
@@ -373,10 +374,24 @@ async function mockNativeHostInWorker(): Promise<void> {
 
 async function installMissingNativeHost(): Promise<void> {
   await worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameOriginalConnectNative?: unknown }
     const runtime = chrome.runtime as unknown as { connectNative: unknown }
+    if (!target.__sesameOriginalConnectNative) {
+      target.__sesameOriginalConnectNative = runtime.connectNative
+    }
     runtime.connectNative = () => {
       throw new Error('Specified native messaging host not found.')
     }
+  })
+}
+
+async function useRegisteredNativeHost(): Promise<void> {
+  await worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameOriginalConnectNative?: unknown }
+    const runtime = chrome.runtime as unknown as { connectNative: unknown }
+    if (!target.__sesameOriginalConnectNative) return
+    runtime.connectNative = target.__sesameOriginalConnectNative
+    delete target.__sesameOriginalConnectNative
   })
 }
 
@@ -424,6 +439,26 @@ beforeAll(async () => {
   tlsServer = tls.server
   tlsOrigin = tls.origin
   profileDir = mkdtempSync(join(tmpdir(), 'sesame-browser-tests-'))
+  if (nativeHostRegistered) {
+    const manifestSource = process.env.SESAME_NATIVE_HOST_MANIFEST
+    if (manifestSource) {
+      if (!existsSync(manifestSource)) {
+        throw new Error(`SESAME_NATIVE_HOST_MANIFEST points at a missing file: ${manifestSource}`)
+      }
+      const nativeHostsDir = join(profileDir, 'NativeMessagingHosts')
+      mkdirSync(nativeHostsDir, { recursive: true })
+      copyFileSync(manifestSource, join(nativeHostsDir, 'app.usesesame.browser.json'))
+    }
+
+    extensionTempRoot = mkdtempSync(join(tmpdir(), 'sesame-native-extension-'))
+    extensionDir = join(extensionTempRoot, 'integration')
+    cpSync(join(root, 'dist', 'integration'), extensionDir, { recursive: true })
+    const copiedManifestPath = join(extensionDir, 'manifest.json')
+    const shipping = JSON.parse(readFileSync(join(root, 'manifests', 'chrome.json'), 'utf8')) as { key: string }
+    const copiedManifest = JSON.parse(readFileSync(copiedManifestPath, 'utf8')) as Record<string, unknown>
+    copiedManifest.key = shipping.key
+    writeFileSync(copiedManifestPath, JSON.stringify(copiedManifest, null, 2))
+  }
   context = await chromium.launchPersistentContext(profileDir, {
     executablePath: findChromiumExecutable(),
     args: [
@@ -439,6 +474,10 @@ beforeAll(async () => {
   await installMissingNativeHost()
   await waitForInlineRegistration()
   page = await context.newPage()
+})
+
+afterEach(async () => {
+  if (nativeHostRegistered) await installMissingNativeHost()
 })
 
 async function waitForInlineRegistration(): Promise<void> {
@@ -457,6 +496,7 @@ afterAll(async () => {
   secondaryServer?.close()
   tlsServer?.close()
   if (profileDir) rmSync(profileDir, { recursive: true, force: true })
+  if (extensionTempRoot) rmSync(extensionTempRoot, { recursive: true, force: true })
   if (tlsDirectory) rmSync(tlsDirectory, { recursive: true, force: true })
 })
 
@@ -1246,7 +1286,8 @@ describe('extension browser suite', () => {
     }
   }, 15000)
 
-  it.skipIf(!nativeHostRegistered)('answers through the registered Windows native host', async () => {
+  it.skipIf(!nativeHostRegistered)('answers through the registered native host', async () => {
+    await useRegisteredNativeHost()
     const extensionId = new URL(worker.url()).host
     const popup = await context.newPage()
     await popup.goto(`chrome-extension://${extensionId}/popup.html`)
@@ -1254,16 +1295,22 @@ describe('extension browser suite', () => {
       const connection = await popup.evaluate(async () => chrome.runtime.sendMessage({
         type: 'sesame:connect',
         force: true,
-      }) as { state?: string; diagnostic?: { code?: string; host?: string } })
+      }) as {
+        state?: string
+        capabilities?: { desktopAvailable?: boolean; locked?: boolean; fillAvailable?: boolean }
+        diagnostic?: { code?: string; host?: string }
+      })
       expect(connection?.diagnostic?.host).toBe('app.usesesame.browser')
       expect(connection?.diagnostic?.code).toBe('connected')
       expect(['desktop-offline', 'locked', 'ready']).toContain(connection?.state)
+      expect(connection?.capabilities?.desktopAvailable).toBe(true)
     } finally {
       if (!popup.isClosed()) await popup.close()
     }
   }, 30000)
 
-  it.skipIf(!manualNativeFill)('saves and fills a disposable login through the registered Windows native host', async () => {
+  it.skipIf(!manualNativeFill)('saves and fills a disposable login through the registered native host', async () => {
+    await useRegisteredNativeHost()
     const extensionId = new URL(worker.url()).host
     const fixture = await openFixture('/registration')
     await fixture.fill('#email', 'jamie@example.test')
