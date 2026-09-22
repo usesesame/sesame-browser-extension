@@ -176,7 +176,7 @@
     {/if}
 
     {#if status}<p class="status" role="status">{status}</p>{/if}
-    <p class="shortcut">{POPUP_HINT} Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> to fill without opening the popup.</p>
+    <p class="shortcut">{POPUP_HINT} Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> for an identity.</p>
   </div>
 </main>
 
@@ -210,7 +210,8 @@
   .connection.ok { background: var(--ok-bg); }
   .connection strong { display: block; color: var(--warn-text); font-size: var(--type-2); }
   .connection.ok strong { color: var(--ok-text); }
-  .connection p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .connection p { margin: 4px 0 0; color: var(--warn-text); font-size: var(--type-2); line-height: 1.5; }
+  .connection.ok p { color: var(--ok-text); }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
   button, a.primary {
     border: 0;

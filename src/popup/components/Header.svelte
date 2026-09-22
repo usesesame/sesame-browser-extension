@@ -1,5 +1,4 @@
 <script lang="ts">
-  export let title: string
   export let subtitle: string = ''
   export let refreshing = false
   export let onRefresh: () => void = () => {}
@@ -20,7 +19,7 @@
     <button class="icon-button" type="button" aria-label="Open Sesame settings" title="Settings" on:click={onOpenSettings}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
     </button>
-    <button class="icon-button" type="button" aria-label={`${title}: check desktop connection and page again`} title="Check again" disabled={refreshing} on:click={onRefresh}>
+    <button class="icon-button" type="button" aria-label="Check desktop connection and page again" title="Check again" disabled={refreshing} on:click={onRefresh}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M18.7 9A7 7 0 0 0 6.2 6.2L4 8"/><path d="M5.3 15A7 7 0 0 0 17.8 17.8L20 16"/></svg>
     </button>
   </div>
@@ -46,9 +45,9 @@
     height: 30px;
     flex: 0 0 30px;
   }
-  .brand-copy { display: grid; gap: 1px; }
+  .brand-copy { display: grid; gap: 1px; min-width: 0; }
   .brand-name { margin: 0; font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-heading); letter-spacing: -.01em; }
-  .brand-meta { color: var(--text-muted); font-size: 11px; }
+  .brand-meta { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--text-muted); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
   .icon-button:hover { color: var(--text); background: var(--tint); }
