@@ -100,6 +100,12 @@ export async function removeAllInlinePermissions(): Promise<boolean> {
   return origins.length === 0 || chrome.permissions.remove({ origins })
 }
 
+export async function removeLegacySitePermissions(): Promise<boolean> {
+  const origins = await grantedInlineOrigins()
+  const legacy = origins.filter((origin) => origin !== GLOBAL_HTTPS_PATTERN)
+  return legacy.length === 0 || chrome.permissions.remove({ origins: legacy })
+}
+
 function isSupportedPermissionPattern(pattern: string): boolean {
   if (pattern === GLOBAL_HTTPS_PATTERN) return true
   if (!pattern.endsWith('/*')) return false

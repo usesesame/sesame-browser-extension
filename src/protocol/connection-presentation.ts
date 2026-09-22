@@ -1,6 +1,6 @@
 export const DESKTOP_RELEASES_URL = 'https://github.com/usesesame/sesame-desktop/releases/latest'
 
-export type ConnectionAction = 'install' | 'update' | 'open-desktop' | 'retry' | 'none'
+export type ConnectionAction = 'install' | 'update' | 'open-desktop' | 'reload' | 'retry' | 'none'
 
 export type ConnectionStateName =
   | 'checking'
@@ -45,7 +45,7 @@ const PRESENTATIONS: Record<string, ConnectionPresentation> = {
   'host-not-found': {
     state: 'missing-host',
     title: 'Sesame desktop app not found',
-    message: 'Install Sesame for Windows, then open it. Website access alone does not connect the desktop app.',
+    message: 'Install Sesame for your desktop, then open it. Website access alone does not connect the desktop app.',
     action: 'install',
     actionLabel: 'Get Sesame',
     canRetry: true,
@@ -53,9 +53,9 @@ const PRESENTATIONS: Record<string, ConnectionPresentation> = {
   'host-forbidden': {
     state: 'forbidden-host',
     title: 'Connection needs a refresh',
-    message: 'Reload this extension once, then restart Sesame and check again.',
-    action: 'retry',
-    actionLabel: 'Check again',
+    message: 'Reload this extension, then restart Sesame and try again.',
+    action: 'reload',
+    actionLabel: 'Reload extension',
     canRetry: true,
   },
   'host-exited': {

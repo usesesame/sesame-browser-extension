@@ -27,7 +27,16 @@ describe('connection presentation', () => {
     expect(presentation.state).toBe('missing-host')
     expect(presentation.action).toBe('install')
     expect(presentation.actionLabel).toBe('Get Sesame')
+    expect(presentation.message).not.toMatch(/Windows/)
     expect(presentation.canRetry).toBe(true)
+  })
+
+  it('offers a reload action when the host refuses the extension', () => {
+    expect(presentConnection('host-forbidden')).toMatchObject({
+      state: 'forbidden-host',
+      action: 'reload',
+      actionLabel: 'Reload extension',
+    })
   })
 
   it('offers an update action for a protocol mismatch', () => {

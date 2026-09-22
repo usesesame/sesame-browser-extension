@@ -11,7 +11,7 @@
   }[tone]
 </script>
 
-<section class="card {toneClass}">
+<section class="card {toneClass}" role="status" aria-live="polite">
   <h2>{title}</h2>
   {#if message}<p>{message}</p>{/if}
 </section>
@@ -39,7 +39,7 @@
   .status-success { background: var(--tint); }
   .status-success h2 { color: var(--accent); }
   .status-warning { background: var(--warn-bg); }
-  .status-warning h2 { color: var(--warn-text); }
+  .status-warning h2, .status-warning p { color: var(--warn-text); }
   .status-error { background: var(--danger-tint); }
   .status-error h2 { color: var(--danger); }
 </style>

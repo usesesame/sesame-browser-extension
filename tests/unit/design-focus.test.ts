@@ -54,3 +54,22 @@ describe('keyboard focus contrast', () => {
     })
   }
 })
+
+describe('text contrast', () => {
+  for (const [name, selector] of themes) {
+    it(`keeps warning text readable on the warning background in ${name}`, () => {
+      const values = new Map([...declarations(':root'), ...declarations(selector)])
+      const text = luminance(color(values, 'warn-text'))
+      const background = luminance(color(values, 'warn-bg'))
+      const ratio = (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05)
+      expect(ratio, `${name} warn-text on warn-bg`).toBeGreaterThanOrEqual(4.5)
+    })
+  }
+
+  it('uses the readable warning token inside warning surfaces', () => {
+    const card = readFileSync(resolve(root, 'src', 'popup', 'components', 'StatusCard.svelte'), 'utf8')
+    const onboardingMarkup = readFileSync(resolve(root, 'src', 'onboarding', 'App.svelte'), 'utf8')
+    expect(card).toMatch(/\.status-warning h2,\s*\.status-warning p\s*\{\s*color:\s*var\(--warn-text\)/)
+    expect(onboardingMarkup).toMatch(/\.connection p\s*\{[^}]*color:\s*var\(--warn-text\)/)
+  })
+})

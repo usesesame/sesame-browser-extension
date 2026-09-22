@@ -309,7 +309,7 @@
       if (activeTabId !== null && activeOrigin && !inlineSitePaused) {
         await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content-overlay.js'] })
       }
-      inlineFeedback = 'Enabled everywhere. Focus a sign-in field or press Ctrl+Shift+L.'
+      inlineFeedback = 'Enabled everywhere. Focus a sign-in field, or press Ctrl+Shift+L for a login or Ctrl+Shift+I for an identity.'
     } catch {
       inlineFeedback = 'Could not enable website access. Reload the extension and try again.'
     } finally {
@@ -574,6 +574,10 @@
     chrome.runtime.openOptionsPage()
   }
 
+  function reloadExtension() {
+    chrome.runtime.reload()
+  }
+
   async function refreshAll() {
     if (refreshing) return
     refreshing = true
@@ -610,7 +614,7 @@
 </script>
 
 <main>
-  <Header title={phase.name} subtitle={$popupState.hostname ? `for ${$popupState.hostname}` : ''} {refreshing} onRefresh={refreshAll} onOpenSettings={openSettings} />
+  <Header subtitle={$popupState.hostname ? `for ${$popupState.hostname}` : ''} {refreshing} onRefresh={refreshAll} onOpenSettings={openSettings} />
 
   {#if phase.name === 'initial' || phase.name === 'checking'}
     <StatusCard title="Finding the desktop app" message="Checking the private connection on this device." />
@@ -641,7 +645,7 @@
     </section>
   {:else}
     <section class="inline-access active-everywhere">
-      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L.'}</p></div>
+      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L for a login or Ctrl+Shift+I for an identity.'}</p></div>
       {#if activeOrigin}
         <button type="button" class:enabled={!inlineSitePaused} disabled={inlineWorking} on:click={toggleSitePause}>{inlineSitePaused ? 'Resume' : 'Pause here'}</button>
       {/if}
@@ -671,6 +675,10 @@
         label={connection.actionLabel}
         secondary={page.kind === 'registration'}
       />
+    {:else if connection.action === 'reload'}
+      <FillButton onClick={reloadExtension} label={connection.actionLabel} secondary={page.kind === 'registration'} />
+    {:else if connection.action === 'retry'}
+      <FillButton onClick={refreshAll} disabled={refreshing} loading={refreshing} loadingLabel="Checking…" label={connection.actionLabel} secondary={page.kind === 'registration'} />
     {/if}
   {:else if pageFillable}
     <FillButton onClick={fill} disabled={desktopState !== 'ready' || !desktopFillAvailable} loading={fillWorking} label={page.kind === 'username' ? 'Fill username' : 'Fill login'} />

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     clearPausedSites, GLOBAL_HTTPS_PATTERN, inlinePermissionMode, loadInlineSettings,
-    removeAllInlinePermissions, setSitePaused,
+    removeAllInlinePermissions, removeLegacySitePermissions, setSitePaused,
     setCardSuggestionsEnabled,
   } from '../permissions/inline-access'
 
@@ -16,12 +16,16 @@
   onMount(refresh)
 
   async function refresh() {
-    const [permissions, settings] = await Promise.all([chrome.permissions.getAll(), loadInlineSettings()])
-    const mode = inlinePermissionMode(permissions.origins)
-    enabled = mode === 'global'
-    legacyAccess = mode === 'legacy-sites'
-    pausedOrigins = settings.pausedOrigins
-    cardSuggestionsEnabled = settings.cardSuggestionsEnabled
+    try {
+      const [permissions, settings] = await Promise.all([chrome.permissions.getAll(), loadInlineSettings()])
+      const mode = inlinePermissionMode(permissions.origins)
+      enabled = mode === 'global'
+      legacyAccess = mode === 'legacy-sites'
+      pausedOrigins = settings.pausedOrigins
+      cardSuggestionsEnabled = settings.cardSuggestionsEnabled
+    } catch {
+      status = 'Could not load the current settings.'
+    }
   }
 
   async function toggleCardSuggestions() {
@@ -59,18 +63,48 @@
     }
   }
 
+  async function upgradeGlobal() {
+    if (working) return
+    working = true
+    status = ''
+    try {
+      const granted = await chrome.permissions.request({ origins: [GLOBAL_HTTPS_PATTERN] })
+      if (!granted) {
+        status = 'Website access was not granted.'
+        return
+      }
+      enabled = true
+      legacyAccess = false
+      await removeLegacySitePermissions().catch(() => false)
+      await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
+      status = 'Sesame is ready on HTTPS login fields.'
+    } catch {
+      status = enabled ? 'Sesame is ready on HTTPS login fields.' : 'Could not change website access.'
+    } finally {
+      working = false
+    }
+  }
+
   async function resume(origin: string) {
-    await setSitePaused(origin, false)
-    pausedOrigins = pausedOrigins.filter((candidate) => candidate !== origin)
-    await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
-    status = `Sesame resumed on ${new URL(origin).hostname}.`
+    try {
+      await setSitePaused(origin, false)
+      pausedOrigins = pausedOrigins.filter((candidate) => candidate !== origin)
+      await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
+      status = `Sesame resumed on ${new URL(origin).hostname}.`
+    } catch {
+      status = 'Could not resume that site.'
+    }
   }
 
   async function resumeAll() {
-    const settings = await clearPausedSites()
-    pausedOrigins = settings.pausedOrigins
-    await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
-    status = 'All paused sites were resumed.'
+    try {
+      const settings = await clearPausedSites()
+      pausedOrigins = settings.pausedOrigins
+      await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
+      status = 'All paused sites were resumed.'
+    } catch {
+      status = 'Could not resume the paused sites.'
+    }
   }
 </script>
 
@@ -83,9 +117,16 @@
       <strong>Show Sesame on websites</strong>
       <p>{enabled ? 'Active across HTTPS websites.' : legacyAccess ? 'Older site-by-site access is active. Upgrade to global access.' : 'Currently disabled.'}</p>
     </div>
-    <button class:danger={enabled || legacyAccess} type="button" disabled={working} on:click={toggleGlobal}>
-      {enabled || legacyAccess ? 'Turn off' : working ? 'Enabling…' : 'Enable'}
-    </button>
+    <div class="setting-actions">
+      {#if enabled}
+        <button class="danger" type="button" disabled={working} on:click={toggleGlobal}>Turn off</button>
+      {:else if legacyAccess}
+        <button type="button" disabled={working} on:click={upgradeGlobal}>{working ? 'Upgrading…' : 'Upgrade'}</button>
+        <button class="danger" type="button" disabled={working} on:click={toggleGlobal}>Turn off</button>
+      {:else}
+        <button type="button" disabled={working} on:click={toggleGlobal}>{working ? 'Enabling…' : 'Enable'}</button>
+      {/if}
+    </div>
   </section>
 
   <p class="privacy">Sesame detects field structure but never reads existing values. Filling still requires desktop approval and never submits the form.</p>
@@ -111,7 +152,7 @@
     {/if}
   </section>
 
-  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> on a login page. Browser shortcut conflicts can be changed from the browser's extension shortcut settings.</p></section>
+  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> for an identity. Browser shortcut conflicts can be changed from the browser's extension shortcut settings.</p></section>
   {#if status}<p class="status" role="status">{status}</p>{/if}
 </main>
 
@@ -121,6 +162,7 @@
   .intro { max-width: 560px; color: var(--text-muted); line-height: 1.5; }
   .setting, .section-heading, li { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
   .setting { margin-top: 24px; padding: 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-inset); }
+  .setting-actions { display: flex; align-items: center; gap: 8px; }
   strong { font-size: 14px; color: var(--text-heading); } p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
   button { border: 0; border-radius: var(--radius-pill); padding: 8px 14px; color: var(--accent-link); background: var(--tint); font-weight: 700; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
   button:hover { background: var(--tint-hover); }
@@ -133,7 +175,7 @@
   .section-heading > button { font-size: 11px; }
   ul { margin: 12px 0 0; padding: 0; list-style: none; }
   li { padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
-  li button { padding: 5px 10px; font-size: 11px; }
+  li button { min-height: 24px; padding: 5px 10px; font-size: 11px; }
   .empty { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-inset); }
   .shortcut { background: var(--surface-inset); }
   kbd { border-radius: 5px; padding: 2px 6px; background: var(--surface); color: var(--text-2); font: 600 11px var(--font-code); }

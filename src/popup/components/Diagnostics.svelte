@@ -55,6 +55,7 @@
   dd { min-width: 0; margin: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
   button {
     margin-top: 6px;
+    min-height: 24px;
     padding: 5px 10px;
     border: 0;
     border-radius: 6px;

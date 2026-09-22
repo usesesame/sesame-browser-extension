@@ -843,7 +843,7 @@ describe('extension browser suite', () => {
       { timeout: 5000 },
     ).toBe(true)
     await expect.poll(
-      async () => popup.getByRole('button', { name: /check desktop connection and page again/ }).isEnabled(),
+      async () => popup.getByRole('button', { name: /check desktop connection and page again/i }).isEnabled(),
       { timeout: 5000 },
     ).toBe(true)
     await popup.close()
@@ -861,7 +861,7 @@ describe('extension browser suite', () => {
       const permissions = chrome.permissions as { getAll: () => Promise<{ origins?: string[] }> }
       permissions.getAll = async () => ({ origins: ['https://*/*'] })
     })
-    await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+    await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
     await expect.poll(
       async () => popup.evaluate(() => document.body.innerText),
       { timeout: 5000 },
@@ -875,7 +875,7 @@ describe('extension browser suite', () => {
       permissions.getAll = async () => ({ origins: [] })
       permissions.request = async () => false
     })
-    await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+    await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
     await expect.poll(
       async () => popup.getByRole('button', { name: 'Enable', exact: true }).isVisible(),
       { timeout: 5000 },
@@ -982,6 +982,8 @@ describe('extension browser suite', () => {
       { reply: { state: 'desktop-offline', diagnostic: { code: 'connected' } }, action: 'Open Sesame' },
       { reply: { state: 'unavailable', diagnostic: { code: 'protocol-mismatch' } }, action: 'Update Sesame' },
       { reply: { state: 'unavailable', diagnostic: { code: 'host-not-found' } }, action: 'Get Sesame' },
+      { reply: { state: 'unavailable', diagnostic: { code: 'host-forbidden' } }, action: 'Reload extension' },
+      { reply: { state: 'unavailable', diagnostic: { code: 'timeout' } }, action: 'Check again' },
     ]
     for (const testCase of cases) {
       const popup = await context.newPage()
@@ -994,7 +996,7 @@ describe('extension browser suite', () => {
           ? reply
           : { state: 'unavailable', code: 'page-check-failed' }
       }, testCase.reply)
-      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => popup.getByRole('button', { name: testCase.action, exact: true }).isVisible(),
         { timeout: 5000 },
@@ -1002,6 +1004,37 @@ describe('extension browser suite', () => {
       await popup.close()
     }
   }, 30000)
+
+  it('announces the connection state and keeps the diagnostic control usable', async () => {
+    const extensionId = new URL(worker.url()).host
+    const popup = await context.newPage()
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+    await popup.evaluate(() => {
+      const runtime = chrome.runtime as {
+        sendMessage: (message: { type?: string }) => Promise<unknown>
+      }
+      runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+        ? {
+            state: 'unavailable',
+            diagnostic: {
+              code: 'host-not-found',
+              checkedAt: new Date().toISOString(),
+              extensionVersion: '0.0.0',
+            },
+          }
+        : { state: 'unavailable', code: 'page-check-failed' }
+    })
+    await popup.getByRole('button', { name: 'Check desktop connection and page again' }).click()
+    await expect.poll(
+      async () => popup.locator('section.card[role="status"]').count(),
+      { timeout: 5000 },
+    ).toBeGreaterThan(0)
+    expect(await popup.locator('main').innerText()).toMatch(/Sesame desktop app not found/)
+    await popup.locator('details.diagnostics summary').click()
+    const height = await popup.locator('details.diagnostics button').evaluate((element) => element.getBoundingClientRect().height)
+    expect(height).toBeGreaterThanOrEqual(24)
+    await popup.close()
+  }, 20000)
 
   it('reports a desktop decline when the fill approval is cancelled', async () => {
     const extensionId = new URL(worker.url()).host
@@ -1050,7 +1083,7 @@ describe('extension browser suite', () => {
 
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1103,7 +1136,7 @@ describe('extension browser suite', () => {
           }
         }
       })
-      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1177,7 +1210,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1210,7 +1243,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1244,7 +1277,7 @@ describe('extension browser suite', () => {
     await overrideWorkerTab(tabId, fixtureUrl)
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1324,7 +1357,7 @@ describe('extension browser suite', () => {
     const savePopup = await openInstalledPopup(extensionId, registrationTabId, registrationUrl)
     let generated = ''
     try {
-      await savePopup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await savePopup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => savePopup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 30000 },
@@ -1350,7 +1383,7 @@ describe('extension browser suite', () => {
     await overrideWorkerTab(loginTabId, loginUrl)
     const fillPopup = await openInstalledPopup(extensionId, loginTabId, loginUrl)
     try {
-      await fillPopup.getByRole('button', { name: /check desktop connection and page again/ }).click()
+      await fillPopup.getByRole('button', { name: /check desktop connection and page again/i }).click()
       await expect.poll(
         async () => fillPopup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 30000 },
