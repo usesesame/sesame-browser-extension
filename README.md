@@ -1,8 +1,8 @@
 # Sesame browser extension
 
-Sesame supports Chrome and Edge on Windows. The same source also builds an
-experimental Firefox package for compatibility work. Firefox is not a
-supported store release.
+Sesame supports Chrome and Edge on Windows and on Linux from the deb and rpm
+desktop packages. The same source also builds an experimental Firefox package
+for compatibility work. Firefox is not a supported store release.
 
 This repository contains the extension's manifests, tests, release scripts,
 and native-host compatibility checks. It builds without desktop source code.

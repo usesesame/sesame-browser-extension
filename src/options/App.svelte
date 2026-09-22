@@ -73,14 +73,13 @@
         status = 'Website access was not granted.'
         return
       }
-      const removed = await removeLegacySitePermissions()
-      if (!removed) throw new Error('legacy permission removal failed')
       enabled = true
       legacyAccess = false
-      status = 'Sesame is ready on HTTPS login fields.'
+      await removeLegacySitePermissions().catch(() => false)
       await chrome.runtime.sendMessage({ type: 'sesame:sync-inline-overlay' })
+      status = 'Sesame is ready on HTTPS login fields.'
     } catch {
-      status = 'Could not change website access.'
+      status = enabled ? 'Sesame is ready on HTTPS login fields.' : 'Could not change website access.'
     } finally {
       working = false
     }
