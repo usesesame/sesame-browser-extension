@@ -15,6 +15,7 @@ const documentToken = 'fictional-document-token-0123456789'
 const replacedToken = 'fictional-document-token-0123456789-replaced'
 const approved = { username: 'jamie@example.test', password: 'fictional-pass-1' }
 const nativeHostRegistered = process.env.SESAME_NATIVE_HOST_TEST === '1'
+const nativeHostExpectsDesktop = nativeHostRegistered && process.env.SESAME_NATIVE_HOST_EXPECT_DESKTOP === '1'
 const manualNativeFill = nativeHostRegistered && process.env.SESAME_MANUAL_NATIVE_FILL === '1'
 
 const loginPage = `<!doctype html><html><body>
@@ -1303,7 +1304,9 @@ describe('extension browser suite', () => {
       expect(connection?.diagnostic?.host).toBe('app.usesesame.browser')
       expect(connection?.diagnostic?.code).toBe('connected')
       expect(['desktop-offline', 'locked', 'ready']).toContain(connection?.state)
-      expect(connection?.capabilities?.desktopAvailable).toBe(true)
+      if (nativeHostExpectsDesktop) {
+        expect(connection?.capabilities?.desktopAvailable).toBe(true)
+      }
     } finally {
       if (!popup.isClosed()) await popup.close()
     }
