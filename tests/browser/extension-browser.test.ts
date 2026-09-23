@@ -88,12 +88,26 @@ const registrationPage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const passwordChangePage = `<!doctype html><html><body>
+<form id="change-form" action="/password-changed" method="post">
+<h1>Change password</h1>
+<label for="current">Current password</label>
+<input id="current" name="current" type="password" autocomplete="current-password">
+<label for="new">New password</label>
+<input id="new" name="new" type="password" autocomplete="new-password">
+<label for="confirm">Confirm new password</label>
+<input id="confirm" name="confirm" type="password" autocomplete="new-password">
+<button type="submit" id="save">Change password</button>
+</form>
+</body></html>`
+
 function pageBody(path: string): string {
   return path === '/username' ? usernameStepPage
     : path === '/password' ? passwordStepPage
       : path === '/identity' ? identityPage
         : path === '/card' ? cardPage
-          : path === '/registration' ? registrationPage : loginPage
+          : path === '/registration' ? registrationPage
+            : path === '/password-change' ? passwordChangePage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -313,14 +327,17 @@ async function mockNativeHostInWorker(): Promise<void> {
     const target = globalThis as typeof globalThis & {
       __sesameTestRestore?: () => void
       __sesameSaveRequests?: number
+      __sesameLastSave?: Record<string, unknown>
     }
     const runtime = chrome.runtime as unknown as { connectNative: unknown }
     const original = runtime.connectNative
     const previous = target.__sesameTestRestore
     target.__sesameSaveRequests = 0
+    delete target.__sesameLastSave
     target.__sesameTestRestore = () => {
       runtime.connectNative = original
       delete target.__sesameSaveRequests
+      delete target.__sesameLastSave
       previous?.()
     }
     runtime.connectNative = () => {
@@ -328,7 +345,7 @@ async function mockNativeHostInWorker(): Promise<void> {
       const disconnectListeners: Array<() => void> = []
       return {
         name: 'app.usesesame.browser',
-        postMessage(request: { type?: string; requestId?: string; version?: number }) {
+        postMessage(request: { type?: string; requestId?: string; version?: number; fields?: string }) {
           queueMicrotask(() => {
             const base = { version: request?.version ?? 1, requestId: request?.requestId }
             if (request?.type === 'capabilities') {
@@ -341,14 +358,16 @@ async function mockNativeHostInWorker(): Promise<void> {
                 fillAvailable: true,
               }))
             } else if (request?.type === 'fill') {
+              const fields = request.fields ?? 'both'
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'fill',
-                username: 'jamie@example.test',
-                password: 'fictional-inline-pass',
+                ...(fields === 'password' ? {} : { username: 'jamie@example.test' }),
+                ...(fields === 'username' ? {} : { password: 'fictional-inline-pass' }),
               }))
             } else if (request?.type === 'save') {
               target.__sesameSaveRequests = (target.__sesameSaveRequests ?? 0) + 1
+              target.__sesameLastSave = request
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'saved',
@@ -400,6 +419,13 @@ async function countNativeSaves(): Promise<number> {
   return worker.evaluate(() => {
     const target = globalThis as typeof globalThis & { __sesameSaveRequests?: number }
     return target.__sesameSaveRequests ?? 0
+  })
+}
+
+async function lastNativeSave(): Promise<Record<string, unknown> | undefined> {
+  return worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameLastSave?: Record<string, unknown> }
+    return target.__sesameLastSave
   })
 }
 
@@ -1233,6 +1259,54 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
+  it('fills a password-change form and saves the generated password after the form clears', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/password-change')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Change password', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Change password', exact: true }).click()
+      const generated = await popup.locator('.generated-password code').innerText()
+      expect(generated.length).toBeGreaterThanOrEqual(16)
+      await expect.poll(
+        async () => current.evaluate(() => ({
+          current: (document.getElementById('current') as HTMLInputElement).value,
+          next: (document.getElementById('new') as HTMLInputElement).value,
+          confirm: (document.getElementById('confirm') as HTMLInputElement).value,
+        })),
+        { timeout: 15000 },
+      ).toEqual({ current: 'fictional-inline-pass', next: generated, confirm: generated })
+      await current.evaluate(() => {
+        document.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach((input) => { input.value = '' })
+      })
+      await current.goto(`${primaryOrigin}/password-changed`)
+      await popup.getByRole('button', { name: 'Save this login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/Login saved in Sesame/)
+      expect(await countNativeSaves()).toBe(1)
+      expect(await lastNativeSave()).toMatchObject({
+        type: 'save',
+        kind: 'update',
+        origin: primaryOrigin,
+        password: generated,
+      })
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
   it('does not read or save when the registration form is submitted', async () => {
     const extensionId = new URL(worker.url()).host
     const current = await openFixture('/registration')
@@ -1290,6 +1364,27 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
+  it('refuses a held save from a page context', async () => {
+    const fresh = await context.newPage()
+    try {
+      await fresh.goto(`${primaryOrigin}/password-change`)
+      await injectBridge(fresh)
+      const tabId = await findTabId(fresh.url())
+      expect(tabId).toBeGreaterThan(0)
+      const response = await worker.evaluate(async ({ tabId: expectedTabId }) => {
+        const [injection] = await chrome.scripting.executeScript({
+          target: { tabId: expectedTabId },
+          func: (tab) => chrome.runtime.sendMessage({ type: 'sesame:save-held', tabId: tab }),
+          args: [expectedTabId],
+        })
+        return injection?.result ?? null
+      }, { tabId })
+      expect(response).toEqual({ ok: false, code: 'save-not-armed' })
+    } finally {
+      if (!fresh.isClosed()) await fresh.close()
+    }
+  }, 15000)
+
   it('refuses to arm a save session from a page context', async () => {
     const fresh = await context.newPage()
     try {
@@ -1314,7 +1409,7 @@ describe('extension browser suite', () => {
         })
         return injection?.result ?? null
       }, { tabId })
-      expect(state).toEqual({ armed: false })
+      expect(state).toEqual({ armed: false, held: false })
     } finally {
       if (!fresh.isClosed()) await fresh.close()
     }

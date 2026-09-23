@@ -91,6 +91,32 @@ chrome.runtime.onConnect.addListener((port) => {
     })
     return
   }
+  if (port.name === 'sesame:change-password') {
+    const controller = new AbortController()
+    port.onDisconnect.addListener(() => controller.abort())
+
+    let started = false
+    port.onMessage.addListener((message) => {
+      if (started || message?.type !== 'start') return
+      started = true
+      const newPassword = typeof message?.newPassword === 'string' ? message.newPassword : ''
+      if (newPassword.length < 16 || newPassword.length > 128) {
+        try { port.postMessage({ state: 'unavailable', code: 'password-change-fill-failed' }) } catch { /* noop */ }
+        return
+      }
+      coordinator.changePasswordActivePage(newPassword, controller.signal).then((result) => {
+        if (result.ok) {
+          saveSession.arm(result.tabId, result.origin, { username: result.username, password: newPassword })
+          try { port.postMessage({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled }) } catch { /* noop */ }
+        } else {
+          try { port.postMessage({ state: 'unavailable', code: result.code }) } catch { /* noop */ }
+        }
+      }).catch(() => {
+        try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }
+      })
+    })
+    return
+  }
   if (port.name === 'sesame:identity-fill') {
     const controller = new AbortController()
     port.onDisconnect.addListener(() => controller.abort())
@@ -219,8 +245,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === 'sesame:save-state') {
     const tabId = message?.tabId
-    sendResponse({ armed: typeof tabId === 'number' && Number.isInteger(tabId) ? saveSession.isArmed(tabId) : false })
+    const validTab = typeof tabId === 'number' && Number.isInteger(tabId)
+    sendResponse({
+      armed: validTab ? saveSession.isArmed(tabId) : false,
+      held: validTab ? saveSession.hasHeldCapture(tabId) : false,
+    })
     return false
+  }
+  if (message?.type === 'sesame:save-held') {
+    if (sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ ok: false, code: 'save-not-armed' })
+      return false
+    }
+    const tabId = message?.tabId
+    if (typeof tabId !== 'number' || !Number.isInteger(tabId)) {
+      sendResponse({ ok: false, code: 'save-not-armed' })
+      return false
+    }
+    saveSession.saveHeld(chromeBrowser, tabId)
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false, code: 'save-failed' }))
+    return true
   }
   if (message?.type === 'sesame:open-desktop') {
     openDesktop(chromeBrowser).then((result) => {

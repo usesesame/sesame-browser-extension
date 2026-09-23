@@ -55,10 +55,14 @@ ready → inspecting → awaiting-approval → filling → complete
 
 Credentials live only in the active call stack. If the service worker
 terminates, the underlying native port closes and the request fails closed.
-A registration or password-change form that Sesame filled is read only when you
-choose **Save this login** in the popup. The extension reads the new password
-at that moment, sends it to the desktop approval, and holds nothing after the
-answer. A form submit does not read or save anything.
+A registration form that Sesame filled is read only when you choose
+**Save this login** in the popup. The extension reads the new password at that
+moment, sends it to the desktop approval, and holds nothing after the answer.
+A password-change form works differently: **Change password** fills the stored
+current password and a generated new one, and the generated value stays in the
+background worker's memory until you save it, the tab closes, the site changes
+origin, or the ten-minute arm expires. A form submit does not read or save
+anything.
 
 ## Tests
 

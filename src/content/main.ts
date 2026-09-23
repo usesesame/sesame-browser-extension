@@ -5,6 +5,7 @@ import { fillIdentitySurface } from './identity-writer'
 import { inspectCardSurface } from './card-detector'
 import { fillCardSurface } from './card-writer'
 import { attachInlineButton } from './overlay'
+import { fillPasswordChangeSurface } from './password-change'
 import { fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
 import { saveCurrentLogin } from './signup-capture'
 
@@ -18,6 +19,7 @@ type GlobalApi = {
   sesameFillRegistrationSurface: typeof fillRegistrationSurface
   sesameInspectRegistrationSurface: typeof inspectRegistrationSurface
   sesameInspectPasswordSurface: typeof inspectPasswordSurface
+  sesameFillPasswordChangeSurface: typeof fillPasswordChangeSurface
   sesameSaveCurrentLogin: typeof saveCurrentLogin
   sesameAttachInlineButton: () => (() => void) | undefined
   sesameDetachInlineButton: (() => void) | undefined
@@ -33,6 +35,7 @@ const api: GlobalApi = {
   sesameFillRegistrationSurface: fillRegistrationSurface,
   sesameInspectRegistrationSurface: inspectRegistrationSurface,
   sesameInspectPasswordSurface: inspectPasswordSurface,
+  sesameFillPasswordChangeSurface: fillPasswordChangeSurface,
   sesameSaveCurrentLogin: saveCurrentLogin,
   sesameAttachInlineButton: () => {
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return undefined
@@ -62,6 +65,7 @@ export {
   fillRegistrationSurface,
   inspectRegistrationSurface,
   inspectPasswordSurface,
+  fillPasswordChangeSurface,
   saveCurrentLogin,
   attachInlineButton,
 }

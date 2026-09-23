@@ -623,7 +623,7 @@ export function identityFillMessage(result: unknown): string {
 }
 
 function registrationMessage(code: string): string {
-  if (code === 'password-change-form') return 'Password-change forms are not filled.'
+  if (code === 'password-change-form') return 'Choose Change password in the Sesame popup for this form.'
   if (code === 'multiple-matches') return 'More than one form is visible. Sesame did not guess.'
   return 'Sesame could not create a password for this form.'
 }
