@@ -35,9 +35,15 @@ function originOf(value: string): string | null {
 
 const ARM_TTL_MS = 10 * 60_000
 
+export interface HeldSaveCapture {
+  username: string
+  password: string
+}
+
 export interface SaveSessionController {
-  arm(tabId: number, origin: string): void
+  arm(tabId: number, origin: string, capture?: HeldSaveCapture): void
   isArmed(tabId: number): boolean
+  hasHeldCapture(tabId: number): boolean
   handleTabUpdated(tabId: number, changeInfo: { url?: string }): void
   handleTabRemoved(tabId: number): void
   save(
@@ -46,30 +52,46 @@ export interface SaveSessionController {
     payload: SignupCapturePayload,
     options?: { requestTimeoutMs?: number },
   ): Promise<{ ok: true } | { ok: false; code: string }>
+  saveHeld(
+    browser: Browser,
+    tabId: number,
+    options?: { requestTimeoutMs?: number },
+  ): Promise<{ ok: true } | { ok: false; code: string }>
 }
 
 export function createSaveSessionController(options: { ttlMs?: number } = {}): SaveSessionController {
   const ttlMs = options.ttlMs ?? ARM_TTL_MS
-  const armed = new Map<number, { origin: string; timer: ReturnType<typeof setTimeout> }>()
+  const armed = new Map<number, { origin: string; timer: ReturnType<typeof setTimeout>; capture?: HeldSaveCapture }>()
   const saving = new Set<number>()
 
   function disarm(tabId: number) {
     const entry = armed.get(tabId)
-    if (entry !== undefined) clearTimeout(entry.timer)
+    if (entry !== undefined) {
+      clearTimeout(entry.timer)
+      if (entry.capture) {
+        entry.capture.username = ''
+        entry.capture.password = ''
+      }
+    }
     armed.delete(tabId)
   }
 
   return {
-    arm(tabId, origin) {
+    arm(tabId, origin, capture) {
       disarm(tabId)
       armed.set(tabId, {
         origin,
-        timer: setTimeout(() => armed.delete(tabId), ttlMs),
+        timer: setTimeout(() => disarm(tabId), ttlMs),
+        capture,
       })
     },
 
     isArmed(tabId) {
       return armed.has(tabId)
+    },
+
+    hasHeldCapture(tabId) {
+      return armed.get(tabId)?.capture !== undefined
     },
 
     handleTabUpdated(tabId, changeInfo) {
@@ -96,6 +118,26 @@ export function createSaveSessionController(options: { ttlMs?: number } = {}): S
           username: payload.username,
           password: payload.password,
           kind: payload.kind,
+        }, { timeoutMs: saveOptions?.requestTimeoutMs })
+        if (result.ok) disarm(tabId)
+        return result.ok ? { ok: true } : { ok: false, code: result.code }
+      } catch {
+        return { ok: false, code: 'save-failed' }
+      } finally {
+        saving.delete(tabId)
+      }
+    },
+
+    async saveHeld(browser, tabId, saveOptions) {
+      const entry = armed.get(tabId)
+      if (!entry?.capture) return { ok: false, code: 'save-not-armed' }
+      if (saving.has(tabId)) return { ok: false, code: 'save-in-progress' }
+      saving.add(tabId)
+      try {
+        const result = await requestSave(browser, entry.origin, {
+          username: entry.capture.username,
+          password: entry.capture.password,
+          kind: 'update',
         }, { timeoutMs: saveOptions?.requestTimeoutMs })
         if (result.ok) disarm(tabId)
         return result.ok ? { ok: true } : { ok: false, code: result.code }

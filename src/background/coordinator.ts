@@ -16,6 +16,7 @@ import {
 import { makeDiagnostic, userMessage } from '../protocol/diagnostics'
 import type { Browser } from '../platform/chrome'
 import { isRecord } from '../shared/values'
+import { normalizePasswordChangeOutcome, type PasswordChangeOutcome } from '../content/password-change'
 import { isSameActivePage, tabFillContext, type PageTab } from './tab-context'
 import {
   CARD_FIELD_KEYS,
@@ -32,6 +33,7 @@ export interface Coordinator {
   checkConnection(): Promise<ConnectionState>
   inspectActivePage(): Promise<PageCheckResult>
   fillActivePage(signal?: AbortSignal): Promise<FillContext>
+  changePasswordActivePage(newPassword: string, signal?: AbortSignal): Promise<ChangePasswordResult>
   inspectIdentityActivePage(): Promise<IdentityPageCheckResult>
   fillIdentityActivePage(signal?: AbortSignal): Promise<IdentityFillResult>
   inspectCardActivePage(): Promise<CardPageCheckResult>
@@ -46,6 +48,10 @@ export interface IdentityPageCheckResult {
 
 export type IdentityFillResult =
   | { ok: true; filledFields: IdentityFieldKey[] }
+  | { ok: false; code: string }
+
+export type ChangePasswordResult =
+  | { ok: true; tabId: number; origin: string; username: string; currentFilled: number; newFilled: number }
   | { ok: false; code: string }
 
 export interface CardPageCheckResult {
@@ -168,6 +174,24 @@ export function createCoordinator(browser: Browser): Coordinator {
         busy: () => update({ type: 'failed', code: 'fill-in-progress' }),
         restricted: (aborted) => update({ type: 'failed', code: aborted ? 'cancelled' : 'page-restricted' }),
       }, (signal) => runFill(browser, signal, update))
+    },
+
+    async changePasswordActivePage(newPassword, externalSignal): Promise<ChangePasswordResult> {
+      return withFillGuard(activeControllers, externalSignal, {
+        cancelled: () => ({ ok: false, code: 'cancelled' }),
+        busy: () => ({ ok: false, code: 'fill-in-progress' }),
+        restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
+      }, async (signal) => {
+        const change = passwordChangeSurface(newPassword)
+        const result = await runSurfaceFill(browser, signal, change.fill)
+        if (!result.ok) return result
+        return {
+          ok: true,
+          ...change.capture(),
+          currentFilled: result.outcome.currentFilled,
+          newFilled: result.outcome.newFilled,
+        }
+      })
     },
 
     async inspectIdentityActivePage(): Promise<IdentityPageCheckResult> {
@@ -337,6 +361,7 @@ async function runSurfaceFill<
 
 type ReadyLoginInspection = Extract<PageInspection, { ok: true }>
 type ReadyIdentityInspection = Extract<IdentityPageInspection, { ok: true }>
+type ReadyPasswordChange = { origin: string }
 
 function loginSurface(
   update?: (event: Parameters<typeof transition>[1]) => FillContext
@@ -396,6 +421,72 @@ function loginSurface(
       inspectionCompleted: (inspection, documentToken) => update({ type: 'inspection-completed', inspection, documentToken }),
       approvalReceived: (credential) => update({ type: 'approval-received', credential }),
     } : undefined,
+  }
+}
+
+function passwordChangeSurface(newPassword: string): {
+  fill: FillSurface<ReadyPasswordChange, 'password', Credential, PasswordChangeOutcome>
+  capture: () => { tabId: number; origin: string; username: string }
+} {
+  let prepared = false
+  let capturedTabId = 0
+  let capturedOrigin = ''
+  let capturedUsername = ''
+  const fill: FillSurface<ReadyPasswordChange, 'password', Credential, PasswordChangeOutcome> = {
+    resolvePage: topLevelPage,
+    async inspect({ browser, tabId, origin }) {
+      capturedTabId = tabId
+      capturedOrigin = origin
+      await installContentBridge(browser, tabId)
+      const [injection] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeBridgeInspection,
+        args: ['sesameInspectPasswordSurface'],
+      })
+      const kind = injection?.result
+      if (kind === 'password-change') return { ok: true, ready: { origin } }
+      if (kind === 'none') return { ok: false, code: 'no-fields' }
+      if (kind === 'ambiguous') return { ok: false, code: 'multiple-matches' }
+      return { ok: false, code: 'not-password-change-form' }
+    },
+    async prepare(ctx) {
+      const [preparation] = await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId },
+        func: invokeBridgeFill,
+        args: ['sesameFillPasswordChangeSurface', ctx.origin, ctx.token, null, null, 'prepare'],
+      })
+      const prep = normalizePasswordChangeOutcome(preparation?.result)
+      if (!prep.ok) return prep
+      prepared = true
+      return { ok: true, approvalInput: 'password' }
+    },
+    async requestApproval(browser, origin, _input, signal) {
+      const fill = await requestFill(browser, origin, { signal, fields: 'password' })
+      if (!fill.ok) return fill
+      capturedUsername = fill.credential.username
+      return { ok: true, approved: fill.credential }
+    },
+    async fill(ctx, approved) {
+      const [injection] = await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId },
+        func: invokeBridgeFill,
+        args: ['sesameFillPasswordChangeSurface', ctx.origin, ctx.token, approved, newPassword, 'fill'],
+      })
+      redactCredential({ credential: approved })
+      return normalizePasswordChangeOutcome(injection?.result)
+    },
+    async cleanup(ctx) {
+      if (!prepared) return
+      await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId },
+        func: invokeBridgeFill,
+        args: ['sesameFillPasswordChangeSurface', ctx.origin, ctx.token, null, null, 'clear'],
+      })
+    },
+  }
+  return {
+    fill,
+    capture: () => ({ tabId: capturedTabId, origin: capturedOrigin, username: capturedUsername }),
   }
 }
 

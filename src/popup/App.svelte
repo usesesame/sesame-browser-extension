@@ -38,6 +38,8 @@
     'multiple-matches': 'More than one login form was found. Sesame did not guess.',
     'no-match': 'No saved login matches this exact site.',
     'no-fields': 'No sign-in fields to fill on this page.',
+    'not-password-change-form': 'This is not a password-change form. Nothing was filled.',
+    'password-change-fill-failed': 'Sesame could not create a new password for this form.',
     'origin-mismatch': 'The page changed. Open Sesame again to retry.',
     'page-changed': 'The active tab or site changed. Nothing was filled.',
     'page-restricted': 'This page cannot be filled.',
@@ -126,6 +128,8 @@
   let fillFeedback = ''
   let generatedPassword = ''
   let registrationWorking = false
+  let changeWorking = false
+  let heldSave = false
   let saveArmed = false
   let saveWorking = false
   let saveFeedback = ''
@@ -271,8 +275,10 @@
       cardFields = []
       page = { ...page, kind: 'restricted', code: 'page-restricted' }
     }
+    const saveState = activeTabId === null ? { armed: false, held: false } : await querySaveState(activeTabId)
     const saveSurface = page.kind === 'registration' || page.kind === 'password-change'
-    saveArmed = saveSurface && activeTabId !== null ? await querySaveState(activeTabId) : false
+    heldSave = saveState.held
+    saveArmed = saveState.held || (saveSurface && saveState.armed)
     saveFeedback = ''
     setPageDiagnostic({
       code: page.code,
@@ -487,6 +493,44 @@
     }
   }
 
+  async function changePassword() {
+    if (changeWorking || activeTabId === null || desktopState !== 'ready' || !desktopFillAvailable) return
+    changeWorking = true
+    fillFeedback = 'Creating a strong password on this device…'
+    copyHandle?.cancel()
+    if (generatedExpiryTimer) clearTimeout(generatedExpiryTimer)
+    generatedPassword = makeRegistrationPassword()
+    copiedPassword = false
+    try {
+      const port = chrome.runtime.connect({ name: 'sesame:change-password' })
+      const result = await new Promise<any>((resolve) => {
+        let settled = false
+        const finish = (value: any) => {
+          if (settled) return
+          settled = true
+          resolve(value)
+        }
+        port.onMessage.addListener((message) => { finish(message); port.disconnect() })
+        port.onDisconnect.addListener(() => finish({ state: 'unavailable', code: 'host-disconnected' }))
+        port.postMessage({ type: 'start', newPassword: generatedPassword })
+      })
+      if (result?.state === 'changed') {
+        heldSave = true
+        saveArmed = true
+        fillFeedback = 'Current and new password filled. Submit the form, then choose Save this login.'
+        generatedExpiryTimer = setTimeout(clearGeneratedPassword, REGISTRATION_EXPIRY_MS)
+      } else {
+        generatedPassword = ''
+        fillFeedback = FILL_MESSAGES[result?.code] ?? 'The change request could not be completed.'
+      }
+    } catch {
+      generatedPassword = ''
+      fillFeedback = 'The change request could not be completed.'
+    } finally {
+      changeWorking = false
+    }
+  }
+
   function invokeRegistrationFill(origin: string, password: string): unknown {
     const fillRegistration = (globalThis as typeof globalThis & { sesameFillRegistrationSurface?: (expectedOrigin: string, generated: string) => unknown }).sesameFillRegistrationSurface
     return typeof fillRegistration === 'function'
@@ -506,25 +550,28 @@
     return { ok: false, code: typeof record.code === 'string' ? record.code : 'save-failed' }
   }
 
-  async function querySaveState(tabId: number): Promise<boolean> {
+  async function querySaveState(tabId: number): Promise<{ armed: boolean; held: boolean }> {
     try {
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:save-state', tabId }), 4_000)
-      return response?.armed === true
+      return { armed: response?.armed === true, held: response?.held === true }
     } catch {
-      return false
+      return { armed: false, held: false }
     }
   }
 
   async function armSave(tabId: number) {
     if (!activeOrigin) {
       saveArmed = false
+      heldSave = false
       return
     }
     try {
       const response = await chrome.runtime.sendMessage({ type: 'sesame:arm-save', tabId, origin: activeOrigin })
+      heldSave = false
       saveArmed = response?.armed === true && (page.kind === 'registration' || page.kind === 'password-change')
     } catch {
       saveArmed = false
+      heldSave = false
     }
   }
 
@@ -533,6 +580,20 @@
     saveWorking = true
     saveFeedback = 'Waiting for approval in Sesame…'
     try {
+      if (heldSave) {
+        const response = await chrome.runtime.sendMessage({ type: 'sesame:save-held', tabId: activeTabId })
+        const outcome = normalizeSaveOutcome(response)
+        if (outcome.ok) {
+          saveArmed = false
+          heldSave = false
+          saveFeedback = 'Login saved in Sesame.'
+        } else {
+          saveFeedback = outcome.code === 'save-not-armed'
+            ? 'The change expired. Choose Change password again.'
+            : SAVE_MESSAGES[outcome.code] ?? 'Sesame could not save this login.'
+        }
+        return
+      }
       await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content.js'] })
       const [injection] = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
@@ -558,7 +619,7 @@
       copyHandle?.cancel()
       copyHandle = await copyTemporarily(generatedPassword, { onExpired: () => { copiedPassword = false } })
       copiedPassword = true
-      fillFeedback = 'Copied temporarily. Choose Save this login in the popup after registration succeeds.'
+      fillFeedback = 'Copied temporarily. Choose Save this login after the site accepts it.'
     } catch {
       fillFeedback = 'Clipboard access is unavailable. The password remains filled in the form.'
     }
@@ -599,7 +660,7 @@
   function pagePresentation(current: PageState) {
     if (current.kind === 'checking') return { title: 'Checking this page', message: 'Looking only for visible sign-in fields.', badge: 'Checking', tone: 'neutral' as const }
     if (current.kind === 'restricted') return { title: 'Browser page', message: 'Sesame cannot fill on this page.', badge: 'Unavailable', tone: 'warning' as const }
-    if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Password-change forms are refused because Sesame will not guess which existing password to replace.', badge: 'Change form', tone: 'warning' as const }
+    if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Sesame fills your current password and creates a new one. Save it after the site accepts it.', badge: 'Change form', tone: 'success' as const }
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
     if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }
     if (current.kind === 'login') return { title: current.hostname || 'This page', message: current.hasUsernameField ? 'Username and password are ready.' : 'A password field is ready.', badge: 'Ready', tone: 'success' as const }
@@ -655,9 +716,11 @@
 
   {#if page.kind === 'registration'}
     <button class="generate-button" type="button" disabled={registrationWorking} on:click={generateAndFillPassword}>{registrationWorking ? 'Creating…' : 'Create password'}</button>
-    {#if generatedPassword}
-      <div class="generated-password"><code>{generatedPassword}</code><button type="button" on:click={copyGeneratedPassword}>{copiedPassword ? 'Copied' : 'Copy temporarily'}</button></div>
-    {/if}
+  {:else if page.kind === 'password-change'}
+    <button class="generate-button" type="button" disabled={changeWorking || desktopState !== 'ready' || !desktopFillAvailable} on:click={changePassword}>{changeWorking ? 'Creating…' : 'Change password'}</button>
+  {/if}
+  {#if generatedPassword && (page.kind === 'registration' || page.kind === 'password-change')}
+    <div class="generated-password"><code>{generatedPassword}</code><button type="button" on:click={copyGeneratedPassword}>{copiedPassword ? 'Copied' : 'Copy temporarily'}</button></div>
   {/if}
   {#if saveArmed}
     <FillButton onClick={saveLogin} loading={saveWorking} loadingLabel="Saving…" label="Save this login" secondary={page.kind === 'registration'} />

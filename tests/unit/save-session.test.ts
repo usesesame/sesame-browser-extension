@@ -135,3 +135,83 @@ describe('save session controller', () => {
     expect(controller.isArmed(5)).toBe(false)
   })
 })
+
+describe('held password-change capture', () => {
+  const held = { username: 'jamie@example.test', password: 'fictional-generated-1' }
+
+  it('reports a held capture only for an arm that carries one', () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test')
+    expect(controller.hasHeldCapture(3)).toBe(false)
+    controller.arm(3, 'https://example.test', { ...held })
+    expect(controller.hasHeldCapture(3)).toBe(true)
+  })
+
+  it('sends the held values as an update and disarms on success', async () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test', { ...held })
+
+    await expect(controller.saveHeld({} as Browser, 3)).resolves.toEqual({ ok: true })
+
+    expect(native.requestSave).toHaveBeenCalledWith(
+      {},
+      'https://example.test',
+      { username: 'jamie@example.test', password: 'fictional-generated-1', kind: 'update' },
+      expect.objectContaining({ timeoutMs: undefined }),
+    )
+    expect(controller.isArmed(3)).toBe(false)
+    expect(controller.hasHeldCapture(3)).toBe(false)
+  })
+
+  it('refuses a held save when the arm carries no capture', async () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test')
+
+    await expect(controller.saveHeld({} as Browser, 3)).resolves.toEqual({ ok: false, code: 'save-not-armed' })
+    expect(native.requestSave).not.toHaveBeenCalled()
+  })
+
+  it('keeps the held capture for a retry when the save is declined', async () => {
+    native.requestSave.mockResolvedValue({ ok: false, code: 'approval-declined' })
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test', { ...held })
+
+    await expect(controller.saveHeld({} as Browser, 3)).resolves.toEqual({ ok: false, code: 'approval-declined' })
+    expect(controller.isArmed(3)).toBe(true)
+    expect(controller.hasHeldCapture(3)).toBe(true)
+  })
+
+  it('drops the held capture on a cross-origin navigation and on tab close', () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test', { ...held })
+    controller.handleTabUpdated(3, { url: 'https://other.test/step' })
+    expect(controller.hasHeldCapture(3)).toBe(false)
+
+    controller.arm(4, 'https://example.test', { ...held })
+    controller.handleTabRemoved(4)
+    expect(controller.hasHeldCapture(4)).toBe(false)
+  })
+
+  it('drops the held capture when the arm expires', () => {
+    vi.useFakeTimers()
+    try {
+      const controller = createSaveSessionController({ ttlMs: 1_000 })
+      controller.arm(3, 'https://example.test', { ...held })
+      expect(controller.hasHeldCapture(3)).toBe(true)
+      vi.advanceTimersByTime(1_001)
+      expect(controller.isArmed(3)).toBe(false)
+      expect(controller.hasHeldCapture(3)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('replaces an earlier held capture when the tab is armed again', () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test', { ...held })
+    controller.arm(3, 'https://example.test')
+
+    expect(controller.isArmed(3)).toBe(true)
+    expect(controller.hasHeldCapture(3)).toBe(false)
+  })
+})

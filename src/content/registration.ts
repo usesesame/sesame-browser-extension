@@ -168,7 +168,7 @@ export function normalizeRegistrationOutcome(value: unknown): RegistrationOutcom
     : 'registration-fill-failed')
 }
 
-function visiblePasswordFields(): HTMLInputElement[] {
+export function visiblePasswordFields(): HTMLInputElement[] {
   return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]'))
     .filter((field) => {
       if (field.disabled || field.readOnly) return false
@@ -182,12 +182,12 @@ function visiblePasswordFields(): HTMLInputElement[] {
     })
 }
 
-function isCurrentPasswordField(field: HTMLInputElement): boolean {
+export function isCurrentPasswordField(field: HTMLInputElement): boolean {
   const hints = `${field.name} ${field.id} ${field.autocomplete}`.toLowerCase()
   return tokens(field.autocomplete).includes('current-password') || /(?:current|old)[-_ ]?pass/.test(hints)
 }
 
-function isRegistrationField(field: HTMLInputElement): boolean {
+export function isRegistrationField(field: HTMLInputElement): boolean {
   const hints = `${field.name} ${field.id} ${field.autocomplete} ${field.form?.name ?? ''} ${field.form?.id ?? ''}`.toLowerCase()
   return tokens(field.autocomplete).includes('new-password')
     || /new[-_ ]?pass|confirm|register|sign[-_ ]?up|create[-_ ]?(?:account|pass)/.test(hints)
