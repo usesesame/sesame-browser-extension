@@ -46,8 +46,8 @@
     flex: 0 0 30px;
   }
   .brand-copy { display: grid; gap: 1px; min-width: 0; }
-  .brand-name { margin: 0; font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-heading); letter-spacing: -.01em; }
-  .brand-meta { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .brand-name { margin: 0; font-family: var(--font-display); font-size: var(--type-3); font-weight: var(--weight-regular); color: var(--text-heading); letter-spacing: -.01em; }
+  .brand-meta { overflow: hidden; color: var(--text-muted); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--text-muted); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
   .icon-button:hover { color: var(--text); background: var(--tint); }

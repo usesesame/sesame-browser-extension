@@ -1,6 +1,7 @@
 <script lang="ts">
   export let title: string
   export let message: string
+  export let note: string = ''
   export let tone: 'neutral' | 'success' | 'warning' | 'error' = 'neutral'
 
   const toneClass = {
@@ -14,6 +15,7 @@
 <section class="card {toneClass}" role="status" aria-live="polite">
   <h2>{title}</h2>
   {#if message}<p>{message}</p>{/if}
+  {#if note}<p class="note">{note}</p>{/if}
 </section>
 
 <style>
@@ -28,14 +30,15 @@
   h2 {
     margin: 0 0 4px;
     font-family: var(--font-display);
-    font-size: 14px;
-    font-weight: 600;
+    font-size: var(--type-3);
+    font-weight: var(--weight-regular);
   }
   p {
     margin: 0;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--type-2);
   }
+  .note { margin-top: 4px; }
   .status-success { background: var(--tint); }
   .status-success h2 { color: var(--accent); }
   .status-warning { background: var(--warn-bg); }

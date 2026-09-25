@@ -43,7 +43,7 @@
 <style>
   .diagnostics {
     margin-top: 12px;
-    font-size: 11px;
+    font-size: var(--type-2);
     color: var(--text-muted);
   }
   summary {
@@ -58,7 +58,7 @@
     min-height: 24px;
     padding: 5px 10px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--surface-inset);
     color: var(--text);
     cursor: pointer;

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -5,9 +6,14 @@ import { fileURLToPath } from 'node:url'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const source = join(root, 'design', 'tokens.css')
 const target = join(root, 'src', 'content', 'overlay-tokens.ts')
+const DESKTOP_TOKENS_COMMIT = 'c7f01ee19d8f855a417c8c82813ce88131df84f5'
+const DESKTOP_TOKENS_SHA256 = '9e87d3014fb30c16de209f7d178333e9fde354261bc5ff5bcc2abd8764582306'
 const OVERLAY_TOKENS = [
   'font-ui',
   'font-display',
+  'type-2',
+  'type-3',
+  'weight-medium',
   'surface',
   'text-heading',
   'text-muted',
@@ -99,6 +105,18 @@ if (mode === 'sync') {
   writeFileSync(target, expected)
   console.log('design tokens: wrote src/content/overlay-tokens.ts')
 } else if (mode === 'check') {
+  const digest = createHash('sha256').update(readFileSync(source)).digest('hex')
+  if (digest !== DESKTOP_TOKENS_SHA256) {
+    console.error(
+      `design tokens: design/tokens.css no longer matches the desktop copy.\n` +
+      `  desktop commit ${DESKTOP_TOKENS_COMMIT}\n` +
+      `  expected sha256 ${DESKTOP_TOKENS_SHA256}\n` +
+      `  actual sha256   ${digest}\n` +
+      `Copy design/tokens.css from the desktop repository again and update both constants in scripts/design-tokens.mjs.`,
+    )
+    process.exit(1)
+  }
+
   let actual
   try {
     actual = readFileSync(target, 'utf8')

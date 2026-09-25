@@ -7,9 +7,12 @@
 export const OVERLAY_TOKEN_CSS = `:host {
   --font-ui: "Schibsted Grotesk Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
   --font-display: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --type-2: 0.8125rem;
+  --type-3: 0.9375rem;
+  --weight-medium: 550;
   --surface: #fffefa;
   --text-heading: #273329;
-  --text-muted: #667267;
+  --text-muted: #5d695e;
   --text-faint: #677166;
   --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
   --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
@@ -30,6 +33,9 @@ export const OVERLAY_TOKEN_CSS = `:host {
   :host {
     --font-ui: "Schibsted Grotesk Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
     --font-display: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --type-2: 0.8125rem;
+    --type-3: 0.9375rem;
+    --weight-medium: 550;
     --surface: #201e15;
     --text-heading: #e9efe1;
     --text-muted: #9aa595;

@@ -140,9 +140,9 @@
       {#if view.showConnectionAction}
         <div class="actions">
           {#if view.connection.action === 'install' || view.connection.action === 'update'}
-            <a class="primary" href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">{view.connection.actionLabel}</a>
+            <a class={view.showPermissionStep ? 'secondary' : 'primary'} href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">{view.connection.actionLabel}</a>
           {:else if view.connection.action === 'open-desktop'}
-            <button class="primary" type="button" disabled={opening} on:click={openDesktop}>
+            <button class={view.showPermissionStep ? 'secondary' : 'primary'} type="button" disabled={opening} on:click={openDesktop}>
               {opening ? 'Opening…' : view.connection.actionLabel}
             </button>
           {/if}
@@ -200,43 +200,43 @@
     background: var(--surface);
     box-shadow: var(--shadow-raised);
   }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; color: var(--text-2); font-weight: 700; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; color: var(--text-2); font-weight: var(--weight-bold); }
   .logo { width: 30px; height: 30px; }
-  h1 { margin: 0; color: var(--text-heading); font: 550 30px/1.18 var(--font-display); font-variation-settings: var(--font-display-settings); }
+  h1 { margin: 0; color: var(--text-heading); font-family: var(--font-display); font-variation-settings: var(--font-display-settings); font-size: var(--type-6); font-weight: var(--weight-regular); line-height: 1.18; }
   .lead { margin: 14px 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
-  ul { margin: 22px 0 28px; padding-left: 20px; color: var(--text); font-size: var(--type-2); line-height: 1.75; }
+  ul { margin: 22px 0 28px; padding-left: 20px; color: var(--text); font-size: var(--type-3); line-height: 1.75; }
   li::marker { color: var(--text-faint); }
   .connection { margin: 18px 0; padding: 13px 16px; border-radius: var(--radius-md); background: var(--warn-bg); }
   .connection.ok { background: var(--ok-bg); }
-  .connection strong { display: block; color: var(--warn-text); font-size: var(--type-2); }
+  .connection strong { display: block; color: var(--warn-text); font-size: var(--type-3); font-weight: var(--weight-bold); }
   .connection.ok strong { color: var(--ok-text); }
   .connection p { margin: 4px 0 0; color: var(--warn-text); font-size: var(--type-2); line-height: 1.5; }
   .connection.ok p { color: var(--ok-text); }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
-  button, a.primary {
+  button, a.primary, a.secondary {
     border: 0;
     border-radius: var(--radius-md);
     padding: 13px 18px;
     font-size: var(--type-2);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     cursor: pointer;
     transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
   }
-  button:active, a.primary:active { transform: scale(.97); }
+  button:active, a.primary:active, a.secondary:active { transform: scale(.97); }
   button:disabled:active { transform: none; }
-  a.primary { display: inline-block; text-decoration: none; }
+  a.primary, a.secondary { display: inline-block; text-decoration: none; }
   .primary { color: var(--on-accent); background: var(--accent); box-shadow: inset 0 1px 0 var(--button-edge); }
   .primary:hover { background: var(--accent-hover); }
-  .secondary { border: 1px solid var(--border-soft); color: var(--accent-link); background: var(--surface-inset); }
-  .secondary:hover { border-color: var(--border-strong); background: var(--tint); }
+  .secondary, a.secondary { border: 1px solid var(--border-soft); color: var(--accent-link); background: var(--surface-inset); }
+  .secondary:hover, a.secondary:hover { border-color: var(--border-strong); background: var(--tint); }
   button:disabled { cursor: wait; opacity: .65; }
   .permission { display: grid; gap: 10px; margin: 0 0 22px; padding: 13px 16px; border-radius: var(--radius-md); background: var(--surface-inset); }
-  .permission strong { font-size: var(--type-2); }
+  .permission strong { font-size: var(--type-3); font-weight: var(--weight-bold); }
   .permission p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
   .not-now { margin-top: 4px; }
-  .success { margin-bottom: 18px; padding: 13px 16px; border-radius: var(--radius-md); color: var(--ok-text); background: var(--ok-bg); font-weight: 600; }
+  .success { margin-bottom: 18px; padding: 13px 16px; border-radius: var(--radius-md); color: var(--ok-text); background: var(--ok-bg); font-weight: var(--weight-medium); }
   .status, .shortcut { color: var(--text-muted); font-size: var(--type-2); }
   .status { margin-top: 12px; }
   .shortcut { margin-top: 26px; }
-  kbd { border-radius: 5px; padding: 2px 6px; background: var(--surface-inset); color: var(--text-2); font: 600 11px var(--font-code); }
+  kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface-inset); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }
 </style>

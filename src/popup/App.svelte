@@ -672,6 +672,7 @@
   $: pageCard = pagePresentation(page)
   $: pageFillable = page.kind === 'login' || page.kind === 'username'
   $: desktopNeedsOpening = desktopState === 'locked' || desktopState === 'desktop-offline' || desktopState === 'unavailable'
+  $: retryNote = reconnectScheduled ? 'Trying the desktop connection again while this window is open.' : ''
 </script>
 
 <main>
@@ -680,15 +681,14 @@
   {#if phase.name === 'initial' || phase.name === 'checking'}
     <StatusCard title="Finding the desktop app" message="Checking the private connection on this device." />
   {:else if phase.name === 'unavailable'}
-    <StatusCard title={phase.title} message={phase.message} tone="warning" />
+    <StatusCard title={phase.title} message={phase.message} note={retryNote} tone="warning" />
   {:else if phase.name === 'desktop-offline'}
-    <StatusCard title={phase.title} message={phase.message} tone="warning" />
+    <StatusCard title={phase.title} message={phase.message} note={retryNote} tone="warning" />
   {:else if phase.name === 'locked'}
     <StatusCard title={phase.title} message={phase.message} />
   {:else if phase.name === 'ready'}
     <StatusCard title="Connected" message={desktopFillAvailable ? '' : 'Page filling is unavailable in this desktop build.'} tone="success" />
   {/if}
-  {#if reconnectScheduled}<p class="retry-note" role="status">Trying the desktop connection again while this window is open.</p>{/if}
 
   <section class="page-context" class:success={pageCard.tone === 'success'} class:warning={pageCard.tone === 'warning'} aria-live="polite">
     <span class="page-icon" aria-hidden="true">
@@ -764,33 +764,32 @@
 
 <style>
   main { padding: 14px; background: var(--bg); }
-  .retry-note { margin: -4px 2px 10px; color: var(--warn-text); font-size: var(--type-1); }
   .page-context { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
   .page-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--radius-md); color: var(--gold-text); background: var(--gold-soft-bg); }
   .page-context.success .page-icon { color: var(--accent); background: var(--tint); }
   .page-context.warning .page-icon { color: var(--warn-text); background: var(--warn-bg); }
-  .page-context strong { display: block; overflow: hidden; font-family: var(--font-display); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
-  .page-context p, .inline-access p, .fill-feedback { margin: 2px 0 0; color: var(--text-muted); font-size: var(--type-1); line-height: 1.45; }
-  .page-badge { max-width: 84px; padding: 4px 7px; border-radius: var(--radius-pill); color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-1); font-weight: 700; text-align: center; }
+  .page-context strong { display: block; overflow: hidden; font-family: var(--font-display); font-size: var(--type-3); font-weight: var(--weight-regular); text-overflow: ellipsis; white-space: nowrap; }
+  .page-context p, .inline-access p, .fill-feedback { margin: 2px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.45; }
+  .page-badge { max-width: 84px; padding: 4px 7px; border-radius: var(--radius-pill); color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-1); font-weight: var(--weight-bold); text-align: center; }
   .page-context.success .page-badge { color: var(--accent); background: var(--tint); }
   .page-context.warning .page-badge { color: var(--warn-text); background: var(--warn-bg); }
   .inline-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
-  .inline-access strong { font-size: var(--type-1); }
-  .inline-access > button { min-width: 62px; border: 0; border-radius: var(--radius-pill); padding: 6px 10px; color: var(--text); background: var(--surface-inset); font-size: var(--type-1); font-weight: 700; cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
+  .inline-access strong { font-size: var(--type-3); font-weight: var(--weight-bold); }
+  .inline-access > button { min-width: 62px; border: 0; border-radius: var(--radius-pill); padding: 6px 10px; color: var(--text); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-medium); cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
   .inline-access > button:active { transform: scale(.95); }
   .inline-access > button.enabled { color: var(--accent); background: var(--tint); }
   .inline-access > button:disabled { cursor: wait; opacity: .6; }
   .inline-access > button:disabled:active { transform: none; }
   .inline-feedback { grid-column: 1 / -1; }
-  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: 650; cursor: pointer; box-shadow: inset 0 1px 0 var(--button-edge); transition: background-color .16s ease, transform .1s ease; }
+  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: var(--weight-bold); cursor: pointer; box-shadow: inset 0 1px 0 var(--button-edge); transition: background-color .16s ease, transform .1s ease; }
   .generate-button:hover:not(:disabled) { background: var(--accent-hover); }
   .generate-button:active:not(:disabled) { background: var(--accent-active); transform: scale(.97); }
   .generate-button:disabled { cursor: wait; opacity: .65; }
   .generated-password { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 8px; border-radius: var(--radius-sm); background: var(--surface-inset); }
-  .generated-password code { flex: 1; overflow: hidden; font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
-  .generated-password button { border: 0; border-radius: 6px; padding: 5px 8px; color: var(--text); background: var(--surface); font-size: var(--type-1); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
+  .generated-password code { flex: 1; overflow: hidden; font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
+  .generated-password button { border: 0; border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text); background: var(--surface); font-size: var(--type-2); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
   .generated-password button:hover { background: var(--tint); }
   .generated-password button:active { transform: scale(.95); }
   .fill-feedback { min-height: 15px; margin: 7px 3px 0; }
-  footer { margin-top: 12px; color: var(--text-faint); font-size: var(--type-1); text-align: center; }
+  footer { margin-top: 12px; color: var(--text-faint); font-size: var(--type-2); text-align: center; }
 </style>
