@@ -158,13 +158,13 @@
 
 <style>
   .options { box-sizing: border-box; max-width: 680px; margin: 40px auto; padding: 32px; background: var(--surface); border-radius: var(--radius-xl); border: 0; box-shadow: var(--shadow-raised); }
-  h1 { margin: 0; color: var(--text-heading); font: 550 var(--type-6)/1.2 var(--font-display); font-variation-settings: var(--font-display-settings); }
-  .intro { max-width: 560px; color: var(--text-muted); line-height: 1.5; }
+  h1 { margin: 0; color: var(--text-heading); font-family: var(--font-display); font-variation-settings: var(--font-display-settings); font-size: var(--type-6); font-weight: var(--weight-regular); line-height: 1.2; }
+  .intro { max-width: 560px; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
   .setting, .section-heading, li { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
   .setting { margin-top: 24px; padding: 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-inset); }
   .setting-actions { display: flex; align-items: center; gap: 8px; }
-  strong { font-size: 14px; color: var(--text-heading); } p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
-  button { border: 0; border-radius: var(--radius-pill); padding: 8px 14px; color: var(--accent-link); background: var(--tint); font-weight: 700; cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
+  strong { font-size: var(--type-3); font-weight: var(--weight-bold); color: var(--text-heading); } p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); }
+  button { border: 0; border-radius: var(--radius-pill); padding: 8px 14px; color: var(--accent-link); background: var(--tint); font-weight: var(--weight-bold); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
   button:hover { background: var(--tint-hover); }
   button:active { transform: scale(.96); }
   button.danger { color: var(--warn-text); background: var(--warn-bg); }
@@ -172,12 +172,12 @@
   button:disabled:active { transform: none; }
   .privacy, .shortcut { margin-top: 16px; padding: 13px; border-radius: var(--radius-md); background: var(--tint); line-height: 1.5; }
   .paused { margin-top: 28px; }
-  .section-heading > button { font-size: 11px; }
+  .section-heading > button { font-size: var(--type-2); }
   ul { margin: 12px 0 0; padding: 0; list-style: none; }
-  li { padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
-  li button { min-height: 24px; padding: 5px 10px; font-size: 11px; }
+  li { padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: var(--type-2); }
+  li button { min-height: 24px; padding: 5px 10px; font-size: var(--type-2); }
   .empty { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-inset); }
   .shortcut { background: var(--surface-inset); }
-  kbd { border-radius: 5px; padding: 2px 6px; background: var(--surface); color: var(--text-2); font: 600 11px var(--font-code); }
-  .status { margin-top: 18px; color: var(--accent); font-weight: 650; }
+  kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }
+  .status { margin-top: 18px; color: var(--accent); font-weight: var(--weight-bold); }
 </style>
