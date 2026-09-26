@@ -23,7 +23,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.45 var(--font-ui);
+  font: var(--type-2)/1.45 var(--font-ui);
 }
 
 button, summary { font: inherit; }

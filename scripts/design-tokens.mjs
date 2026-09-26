@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -5,9 +6,14 @@ import { fileURLToPath } from 'node:url'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const source = join(root, 'design', 'tokens.css')
 const target = join(root, 'src', 'content', 'overlay-tokens.ts')
+const DESKTOP_TOKENS_COMMIT = '25b7b4b5b3c7f6cf49265e286c4747c6bd107fb9'
+const DESKTOP_TOKENS_SHA256 = '9e87d3014fb30c16de209f7d178333e9fde354261bc5ff5bcc2abd8764582306'
 const OVERLAY_TOKENS = [
   'font-ui',
   'font-display',
+  'type-2',
+  'type-3',
+  'weight-medium',
   'surface',
   'text-heading',
   'text-muted',
@@ -59,6 +65,10 @@ function sourceFiles(directory) {
   })
 }
 
+function pixels(value) {
+  return value.replace(/(-?[\d.]+)rem\b/g, (_, size) => `${Number(size) * 16}px`)
+}
+
 function collect() {
   const css = readFileSync(source, 'utf8')
   const light = declarations(block(css, /^:root \{/m))
@@ -68,7 +78,7 @@ function collect() {
     throw new Error(`design/tokens.css is missing overlay tokens: ${missing.join(', ')}`)
   }
   const pick = (map, fallback) => OVERLAY_TOKENS
-    .map((name) => `  --${name}: ${map.get(name) ?? fallback.get(name)};`)
+    .map((name) => `  --${name}: ${pixels(map.get(name) ?? fallback.get(name))};`)
     .join('\n')
   return { light: pick(light, light), dark: pick(dark, light) }
 }
@@ -99,6 +109,18 @@ if (mode === 'sync') {
   writeFileSync(target, expected)
   console.log('design tokens: wrote src/content/overlay-tokens.ts')
 } else if (mode === 'check') {
+  const digest = createHash('sha256').update(readFileSync(source)).digest('hex')
+  if (digest !== DESKTOP_TOKENS_SHA256) {
+    console.error(
+      `design tokens: design/tokens.css no longer matches the desktop copy.\n` +
+      `  desktop commit ${DESKTOP_TOKENS_COMMIT}\n` +
+      `  expected sha256 ${DESKTOP_TOKENS_SHA256}\n` +
+      `  actual sha256   ${digest}\n` +
+      `Copy design/tokens.css from the desktop repository again and update both constants in scripts/design-tokens.mjs.`,
+    )
+    process.exit(1)
+  }
+
   let actual
   try {
     actual = readFileSync(target, 'utf8')

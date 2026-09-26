@@ -18,24 +18,24 @@ const OVERLAY_CSS = `
         .card{display:inline-flex;align-items:center;gap:8px;padding:6px 8px 6px 6px;
           font-family:var(--font-ui);background:var(--surface);color:var(--text-heading);
           border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-pop)}
-        .mark{display:inline-grid;place-items:center;width:22px;height:22px;flex:0 0 22px;border-radius:6px;
+        .mark{display:inline-grid;place-items:center;width:22px;height:22px;flex:0 0 22px;border-radius:var(--radius-sm);
           background:var(--gold);color:var(--gold-mark-text)}
         .mark svg{display:block;width:15px;height:15px}
         button{font-family:inherit}
         .fill{border:0;border-radius:var(--radius-sm);padding:6px 12px;cursor:pointer;
           background:var(--accent);color:var(--on-accent);box-shadow:inset 0 1px 0 var(--button-edge);
-          font-size:13px;font-weight:600;white-space:nowrap}
+          font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}
         .fill:hover{background:var(--accent-hover)}.fill:disabled{opacity:.6;cursor:default}
         .copy{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
           background:var(--surface);color:var(--accent);
-          cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}.copy[hidden]{display:none}
+          cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.copy[hidden]{display:none}
         .identity{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
           background:var(--surface);color:var(--accent);
-          cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}.identity[hidden]{display:none}
+          cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.identity[hidden]{display:none}
         .identity:disabled{opacity:.6;cursor:default}
-        .status{max-width:220px;color:var(--text-muted);font-size:12px;line-height:1.3}
+        .status{max-width:220px;color:var(--text-muted);font-size:var(--type-2);line-height:1.3}
         .card button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
-        .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:15px;line-height:1;display:inline-grid;place-items:center;width:24px;height:24px;padding:0}`
+        .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:var(--type-3);line-height:1;display:inline-grid;place-items:center;width:24px;height:24px;padding:0}`
 
 export interface OverlayOptions {
   onFillRequest(): Promise<unknown> | unknown

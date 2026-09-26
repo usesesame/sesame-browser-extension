@@ -27,7 +27,7 @@
     border-radius: var(--radius-md);
     background: var(--accent);
     color: var(--on-accent);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     cursor: pointer;
     box-shadow: inset 0 1px 0 var(--button-edge);
     transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
