@@ -7,8 +7,8 @@
 export const OVERLAY_TOKEN_CSS = `:host {
   --font-ui: "Schibsted Grotesk Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
   --font-display: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-  --type-2: 0.8125rem;
-  --type-3: 0.9375rem;
+  --type-2: 13px;
+  --type-3: 15px;
   --weight-medium: 550;
   --surface: #fffefa;
   --text-heading: #273329;
@@ -24,8 +24,8 @@ export const OVERLAY_TOKEN_CSS = `:host {
   --gold-mark-text: #28352a;
   --focus-ring: #27613a;
   --button-edge: rgba(255, 255, 255, .14);
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
+  --radius-sm: 4px;
+  --radius-md: 8px;
   --shadow-pop: 0 12px 28px rgba(39, 53, 42, .13);
 }
 
@@ -33,8 +33,8 @@ export const OVERLAY_TOKEN_CSS = `:host {
   :host {
     --font-ui: "Schibsted Grotesk Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
     --font-display: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-    --type-2: 0.8125rem;
-    --type-3: 0.9375rem;
+    --type-2: 13px;
+    --type-3: 15px;
     --weight-medium: 550;
     --surface: #201e15;
     --text-heading: #e9efe1;
@@ -50,8 +50,8 @@ export const OVERLAY_TOKEN_CSS = `:host {
     --gold-mark-text: #21301f;
     --focus-ring: #91c79d;
     --button-edge: rgba(255, 255, 255, .08);
-    --radius-sm: 0.25rem;
-    --radius-md: 0.5rem;
+    --radius-sm: 4px;
+    --radius-md: 8px;
     --shadow-pop: 0 12px 28px rgba(0, 0, 0, .5);
   }
 }`

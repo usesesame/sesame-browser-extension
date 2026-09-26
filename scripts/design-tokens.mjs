@@ -65,6 +65,10 @@ function sourceFiles(directory) {
   })
 }
 
+function pixels(value) {
+  return value.replace(/(-?[\d.]+)rem\b/g, (_, size) => `${Number(size) * 16}px`)
+}
+
 function collect() {
   const css = readFileSync(source, 'utf8')
   const light = declarations(block(css, /^:root \{/m))
@@ -74,7 +78,7 @@ function collect() {
     throw new Error(`design/tokens.css is missing overlay tokens: ${missing.join(', ')}`)
   }
   const pick = (map, fallback) => OVERLAY_TOKENS
-    .map((name) => `  --${name}: ${map.get(name) ?? fallback.get(name)};`)
+    .map((name) => `  --${name}: ${pixels(map.get(name) ?? fallback.get(name))};`)
     .join('\n')
   return { light: pick(light, light), dark: pick(dark, light) }
 }
