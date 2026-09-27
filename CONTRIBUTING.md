@@ -16,8 +16,8 @@ desktop app, and the native messaging host are not part of it.
 | Marketing pages and public documentation | `usesesame/sesame-website` |
 
 The desktop owns the protocol because it owns the host. This repository keeps
-tagged, digest-bound copies under `contracts/browser/v1/` and
-`contracts/browser/v2/`. Editing the TypeScript types without first landing a
+tagged, digest-bound copies under `contracts/browser/v1/` through
+`contracts/browser/v4/`. Editing the TypeScript types without first landing a
 matching tagged contract is a bug rather than a protocol change.
 
 ## Your first change

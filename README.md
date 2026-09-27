@@ -122,8 +122,9 @@ tests and integration builds do not replace either store's installation flow.
 
 The desktop owns the native-messaging protocol. This repository keeps closed
 schemas, fictional test vectors, source commits, and SHA-256 digests in
-`contracts/browser/`. Version 1 covers capabilities, activation, login and
-identity filling, and save requests. Version 2 covers card filling only.
+`contracts/browser/`. Version 1 covers capabilities, activation, identity
+filling, and save requests. Version 2 covers card filling. Version 3 covers
+login filling. Version 4 covers one-time codes.
 
 Changing a wire shape needs a tagged contract and an explicit compatibility
 decision. Updating TypeScript types alone is not enough.
