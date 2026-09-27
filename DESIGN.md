@@ -23,7 +23,7 @@ The native-messaging manifest is pinned to the fixed development extension ID. T
 3. The user clicks **Fill this page**. The helper then checks autocomplete hints, static form attributes, and labels on related submit controls to reject signup and password-change surfaces. It never reads current input values or sends those markers away. A page loading, or the popup opening, is never enough on its own to start a fill.
 4. The extension binds the request to the active tab, window, exact normalized origin, and a random token held in that document's isolated execution world.
 5. The native host relays `{version, type: "fill", requestId, origin, fields}` to the running desktop app over the local named pipe. `fields` is `username`, `password`, or `both`, based on the bound step. The request carries no page contents or current input values.
-6. Sesame compares the requested origin with saved login URLs, preferring exact origins. A bare hostname and its single `www` form may match when scheme and effective port are identical, and the approval dialog identifies this convenience match and shows the saved origin. Parent domains, other subdomains, different schemes, and different ports are not treated as equivalent.
+6. Sesame compares the requested origin with saved login URLs, preferring exact origins. A bare hostname and its single `www` form may match when scheme and effective port are identical, and the approval dialog identifies this convenience match and shows the saved origin. Parent domains, other subdomains, different schemes, and different ports are not treated as equivalent. A near miss that resembles one saved host answers with the `lookalike` reason and releases nothing; the warning names that host and changes nothing about which origin can fill.
 7. Before bringing its window forward, Sesame stores the bounded, secret-free approval metadata as a pending desktop request. The renderer receives an immediate event and also reconciles that pending request, so a listener race or renderer reload cannot leave a live approval invisible. The user selects a login when needed and explicitly approves the request. Approval expires after 30 seconds.
 8. Before releasing a credential, the desktop rechecks the pipe peer, vault session, request binding, selected entry, and the same strict origin relationship. A lock, vault change, disconnect, timeout, replay, or changed login fails closed.
 9. The extension rechecks the active tab, window, origin, same-document token, and prepared step mode. It writes only the field values present in that step and dispatches ordinary `input` and `change` events.
@@ -46,19 +46,20 @@ Every native message is versioned, request-bound, length-limited, and decoded wi
 The desktop-owned canonical contracts are under
 `src-tauri/contracts/browser/`. The independently buildable extension uses the
 byte-identical, source-commit-stamped snapshots under
-`contracts/browser/v1/`, `contracts/browser/v2/`, `contracts/browser/v3/`, and
-`contracts/browser/v4/`; it does not import the desktop implementation or
-download a contract at build or runtime. General operations use protocol v1.
-Card filling uses the narrow protocol v2 contract. Login filling uses protocol
-v3. One-time codes use protocol v4.
+`contracts/browser/v1/`, `contracts/browser/v2/`, `contracts/browser/v3/`,
+`contracts/browser/v4/`, and `contracts/browser/v5/`; it does not import the
+desktop implementation or download a contract at build or runtime. General
+operations use protocol v1. Card filling uses the narrow protocol v2 contract.
+Login filling uses protocol v5. One-time codes use protocol v4.
 
 - Capability request: `{version, type: "capabilities", requestId}`.
 - Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable, locked, fillAvailable}`.
 - Activation request: exactly `{version, type: "activate", requestId}`. It contains no site or credential fields. A running desktop focuses its main window; when the desktop is closed, the registered native helper may start only the sibling Sesame executable from its own install directory.
 - Activation response: exactly `{version, type: "activated", requestId, opened}`. Activation never starts, retries, or resumes a fill request.
-- Fill request: `{version: 3, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. `fields` is optional and means `both` when omitted. During migration, older version-1 helper requests without `fields` are interpreted as `both`.
+- Fill request: `{version: 5, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. `fields` is optional and means `both` when omitted. During migration, older version-1 helper requests without `fields` are interpreted as `both`, and version three requests keep their version three behavior.
 - Successful fill response contains exactly the requested slice: `username`, `password`, or both credential fields, plus `version`, `type`, `requestId`, and `matchKind`. `matchKind` is `exact` or `wwwAlias`, naming the rule the desktop enforced before it released the credential. The explanation is additive: it never changes which origin can fill, and the desktop recomputes the rule when it releases the credential.
-- Unavailable response: exactly `{version, type: "fill-unavailable", requestId, reason}`, where `reason` is from a small allowlist.
+- Unavailable response: exactly `{version, type: "fill-unavailable", requestId, reason}`, where `reason` is from a small allowlist. When `reason` is `lookalike`, the response also carries exactly one `lookalike` field: the one stored host the requested page resembles, normalized to a lowercase origin host and bounded to 128 characters with no control character and no path, query, or userinfo. No credential is released on that path.
+- The lookalike warning is advisory. It never produces a fill, never relaxes the exact-origin rule, and never carries a credential or more than one stored host. The named host is the user's own data and is already shown in the normal approval list, so the warning treats it as untrusted display text: the extension normalizes it for display, bounds it, and renders it as text, never as markup.
 - Identity request: `{version, type: "identity", requestId, origin, fields}`,
   where `fields` is a unique comma-separated subset of the nine allowlisted
   identity keys. A successful response is exactly `{version, type:
