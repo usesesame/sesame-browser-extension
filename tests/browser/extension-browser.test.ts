@@ -365,8 +365,8 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   }
 }
 
-async function mockNativeHostInWorker(): Promise<void> {
-  await worker.evaluate(() => {
+async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exact'): Promise<void> {
+  await worker.evaluate((matchKind) => {
     const target = globalThis as typeof globalThis & {
       __sesameTestRestore?: () => void
       __sesameSaveRequests?: number
@@ -405,7 +405,7 @@ async function mockNativeHostInWorker(): Promise<void> {
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'fill',
-                matchKind: 'exact',
+                matchKind,
                 ...(fields === 'password' ? {} : { username: 'jamie@example.test' }),
                 ...(fields === 'username' ? {} : { password: 'fictional-inline-pass' }),
               }))
@@ -440,7 +440,7 @@ async function mockNativeHostInWorker(): Promise<void> {
         },
       }
     }
-  })
+  }, fillMatchKind)
 }
 
 async function installMissingNativeHost(): Promise<void> {
@@ -1390,6 +1390,71 @@ describe('extension browser suite', () => {
         { timeout: 15000 },
       ).toBe(code)
     } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('shows the fill match explanation in the popup after an inline fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    let popup: Page | undefined
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe('fictional-inline-pass')
+      popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup!.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/The saved login matches this site exactly/)
+    } finally {
+      if (popup && !popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('shows the www alias explanation in the popup after a fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker('wwwAlias')
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/through its single www address/)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()
     }
   }, 30000)

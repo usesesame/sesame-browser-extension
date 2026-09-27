@@ -5,11 +5,14 @@ import { createInlineRegistrationSync, syncInlineContentScript } from './inline-
 import { handleExtensionCommand } from './command-handler'
 import { INLINE_SETTINGS_KEY, loadInlineSettings, normalizePausedOrigins } from '../permissions/inline-access'
 import { publicFillResult } from './fill-result'
+import { createLastFillTracker } from './last-fill'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
+import type { FillContext } from './fill-state'
 
 const coordinator = createCoordinator(chromeBrowser)
 const saveSession = createSaveSessionController()
+const lastFill = createLastFillTracker()
 const CONNECTION_CACHE_MS = 4_000
 let cachedConnection: { checkedAt: number; value: Awaited<ReturnType<typeof coordinator.checkConnection>> } | undefined
 let connectionCheck: Promise<Awaited<ReturnType<typeof coordinator.checkConnection>>> | undefined
@@ -64,11 +67,38 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 })
 chrome.runtime.onStartup.addListener(() => { void syncInlineAccess() })
-chrome.commands.onCommand.addListener((command) => { void handleExtensionCommand(command, coordinator) })
+chrome.commands.onCommand.addListener((command) => {
+  void handleExtensionCommand(command, coordinator).then((handled) => {
+    if (handled && command === 'fill-login') recordLastFillResult(coordinator.state())
+  })
+})
 void refreshInlineRegistration()
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => saveSession.handleTabUpdated(tabId, changeInfo))
-chrome.tabs.onRemoved.addListener((tabId) => saveSession.handleTabRemoved(tabId))
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  saveSession.handleTabUpdated(tabId, changeInfo)
+  if (typeof changeInfo.url === 'string' || changeInfo.status === 'loading') lastFill.clear(tabId)
+})
+chrome.tabs.onRemoved.addListener((tabId) => {
+  saveSession.handleTabRemoved(tabId)
+  lastFill.clear(tabId)
+})
+
+function recordLastFillResult(result: FillContext): void {
+  const phase = result.phase
+  if (phase.name !== 'complete') return
+  chrome.tabs.query({ active: true, currentWindow: true })
+    .then(([tab]) => {
+      const tabId = tab?.id
+      if (typeof tabId === 'number' && Number.isInteger(tabId)) {
+        lastFill.record(tabId, {
+          usernameFilled: phase.usernameFilled,
+          passwordFilled: phase.passwordFilled,
+          matchKind: phase.matchKind,
+        })
+      }
+    })
+    .catch(() => { /* noop */ })
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== chrome.runtime.getURL('popup.html')) {
@@ -84,6 +114,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (started || message?.type !== 'start') return
       started = true
       coordinator.fillActivePage(controller.signal).then((result) => {
+        recordLastFillResult(result)
         try { port.postMessage(publicFillResult(result)) } catch { /* noop */ }
       }).catch(() => {
         try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }
@@ -195,7 +226,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (message?.type === 'sesame:autofill') {
-    coordinator.fillActivePage().then((result) => sendResponse(publicFillResult(result))).catch(() => sendResponse({
+    coordinator.fillActivePage().then((result) => {
+      recordLastFillResult(result)
+      sendResponse(publicFillResult(result))
+    }).catch(() => sendResponse({
       state: 'unavailable',
       code: 'fill-failed',
     }))
@@ -279,6 +313,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     saveSession.saveHeld(chromeBrowser, tabId)
       .then(sendResponse)
       .catch(() => sendResponse({ ok: false, code: 'save-failed' }))
+    return true
+  }
+  if (message?.type === 'sesame:last-fill-result') {
+    if (sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ state: 'none' })
+      return false
+    }
+    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      const tabId = tab?.id
+      const record = typeof tabId === 'number' && Number.isInteger(tabId) ? lastFill.lookup(tabId) : undefined
+      sendResponse(record
+        ? {
+            state: 'filled',
+            usernameFilled: record.usernameFilled,
+            passwordFilled: record.passwordFilled,
+            matchKind: record.matchKind,
+          }
+        : { state: 'none' })
+    }).catch(() => sendResponse({ state: 'none' }))
     return true
   }
   if (message?.type === 'sesame:open-desktop') {

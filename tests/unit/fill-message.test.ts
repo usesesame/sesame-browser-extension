@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cardFillMessage, fillMessage, identityFillMessage, oneTimeCodeMessage } from '../../src/content/overlay'
+import { fillMatchExplanation } from '../../src/shared/fill-match'
 
 describe('inline fill messages', () => {
   it('explains a cancelled login fill instead of going silent', () => {
@@ -19,6 +20,17 @@ describe('inline fill messages', () => {
   it('falls back to a plain review line when the result carries no rule', () => {
     expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true }))
       .toBe('Filled. Review the page and sign in.')
+  })
+
+  it('shares one explanation string with the popup for both match kinds', () => {
+    for (const matchKind of ['exact', 'wwwAlias'] as const) {
+      const explanation = fillMatchExplanation(matchKind)
+      expect(explanation).not.toBeNull()
+      expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true, matchKind }))
+        .toBe(explanation)
+    }
+    expect(fillMatchExplanation('parentDomain')).toBeNull()
+    expect(fillMatchExplanation(undefined)).toBeNull()
   })
 
   it('asks for a desktop update when the host does not speak the fill protocol', () => {

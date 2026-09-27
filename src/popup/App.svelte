@@ -6,6 +6,7 @@
   } from './states/store'
   import { makeRegistrationPassword, normalizeRegistrationOutcome, type PasswordSurfaceKind } from '../content/registration'
   import { copyTemporarily, type TemporaryCopyHandle } from '../content/temporary-copy'
+  import { fillMatchExplanation } from '../shared/fill-match'
   import { normalizeFillOrigin } from '../protocol/native'
   import {
     CHECKING_PRESENTATION, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
@@ -400,9 +401,10 @@
     fillWorking = false
     if (result?.state === 'filled') {
       if (activeTabId !== null) await armSave(activeTabId)
-      fillFeedback = result.usernameFilled && result.passwordFilled
-        ? 'Username and password filled. Review the page before signing in.'
-        : 'Sign-in field filled. Review the page before continuing.'
+      fillFeedback = fillMatchExplanation(result.matchKind)
+        ?? (result.usernameFilled && result.passwordFilled
+          ? 'Username and password filled. Review the page before signing in.'
+          : 'Sign-in field filled. Review the page before continuing.')
     } else {
       fillFeedback = result?.code === 'no-match' && page.hostname
         ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
@@ -560,6 +562,16 @@
     }
   }
 
+  async function loadLastFillResult() {
+    if (activeTabId === null) return
+    try {
+      const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:last-fill-result' }), 4_000)
+      if (response?.state !== 'filled') return
+      const explanation = fillMatchExplanation(response.matchKind)
+      if (explanation) fillFeedback = explanation
+    } catch { /* noop */ }
+  }
+
   async function armSave(tabId: number) {
     if (!activeOrigin) {
       saveArmed = false
@@ -645,6 +657,7 @@
     refreshing = true
     fillFeedback = ''
     await Promise.allSettled([checkDesktop(), inspectPage()])
+    await loadLastFillResult()
     refreshing = false
   }
 

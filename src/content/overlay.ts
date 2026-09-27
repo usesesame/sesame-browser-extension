@@ -5,6 +5,7 @@ import { cardFieldsForInput } from './card-fields'
 import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
 import { isVisibleInput } from '../shared/dom'
+import { fillMatchExplanation } from '../shared/fill-match'
 import {
   DEFAULT_MAX_SCAN_DEPTH,
   collectInputs,
@@ -655,12 +656,7 @@ function ownerOf(field: HTMLInputElement): Element {
 
 export function fillMessage(result: unknown): string {
   if (recordString(result, 'state') === 'filled') {
-    const matchKind = recordString(result, 'matchKind')
-    if (matchKind === 'exact') return 'Filled. The saved login matches this site exactly.'
-    if (matchKind === 'wwwAlias') {
-      return 'Filled. The saved login matches this site through its single www address.'
-    }
-    return 'Filled. Review the page and sign in.'
+    return fillMatchExplanation(recordString(result, 'matchKind')) ?? 'Filled. Review the page and sign in.'
   }
   const code = recordString(result, 'code') || recordString(result, 'reason')
   if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
