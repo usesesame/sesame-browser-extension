@@ -29,6 +29,18 @@ const loginPage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const framedLoginPage = `<!doctype html><html><body>
+<h1>Embedded sign in</h1>
+<iframe id="login-frame" title="Sign in" src="/login" style="width:640px;height:420px"></iframe>
+</body></html>`
+
+function crossOriginLoginPage(): string {
+  return `<!doctype html><html><body>
+<h1>Embedded sign in</h1>
+<iframe id="login-frame" title="Sign in" src="${secondaryOrigin}/login" style="width:640px;height:420px"></iframe>
+</body></html>`
+}
+
 const usernameStepPage = `<!doctype html><html><body>
 <form id="login-form" action="/signin" method="post">
 <h1>Sign in</h1>
@@ -111,13 +123,15 @@ const oneTimeCodePage = `<!doctype html><html><body>
 </body></html>`
 
 function pageBody(path: string): string {
-  return path === '/username' ? usernameStepPage
-    : path === '/password' ? passwordStepPage
-      : path === '/identity' ? identityPage
-        : path === '/card' ? cardPage
-          : path === '/registration' ? registrationPage
-            : path === '/password-change' ? passwordChangePage
-              : path === '/one-time-code' ? oneTimeCodePage : loginPage
+  return path === '/framed-login' ? framedLoginPage
+    : path === '/cross-origin-login' ? crossOriginLoginPage()
+      : path === '/username' ? usernameStepPage
+        : path === '/password' ? passwordStepPage
+          : path === '/identity' ? identityPage
+            : path === '/card' ? cardPage
+              : path === '/registration' ? registrationPage
+                : path === '/password-change' ? passwordChangePage
+                  : path === '/one-time-code' ? oneTimeCodePage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -716,6 +730,58 @@ describe('extension browser suite', () => {
     expect(values.inputs).not.toContain(approved.username)
     expect(values.text).not.toContain(approved.username)
   })
+
+  it('fills a same-origin sign-in form inside a child frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/framed-login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      const frame = current.frameLocator('#login-frame')
+      await expect.poll(
+        async () => frame.locator('#username').inputValue(),
+        { timeout: 15000 },
+      ).toBe('jamie@example.test')
+      expect(await frame.locator('#password').inputValue()).toBe('fictional-inline-pass')
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('does not fill a cross-origin sign-in frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/cross-origin-login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/No visible sign-in fields were found/)
+      expect(await popup.getByRole('button', { name: 'Fill login', exact: true }).count()).toBe(0)
+      const frame = current.frameLocator('#login-frame')
+      expect(await frame.locator('#username').inputValue()).toBe('')
+      expect(await frame.locator('#password').inputValue()).toBe('')
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
 
   it('fills only the approved identity fields after a matching prepare', async () => {
     const approvedIdentity = {

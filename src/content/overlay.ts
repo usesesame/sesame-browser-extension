@@ -6,6 +6,12 @@ import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
 import { isVisibleInput } from '../shared/dom'
 import {
+  DEFAULT_MAX_SCAN_DEPTH,
+  collectInputs,
+  collectInputsOfType,
+  eventTargetInput,
+} from './input-scan'
+import {
   fillRegistrationSurface,
   inspectPasswordSurface,
   makeRegistrationPassword,
@@ -53,6 +59,7 @@ export interface OverlayOptions {
 
 const CAPABILITY_TTL_MS = 15_000
 const GENERATED_PASSWORD_TTL_MS = 120_000
+const MAX_OBSERVED_SHADOW_ROOTS = 64
 
 let sharedHostId: string | undefined
 
@@ -449,17 +456,18 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       }
       hideOverlay()
     }
-    const active = document.activeElement
-    if (active instanceof HTMLInputElement) {
+    const active = focusedInput()
+    if (active) {
       const safeAnchor = findSafeAnchor(active)
       if (safeAnchor) showOverlay(safeAnchor)
     }
   }
 
   function onFocusIn(event: FocusEvent) {
-    const target = event.target
-    if (!(target instanceof HTMLInputElement)) return
+    const target = eventTargetInput(event)
+    if (!target) return
     if (target !== dismissedField) dismissedField = null
+    observePageRoots()
     const safeAnchor = findSafeAnchor(target)
     if (safeAnchor) showOverlay(safeAnchor)
     else hideOverlay()
@@ -468,8 +476,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   function onFocusOut() {
     setTimeout(() => {
       if (!host || document.activeElement === host) return
-      const active = document.activeElement
-      if (!(active instanceof HTMLInputElement) || !findSafeAnchor(active)) hideOverlay()
+      const active = focusedInput()
+      if (!active || !findSafeAnchor(active)) hideOverlay()
     }, 150)
   }
 
@@ -483,25 +491,45 @@ export function attachInlineButton(options: OverlayOptions): () => void {
         (record) => record.type === 'childList' || record.target instanceof HTMLInputElement,
       )
     ) {
+      if (records.some((record) => record.type === 'childList')) observePageRoots()
       refreshFocusedField()
     }
   })
-  pageObserver.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: [
-      'type',
-      'disabled',
-      'readonly',
-      'hidden',
-      'style',
-      'class',
-      'autocomplete',
-      'name',
-      'id',
-    ],
-  })
+  const observedRoots = new WeakSet<Node>()
+  let observedShadowRoots = 0
+
+  function observeRoot(root: Node) {
+    if (observedRoots.has(root)) return
+    observedRoots.add(root)
+    pageObserver.observe(root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        'type',
+        'disabled',
+        'readonly',
+        'hidden',
+        'style',
+        'class',
+        'autocomplete',
+        'name',
+        'id',
+      ],
+    })
+  }
+
+  function observePageRoots() {
+    observeRoot(document.documentElement)
+    for (const root of collectInputs(document).shadowRoots) {
+      if (observedRoots.has(root)) continue
+      if (observedShadowRoots >= MAX_OBSERVED_SHADOW_ROOTS) return
+      observedShadowRoots += 1
+      observeRoot(root)
+    }
+  }
+
+  observePageRoots()
   document.addEventListener('focusin', onFocusIn, true)
   document.addEventListener('focusout', onFocusOut, true)
   document.addEventListener('keydown', onKeyDown, true)
@@ -537,7 +565,20 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   }
 }
 
+function focusedInput(): HTMLInputElement | null {
+  let active: Element | null = document.activeElement
+  let depth = 0
+  while (active && depth < DEFAULT_MAX_SCAN_DEPTH) {
+    const root = active.shadowRoot
+    if (!root?.activeElement) break
+    active = root.activeElement
+    depth += 1
+  }
+  return active instanceof HTMLInputElement ? active : null
+}
+
 function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
+  if (collectInputs(document).truncated) return null
   if (!isVisibleInput(field)) return null
   if (!isLoginField(field)) {
     if (cardFieldsForInput(field).length > 0) return field
@@ -556,7 +597,9 @@ function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
 
 function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
   if (field.type === 'password') return false
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))
+  const scan = collectInputs(document)
+  if (scan.truncated) return false
+  const inputs = scan.inputs.filter((input) => isVisibleInput(input))
   const candidates = inputs.filter(
     (candidate) => candidate.type !== 'password' && isLoginField(candidate),
   )
@@ -587,9 +630,9 @@ function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
 }
 
 function visiblePasswordFields(): HTMLInputElement[] {
-  return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
-    (input) => isVisibleInput(input),
-  )
+  const scan = collectInputsOfType(document, 'password')
+  if (scan.truncated) return []
+  return scan.inputs.filter((input) => isVisibleInput(input))
 }
 
 function isLoginField(field: HTMLInputElement): boolean {
