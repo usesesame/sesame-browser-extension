@@ -215,6 +215,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }))
     return true
   }
+  if (message?.type === 'sesame:inspect-one-time-code') {
+    coordinator.inspectOneTimeCodeActivePage().then(sendResponse).catch(() => sendResponse({
+      state: 'unavailable',
+      code: 'page-check-failed',
+    }))
+    return true
+  }
+  if (message?.type === 'sesame:autofill-one-time-code') {
+    coordinator.fillOneTimeCodeActivePage().then(sendResponse).catch(() => sendResponse({
+      ok: false,
+      code: 'fill-failed',
+    }))
+    return true
+  }
   if (message?.type === 'sesame:capture-signup') {
     const tabId = sender.tab?.id
     // Origin from the delivering frame, never the message.
