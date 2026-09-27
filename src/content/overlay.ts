@@ -6,6 +6,7 @@ import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
 import { isVisibleInput } from '../shared/dom'
 import { fillMatchExplanation } from '../shared/fill-match'
+import { lookalikeWarningForResult } from '../shared/lookalike-warning'
 import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
 import {
   DEFAULT_MAX_SCAN_DEPTH,
@@ -656,6 +657,8 @@ function ownerOf(field: HTMLInputElement): Element {
 }
 
 export function fillMessage(result: unknown): string {
+  const lookalike = lookalikeWarningForResult(result)
+  if (lookalike) return lookalike
   if (recordString(result, 'state') === 'filled') {
     return fillMatchExplanation(recordString(result, 'matchKind')) ?? 'Filled. Review the page and sign in.'
   }

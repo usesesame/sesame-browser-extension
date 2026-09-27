@@ -1232,6 +1232,73 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
+  it('warns in the popup when the fill host resembles a saved site', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await worker.evaluate(({ tabId: expectedTabId, url }) => {
+      const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+      const runtime = chrome.runtime as unknown as { connectNative: unknown }
+      const tabs = chrome.tabs as unknown as { query: unknown }
+      const originalConnect = runtime.connectNative
+      const originalQuery = tabs.query
+      target.__sesameTestRestore = () => {
+        runtime.connectNative = originalConnect
+        tabs.query = originalQuery
+      }
+      runtime.connectNative = () => {
+        const messageListeners: Array<(message: unknown) => void> = []
+        return {
+          name: 'app.usesesame.browser',
+          postMessage(request: { requestId?: string; version?: number }) {
+            queueMicrotask(() => {
+              messageListeners.forEach((listener) => listener({
+                version: request?.version ?? 1,
+                type: 'fill-unavailable',
+                requestId: request?.requestId,
+                reason: 'lookalike',
+                lookalike: 'apple.example',
+              }))
+            })
+          },
+          disconnect() {},
+          onMessage: {
+            addListener: (callback: (message: unknown) => void) => { messageListeners.push(callback) },
+            removeListener: () => {},
+          },
+          onDisconnect: {
+            addListener: () => {},
+            removeListener: () => {},
+          },
+        }
+      }
+      tabs.query = async () => [{ id: expectedTabId, url }]
+    }, { tabId, url: fixtureUrl })
+
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/This page looks like apple\.example, a site you saved, but the address is different\. Sesame did not fill anything\. Check the address bar before you sign in\./)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await worker.evaluate(() => {
+        const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+        target.__sesameTestRestore?.()
+        delete target.__sesameTestRestore
+      })
+    }
+  }, 30000)
+
   it('fails closed when the fill port closes before an answer', async () => {
     const extensionId = new URL(worker.url()).host
     const current = await openFixture('/login')

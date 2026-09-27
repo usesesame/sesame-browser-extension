@@ -39,6 +39,17 @@ describe('inline fill messages', () => {
       .toBe('The Sesame desktop app needs an update to fill this login.')
   })
 
+  it('shows the lookalike warning in the status line with the stored host', () => {
+    expect(fillMessage({ state: 'unavailable', code: 'lookalike-domain', lookalike: 'apple.example' }))
+      .toBe('This page looks like apple.example, a site you saved, but the address is different. Sesame did not fill anything. Check the address bar before you sign in.')
+  })
+
+  it('keeps the ordinary no-match copy and shows no lookalike warning', () => {
+    const message = fillMessage({ state: 'unavailable', code: 'no-match' })
+    expect(message).toBe('No saved login matches this site.')
+    expect(message).not.toMatch(/looks like/)
+  })
+
   it('never leaves a known failure without copy', () => {
     const codes = [
       'origin-mismatch',

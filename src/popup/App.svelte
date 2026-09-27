@@ -8,6 +8,7 @@
   import { copyTemporarily, type TemporaryCopyHandle } from '../content/temporary-copy'
   import type { OneTimeCodeKind } from '../content/one-time-code'
   import { fillMatchExplanation } from '../shared/fill-match'
+  import { lookalikeWarningForResult } from '../shared/lookalike-warning'
   import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
   import { normalizeFillOrigin } from '../protocol/native'
   import {
@@ -418,9 +419,10 @@
           ? 'Username and password filled. Review the page before signing in.'
           : 'Sign-in field filled. Review the page before continuing.')
     } else {
-      fillFeedback = result?.code === 'no-match' && page.hostname
-        ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
-        : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.'
+      fillFeedback = lookalikeWarningForResult(result)
+        ?? (result?.code === 'no-match' && page.hostname
+          ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
+          : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
     }
   }
 
@@ -563,7 +565,8 @@
         generatedExpiryTimer = setTimeout(clearGeneratedPassword, REGISTRATION_EXPIRY_MS)
       } else {
         generatedPassword = ''
-        fillFeedback = FILL_MESSAGES[result?.code] ?? 'The change request could not be completed.'
+        fillFeedback = lookalikeWarningForResult(result)
+          ?? FILL_MESSAGES[result?.code] ?? 'The change request could not be completed.'
       }
     } catch {
       generatedPassword = ''
