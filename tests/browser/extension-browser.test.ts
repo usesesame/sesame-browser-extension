@@ -122,6 +122,24 @@ const oneTimeCodePage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const shadowOneTimeCodePage = `<!doctype html><html><body>
+<h1>Two-step verification</h1>
+<div id="code-host"></div>
+<script>
+const outer = document.getElementById('code-host').attachShadow({ mode: 'open' })
+const innerHost = document.createElement('div')
+outer.append(innerHost)
+const inner = innerHost.attachShadow({ mode: 'open' })
+const input = document.createElement('input')
+input.id = 'shadow-code'
+input.type = 'text'
+input.autocomplete = 'one-time-code'
+input.inputMode = 'numeric'
+input.setAttribute('aria-label', 'Verification code')
+inner.append(input)
+</script>
+</body></html>`
+
 function pageBody(path: string): string {
   return path === '/framed-login' ? framedLoginPage
     : path === '/cross-origin-login' ? crossOriginLoginPage()
@@ -131,7 +149,8 @@ function pageBody(path: string): string {
             : path === '/card' ? cardPage
               : path === '/registration' ? registrationPage
                 : path === '/password-change' ? passwordChangePage
-                  : path === '/one-time-code' ? oneTimeCodePage : loginPage
+                  : path === '/one-time-code' ? oneTimeCodePage
+                    : path === '/shadow-one-time-code' ? shadowOneTimeCodePage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -1338,6 +1357,38 @@ describe('extension browser suite', () => {
       const clipboard = await current.evaluate(async () => navigator.clipboard.readText())
       expect(clipboard).toBe(sentinel)
       expect(clipboard).not.toContain(code)
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('fills a one-time code inside nested open shadow roots', async () => {
+    const code = '287082'
+    const current = await openFixture('/shadow-one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      await current.evaluate(() => {
+        const outer = document.getElementById('code-host')?.shadowRoot
+        const inner = outer?.querySelector('div')?.shadowRoot
+        ;(inner?.querySelector('#shadow-code') as HTMLInputElement | null)?.focus()
+      })
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill code')
+      await expect.poll(
+        async () => current.evaluate(() => {
+          const outer = document.getElementById('code-host')?.shadowRoot
+          const inner = outer?.querySelector('div')?.shadowRoot
+          return (inner?.querySelector('#shadow-code') as HTMLInputElement | null)?.value ?? ''
+        }),
+        { timeout: 15000 },
+      ).toBe(code)
     } finally {
       await restoreWorkerMocks()
     }

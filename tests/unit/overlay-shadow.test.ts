@@ -62,6 +62,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+function visibleButtonLabels(roots: ShadowRoot[]): string[] {
+  return roots.flatMap((root) => [...root.querySelectorAll('button')])
+    .filter((button) => !button.hidden)
+    .map((button) => button.textContent ?? '')
+}
+
 describe('the inline control follows open shadow roots', () => {
   it('shows the control for a password field inside nested shadow roots', () => {
     const roots = captureShadow()
@@ -71,10 +77,24 @@ describe('the inline control follows open shadow roots', () => {
     const detach = attachInlineButton(baseOptions())
     password.dispatchEvent(new FocusEvent('focusin', { bubbles: true, composed: true }))
 
-    const labels = roots.flatMap((root) => [...root.querySelectorAll('button')])
-      .filter((button) => !button.hidden)
-      .map((button) => button.textContent ?? '')
-    expect(labels).toContain('Fill with Sesame')
+    expect(visibleButtonLabels(roots)).toContain('Fill with Sesame')
+    detach()
+  })
+
+  it('shows the code control for a one-time-code field inside nested shadow roots', () => {
+    const roots = captureShadow()
+    const second = openShadowRoot(openShadowRoot(document.body))
+    const code = document.createElement('input')
+    code.type = 'text'
+    code.autocomplete = 'one-time-code'
+    code.inputMode = 'numeric'
+    second.append(code)
+    layout(code)
+
+    const detach = attachInlineButton(baseOptions())
+    code.dispatchEvent(new FocusEvent('focusin', { bubbles: true, composed: true }))
+
+    expect(visibleButtonLabels(roots)).toContain('Fill code')
     detach()
   })
 

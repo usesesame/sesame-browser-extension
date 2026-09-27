@@ -635,23 +635,24 @@ function oneTimeCodeSurface(): FillSurface<
   OneTimeCodeFillOutcome
 > {
   let prepared = false
+  let frameId = 0
   return {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
+      await installContentBridge(browser, tabId, true)
+      const injections = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
         args: ['sesameInspectOneTimeCodeSurface'],
       })
-      const inspection = normalizeOneTimeCodeInspection(injection?.result)
-      if (!inspection.ok) return inspection
-      if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
-      return { ok: true, ready: inspection }
+      const selected = selectSameOriginSurface(injections, origin, normalizeOneTimeCodeInspection)
+      if (!selected.ok) return selected
+      frameId = selected.frameId
+      return { ok: true, ready: selected.ready }
     },
     async prepare(ctx, ready) {
       const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'prepare'],
       })
@@ -667,7 +668,7 @@ function oneTimeCodeSurface(): FillSurface<
     async fill(ctx, approved) {
       try {
         const [injection] = await ctx.browser.scripting.executeScript({
-          target: { tabId: ctx.tabId },
+          target: { tabId: ctx.tabId, frameIds: [frameId] },
           func: invokeBridgeFill,
           args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, approved.totpCode, 'fill'],
         })
@@ -679,7 +680,7 @@ function oneTimeCodeSurface(): FillSurface<
     async cleanup(ctx) {
       if (!prepared) return
       await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'clear'],
       })

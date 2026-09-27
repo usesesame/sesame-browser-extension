@@ -7,6 +7,7 @@ import {
   normalizeOneTimeCodeInspection,
   oneTimeCodeKindForField,
 } from '../../src/content/one-time-code'
+import { DEFAULT_MAX_SCAN_DEPTH, collectInputs } from '../../src/content/input-scan'
 
 const origin = 'https://example.test'
 const token = 'one-time-code-token-1234'
@@ -24,6 +25,20 @@ function render(html: string): HTMLInputElement[] {
   const inputs = Array.from(document.querySelectorAll('input'))
   for (const input of inputs) layout(input)
   return inputs
+}
+
+function openShadowRoot(parent: ParentNode): ShadowRoot {
+  const host = document.createElement('div')
+  parent.append(host)
+  return host.attachShadow({ mode: 'open' })
+}
+
+function codeInput(): HTMLInputElement {
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.autocomplete = 'one-time-code'
+  layout(input)
+  return input
 }
 
 beforeEach(() => {
@@ -102,6 +117,52 @@ describe('inspectOneTimeCodeSurface', () => {
     expect(oneTimeCodeKindForField(inputs[2])).toBe('split')
     expect(oneTimeCodeKindForField(document.createElement('input'))).toBeNull()
   })
+
+  it('finds a single field inside nested open shadow roots', () => {
+    const third = openShadowRoot(openShadowRoot(openShadowRoot(document.body)))
+    const input = codeInput()
+    third.append(input)
+
+    expect(collectInputs(document)).toMatchObject({ truncated: false, inputs: [input] })
+    expect(inspectOneTimeCodeSurface()).toEqual({
+      ok: true,
+      surface: { ok: true, origin },
+      kind: 'single',
+      fields: 1,
+    })
+    expect(oneTimeCodeKindForField(input)).toBe('single')
+  })
+
+  it('binds a split group inside an open shadow root', () => {
+    const root = openShadowRoot(document.body)
+    const form = document.createElement('form')
+    const inputs = Array.from({ length: 6 }, () => {
+      const input = document.createElement('input')
+      input.maxLength = 1
+      input.inputMode = 'numeric'
+      layout(input)
+      form.append(input)
+      return input
+    })
+    root.append(form)
+
+    expect(inspectOneTimeCodeSurface()).toEqual({
+      ok: true,
+      surface: { ok: true, origin },
+      kind: 'split',
+      fields: 6,
+    })
+    expect(oneTimeCodeKindForField(inputs[3])).toBe('split')
+  })
+
+  it('fails closed when an open shadow tree is deeper than the traversal bound', () => {
+    let deepest = openShadowRoot(document.body)
+    for (let depth = 0; depth < DEFAULT_MAX_SCAN_DEPTH; depth += 1) deepest = openShadowRoot(deepest)
+    deepest.append(codeInput())
+
+    expect(collectInputs(document).truncated).toBe(true)
+    expect(inspectOneTimeCodeSurface()).toEqual({ ok: false, code: 'no-fields' })
+  })
 })
 
 describe('fillOneTimeCodeSurface', () => {
@@ -121,6 +182,46 @@ describe('fillOneTimeCodeSurface', () => {
     expect(fillOneTimeCodeSurface(origin, token, code, 'fill'))
       .toEqual({ ok: true, kind: 'split', filledFields: 6 })
     expect(inputs.map((input) => input.value).join('')).toBe(code)
+  })
+
+  it('writes a code into a field inside nested open shadow roots', () => {
+    const third = openShadowRoot(openShadowRoot(openShadowRoot(document.body)))
+    const input = codeInput()
+    third.append(input)
+
+    expect(fillOneTimeCodeSurface(origin, token, null, 'prepare'))
+      .toEqual({ ok: true, kind: 'single', filledFields: 1 })
+    expect(fillOneTimeCodeSurface(origin, token, code, 'fill'))
+      .toEqual({ ok: true, kind: 'single', filledFields: 1 })
+    expect(input.value).toBe(code)
+  })
+
+  it('writes one digit per split box inside an open shadow root', () => {
+    const root = openShadowRoot(document.body)
+    const form = document.createElement('form')
+    const inputs = Array.from({ length: 6 }, () => {
+      const input = document.createElement('input')
+      input.maxLength = 1
+      input.inputMode = 'numeric'
+      layout(input)
+      form.append(input)
+      return input
+    })
+    root.append(form)
+
+    expect(fillOneTimeCodeSurface(origin, token, null, 'prepare'))
+      .toEqual({ ok: true, kind: 'split', filledFields: 6 })
+    expect(fillOneTimeCodeSurface(origin, token, code, 'fill'))
+      .toEqual({ ok: true, kind: 'split', filledFields: 6 })
+    expect(inputs.map((input) => input.value).join('')).toBe(code)
+  })
+
+  it('refuses a prepare when the shadow scan is truncated', () => {
+    let deepest = openShadowRoot(document.body)
+    for (let depth = 0; depth < DEFAULT_MAX_SCAN_DEPTH; depth += 1) deepest = openShadowRoot(deepest)
+    deepest.append(codeInput())
+
+    expect(fillOneTimeCodeSurface(origin, token, null, 'prepare')).toEqual({ ok: false, code: 'no-fields' })
   })
 
   it('refuses a split code whose digit count does not match the boxes', () => {
