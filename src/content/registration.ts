@@ -1,6 +1,7 @@
 import { isUsernameField } from './field-detector'
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
+import { collectInputs, collectInputsOfType } from './input-scan'
 
 const REGISTRATION_VERSION = 1
 
@@ -114,7 +115,9 @@ export function captureSignupSubmission(): SignupCapture | null {
   if (password.length === 0) return null
 
   const owner = passwordFields[0].form ?? passwordFields[0].parentElement ?? passwordFields[0]
-  const usernameField = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+  const scan = collectInputs(document)
+  if (scan.truncated) return null
+  const usernameField = scan.inputs
     .filter((field) => field.type !== 'password' && isVisibleInput(field, { rejectAriaHiddenAncestor: true, minimumSize: 1 }) && isUsernameField(field))
     .find((field) => (field.form ?? field.parentElement ?? field) === owner)
 
@@ -136,7 +139,9 @@ export function captureUpdateSubmission(): UpdateCapture | null {
   if (password.length === 0) return null
 
   const owner = newPasswordField.form ?? newPasswordField.parentElement ?? newPasswordField
-  const usernameField = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+  const scan = collectInputs(document)
+  if (scan.truncated) return null
+  const usernameField = scan.inputs
     .filter((field) => field.type !== 'password' && isVisibleInput(field, { rejectAriaHiddenAncestor: true, minimumSize: 1 }) && isUsernameField(field))
     .find((field) => (field.form ?? field.parentElement ?? field) === owner)
 
@@ -169,17 +174,18 @@ export function normalizeRegistrationOutcome(value: unknown): RegistrationOutcom
 }
 
 export function visiblePasswordFields(): HTMLInputElement[] {
-  return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]'))
-    .filter((field) => {
-      if (field.disabled || field.readOnly) return false
-      const style = getComputedStyle(field)
-      const bounds = field.getBoundingClientRect()
-      return style.display !== 'none'
-        && style.visibility !== 'hidden'
-        && Number(style.opacity) !== 0
-        && bounds.width > 0
-        && bounds.height > 0
-    })
+  const scan = collectInputsOfType(document, 'password')
+  if (scan.truncated) return []
+  return scan.inputs.filter((field) => {
+    if (field.disabled || field.readOnly) return false
+    const style = getComputedStyle(field)
+    const bounds = field.getBoundingClientRect()
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && Number(style.opacity) !== 0
+      && bounds.width > 0
+      && bounds.height > 0
+  })
 }
 
 export function isCurrentPasswordField(field: HTMLInputElement): boolean {
