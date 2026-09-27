@@ -5,6 +5,7 @@ import {
   FILL_MATCH_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
   PROTOCOL_VERSION,
+  TOTP_PROTOCOL_VERSION,
   isCapabilities,
   isCredential,
   isNativeRequest,
@@ -12,6 +13,7 @@ import {
   makeIdentityRequest,
   makeRequest,
   makeSaveRequest,
+  makeTotpRequest,
   normalizeFillOrigin,
   redactCard,
   safeNativeResponse,
@@ -74,6 +76,7 @@ describe('makeRequest', () => {
 
   it('refuses to build a fill request for an origin it would not accept', () => {
     expect(() => makeRequest('fill', 'http://example.test')).toThrow(TypeError)
+    expect(() => makeTotpRequest('http://example.test')).toThrow(TypeError)
   })
 
   it('stamps every request with the protocol version its host checks', () => {
@@ -81,6 +84,7 @@ describe('makeRequest', () => {
     expect(makeRequest('activate').version).toBe(PROTOCOL_VERSION)
     expect(fillRequest('both').version).toBe(FILL_MATCH_PROTOCOL_VERSION)
     expect(makeCardRequest('https://checkout.example.test', ['number']).version).toBe(CARD_PROTOCOL_VERSION)
+    expect(makeTotpRequest('https://example.test').version).toBe(TOTP_PROTOCOL_VERSION)
   })
 })
 
@@ -139,6 +143,66 @@ describe('isNativeRequest', () => {
       requestId: 'identity-3',
       origin: 'https://example.test',
       fields: 'email',
+    })).toBe(false)
+  })
+
+  it('accepts a totp request on version four only', () => {
+    const request = makeTotpRequest('https://example.test')
+    expect(isNativeRequest(request)).toBe(true)
+    expect(isNativeRequest({ ...request, version: PROTOCOL_VERSION })).toBe(false)
+    expect(isNativeRequest({ ...request, version: CARD_PROTOCOL_VERSION })).toBe(false)
+    expect(isNativeRequest({ ...request, version: FILL_MATCH_PROTOCOL_VERSION })).toBe(false)
+    expect(isNativeRequest({ ...request, version: TOTP_PROTOCOL_VERSION + 1 })).toBe(false)
+  })
+
+  it('keeps protocol v4 exclusive to totp requests', () => {
+    expect(isNativeRequest({ version: TOTP_PROTOCOL_VERSION, type: 'capabilities', requestId: 'capabilities-4' })).toBe(false)
+    expect(isNativeRequest({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'fill',
+      requestId: 'fill-4',
+      origin: 'https://example.test',
+    })).toBe(false)
+    expect(isNativeRequest({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'card',
+      requestId: 'card-4',
+      origin: 'https://example.test',
+      fields: 'number',
+    })).toBe(false)
+    expect(isNativeRequest({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'identity',
+      requestId: 'identity-4',
+      origin: 'https://example.test',
+      fields: 'email',
+    })).toBe(false)
+    expect(isNativeRequest({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'save',
+      requestId: 'save-4',
+      origin: 'https://example.test',
+      kind: 'new',
+      password: 'pw',
+    })).toBe(false)
+  })
+
+  it('holds a totp request to the origin-only shape', () => {
+    expect(isNativeRequest({ ...makeTotpRequest('https://example.test'), extra: 1 })).toBe(false)
+    expect(isNativeRequest({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'totp',
+      requestId: 'totp-4-extra',
+      origin: 'https://example.test',
+      code: '287082',
+    })).toBe(false)
+    expect(isNativeRequest({ version: TOTP_PROTOCOL_VERSION, type: 'totp', requestId: 'totp-4-missing' })).toBe(false)
+    expect(isNativeRequest({ version: TOTP_PROTOCOL_VERSION, type: 'totp', requestId: 'totp-4-empty', origin: '' })).toBe(false)
+    expect(isNativeRequest({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'totp',
+      requestId: 'totp-4-control',
+      origin: 'https://example.test\u0000',
     })).toBe(false)
   })
 
@@ -291,6 +355,87 @@ describe('safeNativeResponse', () => {
     for (const raw of [null, 'fill', 42, ['fill']]) {
       expect(safeNativeResponse(raw, request)).toEqual({ ok: false, code: 'invalid-response' })
     }
+  })
+})
+
+describe('one-time code responses', () => {
+  const totpRequest = (): NativeRequest => makeTotpRequest('https://example.test')
+
+  it('returns the code under a field that cannot be read as a failure code', () => {
+    expect(respond(totpRequest(), { type: 'totp', code: '287082', remainingSeconds: 18 }))
+      .toEqual({ ok: true, totpCode: '287082', remainingSeconds: 18 })
+  })
+
+  it('keeps an eight digit code intact', () => {
+    expect(respond(totpRequest(), { type: 'totp', code: '12345678', remainingSeconds: 4 }))
+      .toEqual({ ok: true, totpCode: '12345678', remainingSeconds: 4 })
+  })
+
+  it('refuses a one-time code response to a fill request', () => {
+    const request = legacyFillRequest()
+    expect(safeNativeResponse({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'totp',
+      requestId: request.requestId,
+      code: '287082',
+      remainingSeconds: 18,
+    }, request)).toEqual({ ok: false, code: 'protocol-mismatch' })
+  })
+
+  it('refuses a response for another request id', () => {
+    expect(safeNativeResponse({
+      version: TOTP_PROTOCOL_VERSION,
+      type: 'totp',
+      requestId: 'another-request',
+      code: '287082',
+      remainingSeconds: 18,
+    }, totpRequest())).toEqual({ ok: false, code: 'request-mismatch' })
+  })
+
+  it('refuses a response that is not a totp response', () => {
+    expect(respond(totpRequest(), { type: 'fill', code: '287082', remainingSeconds: 18 }))
+      .toEqual({ ok: false, code: 'invalid-response' })
+  })
+
+  it('refuses a code that is not one to nine digits', () => {
+    const request = totpRequest()
+    for (const code of ['', '28a082', '1234567890', '-123456']) {
+      expect(respond(request, { type: 'totp', code, remainingSeconds: 18 }))
+        .toEqual({ ok: false, code: 'unsafe-response' })
+    }
+  })
+
+  it('refuses a remaining window outside the contract range', () => {
+    const request = totpRequest()
+    for (const remainingSeconds of [0, 3601, 18.5, '18', null]) {
+      expect(respond(request, { type: 'totp', code: '287082', remainingSeconds }))
+        .toEqual({ ok: false, code: 'unsafe-response' })
+    }
+  })
+
+  it('refuses a response with a missing or extra key', () => {
+    const request = totpRequest()
+    expect(respond(request, { type: 'totp', code: '287082' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(request, { type: 'totp', code: '287082', remainingSeconds: 18, matchKind: 'exact' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('maps each unavailable reason to the shared stable code', () => {
+    const request = totpRequest()
+    expect(respond(request, { type: 'totp-unavailable', reason: 'noMatch' }))
+      .toEqual({ ok: false, code: 'no-match' })
+    expect(respond(request, { type: 'totp-unavailable', reason: 'locked' }))
+      .toEqual({ ok: false, code: 'vault-locked' })
+    expect(respond(request, { type: 'totp-unavailable', reason: 'desktopUnavailable' }))
+      .toEqual({ ok: false, code: 'desktop-unavailable' })
+    expect(respond(request, { type: 'totp-unavailable', reason: 'approvalDeclined' }))
+      .toEqual({ ok: false, code: 'approval-declined' })
+  })
+
+  it('refuses an unavailable response that carries a code', () => {
+    expect(respond(totpRequest(), { type: 'totp-unavailable', reason: 'noMatch', code: '287082' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
   })
 })
 

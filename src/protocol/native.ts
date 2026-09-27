@@ -4,6 +4,7 @@ export const NATIVE_HOST = 'app.usesesame.browser'
 export const PROTOCOL_VERSION = 1
 export const CARD_PROTOCOL_VERSION = 2
 export const FILL_MATCH_PROTOCOL_VERSION = 3
+export const TOTP_PROTOCOL_VERSION = 4
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
@@ -30,6 +31,7 @@ export type NativeRequest =
   | { version: number; type: 'capabilities'; requestId: string }
   | { version: number; type: 'activate'; requestId: string }
   | { version: number; type: 'fill'; requestId: string; origin: string; fields?: FillFields }
+  | { version: 4; type: 'totp'; requestId: string; origin: string }
   | { version: number; type: 'identity'; requestId: string; origin: string; fields: string }
   | { version: 2; type: 'card'; requestId: string; origin: string; fields: string }
   | { version: number; type: 'save'; requestId: string; origin: string; kind: 'new' | 'update'; title?: string; username?: string; password: string }
@@ -38,6 +40,7 @@ export type NativeResult =
   | { ok: true; protocolVersion: number; capabilities: DesktopCapabilities }
   | { ok: true; opened: true }
   | { ok: true; credential: Credential; matchKind?: FillMatchKind }
+  | { ok: true; totpCode: string; remainingSeconds: number }
   | { ok: true; identity: IdentityFields }
   | { ok: true; card: CardFields }
   | { ok: true; saved: true }
@@ -70,6 +73,7 @@ const BASE_REQUEST_KEYS = new Set(['version', 'type', 'requestId'])
 const FILL_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin'])
 const FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'fields'])
 const CARD_KEYS = new Set(['version', 'type', 'requestId', 'card'])
+const TOTP_KEYS = new Set(['version', 'type', 'requestId', 'code', 'remainingSeconds'])
 const SAVE_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'kind', 'password'])
 const UNAVAILABLE_CODES: Readonly<Record<string, string>> = Object.freeze({
   desktopUnavailable: 'desktop-unavailable',
@@ -113,17 +117,24 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
   if (!isRecord(value)
     || (value.version !== PROTOCOL_VERSION
       && value.version !== CARD_PROTOCOL_VERSION
-      && value.version !== FILL_MATCH_PROTOCOL_VERSION)
+      && value.version !== FILL_MATCH_PROTOCOL_VERSION
+      && value.version !== TOTP_PROTOCOL_VERSION)
     || !isRequestId(value.requestId)) {
     return false
   }
   if ((value.version === PROTOCOL_VERSION && value.type === 'card')
     || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')
-    || (value.version === FILL_MATCH_PROTOCOL_VERSION && value.type !== 'fill')) {
+    || (value.version === FILL_MATCH_PROTOCOL_VERSION && value.type !== 'fill')
+    || (value.version === TOTP_PROTOCOL_VERSION && value.type !== 'totp')) {
     return false
   }
   if (value.type === 'capabilities' || value.type === 'activate') {
     return hasExactKeys(value, BASE_REQUEST_KEYS)
+  }
+  if (value.type === 'totp') {
+    return value.version === TOTP_PROTOCOL_VERSION
+      && isWireOrigin(value.origin)
+      && hasExactKeys(value, FILL_REQUEST_KEYS)
   }
   if (value.type === 'fill') {
     const fieldsValid = value.fields === undefined
@@ -256,6 +267,18 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
     return raw.saved === true ? { ok: true, saved: true } : { ok: false, code: 'invalid-response' }
   }
 
+  if (request.type === 'totp') {
+    if (raw.type === 'totp-unavailable') {
+      return decodeUnavailable(raw)
+    }
+    if (raw.type !== 'totp') return { ok: false, code: 'invalid-response' }
+    if (!hasExactKeys(raw, TOTP_KEYS)) return { ok: false, code: 'unsafe-response' }
+    if (!isOneTimeCode(raw.code) || !isOneTimeCodeWindow(raw.remainingSeconds)) {
+      return { ok: false, code: 'unsafe-response' }
+    }
+    return { ok: true, totpCode: raw.code, remainingSeconds: raw.remainingSeconds }
+  }
+
   if (raw.type === 'fill-unavailable') {
     return decodeUnavailable(raw)
   }
@@ -336,6 +359,12 @@ export function makeCardRequest(origin: string, fields: readonly CardFieldKey[])
   return { version: CARD_PROTOCOL_VERSION, type: 'card', requestId: crypto.randomUUID(), origin: normalizedOrigin, fields: unique.join(',') }
 }
 
+export function makeTotpRequest(origin: string): Extract<NativeRequest, { type: 'totp' }> {
+  const normalizedOrigin = normalizeFillOrigin(origin)
+  if (!normalizedOrigin) throw new TypeError('totp request requires a normalized web origin')
+  return { version: TOTP_PROTOCOL_VERSION, type: 'totp', requestId: crypto.randomUUID(), origin: normalizedOrigin }
+}
+
 export function makeSaveRequest(
   origin: string,
   password: string,
@@ -389,6 +418,14 @@ function isRequestId(value: unknown): value is string {
 
 function isFillMatchKind(value: unknown): value is FillMatchKind {
   return value === 'exact' || value === 'wwwAlias'
+}
+
+function isOneTimeCode(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9]{1,9}$/.test(value)
+}
+
+function isOneTimeCodeWindow(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 3600
 }
 
 function isWireOrigin(value: unknown): value is string {
