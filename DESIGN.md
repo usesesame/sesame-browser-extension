@@ -44,16 +44,17 @@ Every native message is versioned, request-bound, length-limited, and decoded wi
 The desktop-owned canonical contracts are under
 `src-tauri/contracts/browser/`. The independently buildable extension uses the
 byte-identical, source-commit-stamped snapshots under
-`contracts/browser/v1/` and `contracts/browser/v2/`; it does not import the
-desktop implementation or download a contract at build or runtime. General
-operations use protocol v1. Card filling uses the narrow protocol v2 contract.
+`contracts/browser/v1/`, `contracts/browser/v2/`, and `contracts/browser/v3/`;
+it does not import the desktop implementation or download a contract at build
+or runtime. General operations use protocol v1. Card filling uses the narrow
+protocol v2 contract. Login filling uses protocol v3.
 
 - Capability request: `{version, type: "capabilities", requestId}`.
 - Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable, locked, fillAvailable}`.
 - Activation request: exactly `{version, type: "activate", requestId}`. It contains no site or credential fields. A running desktop focuses its main window; when the desktop is closed, the registered native helper may start only the sibling Sesame executable from its own install directory.
 - Activation response: exactly `{version, type: "activated", requestId, opened}`. Activation never starts, retries, or resumes a fill request.
-- Fill request: `{version, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. During migration, older version-1 helper requests without `fields` are interpreted as `both`.
-- Successful fill response contains exactly the requested slice: `username`, `password`, or both credential fields, plus `version`, `type`, and `requestId`.
+- Fill request: `{version: 3, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. `fields` is optional and means `both` when omitted. During migration, older version-1 helper requests without `fields` are interpreted as `both`.
+- Successful fill response contains exactly the requested slice: `username`, `password`, or both credential fields, plus `version`, `type`, `requestId`, and `matchKind`. `matchKind` is `exact` or `wwwAlias`, naming the rule the desktop enforced before it released the credential. The explanation is additive: it never changes which origin can fill, and the desktop recomputes the rule when it releases the credential.
 - Unavailable response: exactly `{version, type: "fill-unavailable", requestId, reason}`, where `reason` is from a small allowlist.
 - Identity request: `{version, type: "identity", requestId, origin, fields}`,
   where `fields` is a unique comma-separated subset of the nine allowlisted
