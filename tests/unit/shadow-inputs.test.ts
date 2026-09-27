@@ -101,6 +101,22 @@ describe('input traversal through open shadow roots', () => {
     expect(fillLoginSurface(origin, token, null, 'prepare')).toEqual({ ok: false, code: 'no-fields' })
   })
 
+  it('rejects a honeypot behind an aria-hidden shadow host', () => {
+    const hidden = document.createElement('div')
+    hidden.setAttribute('aria-hidden', 'true')
+    const wrapper = document.createElement('div')
+    hidden.append(wrapper)
+    document.body.append(hidden)
+    const root = openShadowRoot(wrapper)
+    const password = document.createElement('input')
+    password.type = 'password'
+    root.append(password)
+    layout(password)
+
+    expect(collectInputs(document).inputs).toEqual([password])
+    expect(inspectLoginSurface()).toEqual({ ok: false, code: 'no-fields' })
+  })
+
   it('fails closed when a shadow tree is deeper than the traversal bound', () => {
     const first = openShadowRoot(document.body)
     const { username, password } = addLoginForm(first)
