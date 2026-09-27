@@ -363,28 +363,66 @@ type ReadyLoginInspection = Extract<PageInspection, { ok: true }>
 type ReadyIdentityInspection = Extract<IdentityPageInspection, { ok: true }>
 type ReadyPasswordChange = { origin: string }
 
+export interface FrameInjection {
+  frameId?: number
+  result?: unknown
+}
+
+export function selectSameOriginSurface<Ready extends { ok: true; surface: { origin: string } }>(
+  injections: readonly FrameInjection[],
+  expectedOrigin: string,
+  normalize: (raw: unknown) => Ready | { ok: false; code: string },
+): { ok: true; frameId: number; ready: Ready } | { ok: false; code: string } {
+  let top: { frameId: number; ready: Ready } | undefined
+  let topFailure: string | undefined
+  const sameOriginChildren: Array<{ frameId: number; ready: Ready }> = []
+
+  for (const injection of injections) {
+    const frameId = injection.frameId
+    if (typeof frameId !== 'number' || !Number.isInteger(frameId) || frameId < 0) continue
+    const normalized = normalize(injection.result)
+    if (!normalized.ok) {
+      if (frameId === 0 && normalized.code !== 'no-fields') topFailure ??= normalized.code
+      continue
+    }
+    if (normalized.surface.origin !== expectedOrigin) {
+      if (frameId === 0) topFailure ??= 'origin-mismatch'
+      continue
+    }
+    if (frameId === 0) top = { frameId, ready: normalized }
+    else sameOriginChildren.push({ frameId, ready: normalized })
+  }
+
+  if (topFailure) return { ok: false, code: topFailure }
+  if (top) return { ok: true, frameId: top.frameId, ready: top.ready }
+  if (sameOriginChildren.length > 1) return { ok: false, code: 'multiple-matches' }
+  const child = sameOriginChildren[0]
+  return child ? { ok: true, frameId: child.frameId, ready: child.ready } : { ok: false, code: 'no-fields' }
+}
+
 function loginSurface(
   update?: (event: Parameters<typeof transition>[1]) => FillContext
 ): FillSurface<ReadyLoginInspection, FillFields, Credential, FillOutcome> {
   let prepared = false
+  let frameId = 0
   return {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
+      await installContentBridge(browser, tabId, true)
+      const injections = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
         args: ['sesameInspectLoginSurface'],
       })
-      const inspection = normalizeInspection(injection?.result)
-      if (!inspection.ok) return inspection
-      if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
-      return { ok: true, ready: inspection }
+      const selected = selectSameOriginSurface(injections, origin, normalizeInspection)
+      if (!selected.ok) return selected
+      frameId = selected.frameId
+      return { ok: true, ready: selected.ready }
     },
     unfillableCode: (inspection) => (!inspection.hasPasswordField && !inspection.hasUsernameField ? 'no-fields' : undefined),
     async prepare(ctx) {
       const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillLoginSurface', ctx.origin, ctx.token, null, 'prepare'],
       })
@@ -401,7 +439,7 @@ function loginSurface(
     },
     async fill(ctx, approved) {
       const [injection] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillLoginSurface', ctx.origin, ctx.token, approved, 'fill'],
       })
@@ -411,7 +449,7 @@ function loginSurface(
     async cleanup(ctx) {
       if (!prepared) return
       await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillLoginSurface', ctx.origin, ctx.token, null, 'clear'],
       })
@@ -492,23 +530,24 @@ function passwordChangeSurface(newPassword: string): {
 
 function identitySurface(): FillSurface<ReadyIdentityInspection, readonly IdentityFieldKey[], IdentityFields, IdentityFillOutcome> {
   let prepared = false
+  let frameId = 0
   return {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
+      await installContentBridge(browser, tabId, true)
+      const injections = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
         args: ['sesameInspectIdentitySurface'],
       })
-      const inspection = normalizeIdentityInspection(injection?.result)
-      if (!inspection.ok) return inspection
-      if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
-      return { ok: true, ready: inspection }
+      const selected = selectSameOriginSurface(injections, origin, normalizeIdentityInspection)
+      if (!selected.ok) return selected
+      frameId = selected.frameId
+      return { ok: true, ready: selected.ready }
     },
     async prepare(ctx, ready) {
       const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'prepare'],
       })
@@ -523,7 +562,7 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
     },
     async fill(ctx, approved) {
       const [injection] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, approved, 'fill'],
       })
@@ -533,7 +572,7 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
     async cleanup(ctx) {
       if (!prepared) return
       await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'clear'],
       })

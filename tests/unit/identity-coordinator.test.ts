@@ -14,7 +14,11 @@ import { createCoordinator } from '../../src/background/coordinator'
 
 const pageOrigin = 'https://example.test'
 
-function browserForIdentityPage(): Browser {
+function browserForIdentityPage(
+  inspections: Array<{ frameId: number; result: unknown }> = [
+    { frameId: 0, result: { ok: true, surface: { ok: true, origin: pageOrigin }, fields: ['fullName', 'email'] } },
+  ],
+): Browser {
   return {
     runtime: {
       getManifest: () => ({ version: '0.1.0' }),
@@ -27,9 +31,7 @@ function browserForIdentityPage(): Browser {
     scripting: {
       executeScript: vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
         if ('files' in details) return []
-        if (details.func.name === 'invokeBridgeInspection') {
-          return [{ result: { ok: true, surface: { ok: true, origin: pageOrigin }, fields: ['fullName', 'email'] } }]
-        }
+        if (details.func.name === 'invokeBridgeInspection') return inspections
         const phase = details.args?.[4]
         if (phase === 'fill') return [{ result: { ok: true, filledFields: ['fullName', 'email'] } }]
         return [{ result: { ok: true, filledFields: [] } }]
@@ -79,5 +81,34 @@ describe('identity coordinator', () => {
     const result = await pending
 
     expect(result).toEqual({ ok: false, code: 'cancelled' })
+  })
+
+  it('fills identity fields in one same-origin child frame', async () => {
+    const browser = browserForIdentityPage([
+      { frameId: 0, result: { ok: false, code: 'no-fields' } },
+      { frameId: 6, result: { ok: true, surface: { ok: true, origin: pageOrigin }, fields: ['fullName', 'email'] } },
+    ])
+    const coordinator = createCoordinator(browser)
+
+    await expect(coordinator.fillIdentityActivePage()).resolves.toEqual({
+      ok: true,
+      filledFields: ['fullName', 'email'],
+    })
+    const writes = (browser.scripting.executeScript as ReturnType<typeof vi.fn>).mock.calls
+      .map(([details]) => details as ScriptInjectionDetails<unknown>)
+      .filter((details) => !('files' in details) && details.func.name === 'invokeBridgeFill')
+    expect(writes).toHaveLength(3)
+    for (const details of writes) expect(details.target).toEqual({ tabId: 5, frameIds: [6] })
+  })
+
+  it('does not fill identity fields in a cross-origin child frame', async () => {
+    const browser = browserForIdentityPage([
+      { frameId: 0, result: { ok: false, code: 'no-fields' } },
+      { frameId: 6, result: { ok: true, surface: { ok: true, origin: 'https://other.example.test' }, fields: ['email'] } },
+    ])
+    const coordinator = createCoordinator(browser)
+
+    await expect(coordinator.fillIdentityActivePage()).resolves.toEqual({ ok: false, code: 'no-fields' })
+    expect(native.requestIdentityFill).not.toHaveBeenCalled()
   })
 })
