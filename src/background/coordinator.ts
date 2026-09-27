@@ -24,6 +24,7 @@ import {
   type CardFieldKey,
   type CardFields,
   type FillFields,
+  type FillMatchKind,
   type IdentityFieldKey,
   type IdentityFields,
 } from '../protocol/native'
@@ -316,7 +317,7 @@ async function runSurfaceFill<
   browser: Browser,
   signal: AbortSignal,
   surface: FillSurface<Ready, ApprovalInput, Approved, Outcome>
-): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }> } | { ok: false; code: string }> {
+): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }>; approved: Approved } | { ok: false; code: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   const resolved = surface.resolvePage(tab)
   if (!resolved.ok) return { ok: false, code: resolved.code }
@@ -348,7 +349,7 @@ async function runSurfaceFill<
 
     const outcome = await surface.fill(ctx, approval.approved)
     return outcome.ok
-      ? { ok: true, outcome: outcome as Extract<Outcome, { ok: true }> }
+      ? { ok: true, outcome: outcome as Extract<Outcome, { ok: true }>, approved: approval.approved }
       : { ok: false, code: (outcome as unknown as { code: string }).code }
   } catch {
     return { ok: false, code: signal.aborted ? 'cancelled' : 'page-restricted' }
@@ -365,7 +366,7 @@ type ReadyPasswordChange = { origin: string }
 
 function loginSurface(
   update?: (event: Parameters<typeof transition>[1]) => FillContext
-): FillSurface<ReadyLoginInspection, FillFields, Credential, FillOutcome> {
+): FillSurface<ReadyLoginInspection, FillFields, { credential: Credential; matchKind: FillMatchKind }, FillOutcome> {
   let prepared = false
   return {
     resolvePage: topLevelPage,
@@ -397,15 +398,17 @@ function loginSurface(
     },
     async requestApproval(browser, origin, input, signal) {
       const fill = await requestFill(browser, origin, { signal, fields: input })
-      return fill.ok ? { ok: true, approved: fill.credential } : fill
+      return fill.ok
+        ? { ok: true, approved: { credential: fill.credential, matchKind: fill.matchKind } }
+        : fill
     },
     async fill(ctx, approved) {
       const [injection] = await ctx.browser.scripting.executeScript({
         target: { tabId: ctx.tabId },
         func: invokeBridgeFill,
-        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, approved, 'fill'],
+        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, approved.credential, 'fill'],
       })
-      redactCredential({ credential: approved })
+      redactCredential({ credential: approved.credential })
       return normalizeFillOutcome(injection?.result)
     },
     async cleanup(ctx) {
@@ -419,7 +422,7 @@ function loginSurface(
     events: update ? {
       inspectionStarted: () => update({ type: 'inspection-started' }),
       inspectionCompleted: (inspection, documentToken) => update({ type: 'inspection-completed', inspection, documentToken }),
-      approvalReceived: (credential) => update({ type: 'approval-received', credential }),
+      approvalReceived: (approved) => update({ type: 'approval-received', credential: approved.credential }),
     } : undefined,
   }
 }
@@ -548,7 +551,12 @@ async function runFill(
 ): Promise<FillContext> {
   const result = await runSurfaceFill(browser, signal, loginSurface(update))
   return result.ok
-    ? update({ type: 'fill-completed', usernameFilled: result.outcome.usernameFilled, passwordFilled: result.outcome.passwordFilled })
+    ? update({
+        type: 'fill-completed',
+        usernameFilled: result.outcome.usernameFilled,
+        passwordFilled: result.outcome.passwordFilled,
+        matchKind: result.approved.matchKind,
+      })
     : update({ type: 'failed', code: result.code })
 }
 

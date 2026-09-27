@@ -41,7 +41,11 @@ function browserForLoginPage(): Browser {
 
 beforeEach(() => {
   native.requestFill.mockReset()
-  native.requestFill.mockResolvedValue({ ok: true, credential: { username: 'jamie', password: 'hunter2' } })
+  native.requestFill.mockResolvedValue({
+    ok: true,
+    credential: { username: 'jamie', password: 'hunter2' },
+    matchKind: 'exact',
+  })
 })
 
 describe('login coordinator', () => {
@@ -51,12 +55,35 @@ describe('login coordinator', () => {
 
     const result = await coordinator.fillActivePage()
 
-    expect(result.phase).toEqual({ name: 'complete', usernameFilled: true, passwordFilled: true })
+    expect(result.phase).toEqual({
+      name: 'complete',
+      usernameFilled: true,
+      passwordFilled: true,
+      matchKind: 'exact',
+    })
     expect(native.requestFill).toHaveBeenCalledWith(
       browser,
       pageOrigin,
       expect.objectContaining({ signal: expect.any(AbortSignal), fields: 'both' }),
     )
+  })
+
+  it('keeps the matched rule the desktop reported', async () => {
+    native.requestFill.mockResolvedValue({
+      ok: true,
+      credential: { username: 'jamie', password: 'hunter2' },
+      matchKind: 'wwwAlias',
+    })
+    const coordinator = createCoordinator(browserForLoginPage())
+
+    const result = await coordinator.fillActivePage()
+
+    expect(result.phase).toEqual({
+      name: 'complete',
+      usernameFilled: true,
+      passwordFilled: true,
+      matchKind: 'wwwAlias',
+    })
   })
 
   it('cancels the fill when the caller aborts while awaiting desktop approval', async () => {

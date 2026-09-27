@@ -6,6 +6,26 @@ describe('inline fill messages', () => {
     expect(fillMessage({ code: 'cancelled' })).toBe('Fill was cancelled. Nothing was filled.')
   })
 
+  it('names the exact origin rule after a fill', () => {
+    expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true, matchKind: 'exact' }))
+      .toBe('Filled. The saved login matches this site exactly.')
+  })
+
+  it('names the single www address rule after a fill', () => {
+    expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true, matchKind: 'wwwAlias' }))
+      .toBe('Filled. The saved login matches this site through its single www address.')
+  })
+
+  it('falls back to a plain review line when the result carries no rule', () => {
+    expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true }))
+      .toBe('Filled. Review the page and sign in.')
+  })
+
+  it('asks for a desktop update when the host does not speak the fill protocol', () => {
+    expect(fillMessage({ state: 'unavailable', code: 'protocol-mismatch' }))
+      .toBe('The Sesame desktop app needs an update to fill this login.')
+  })
+
   it('never leaves a known failure without copy', () => {
     const codes = [
       'origin-mismatch',

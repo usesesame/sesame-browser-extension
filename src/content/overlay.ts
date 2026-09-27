@@ -570,10 +570,18 @@ function ownerOf(field: HTMLInputElement): Element {
 }
 
 export function fillMessage(result: unknown): string {
-  if (recordString(result, 'state') === 'filled') return 'Filled. Review the page and sign in.'
+  if (recordString(result, 'state') === 'filled') {
+    const matchKind = recordString(result, 'matchKind')
+    if (matchKind === 'exact') return 'Filled. The saved login matches this site exactly.'
+    if (matchKind === 'wwwAlias') {
+      return 'Filled. The saved login matches this site through its single www address.'
+    }
+    return 'Filled. Review the page and sign in.'
+  }
   const code = recordString(result, 'code') || recordString(result, 'reason')
   if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
   if (code === 'origin-mismatch' || code === 'no-match') return 'No saved login matches this site.'
+  if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this login.'
   if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
   if (code === 'desktop-unavailable' || code === 'host-not-found')
     return 'Open Sesame, then try again.'
