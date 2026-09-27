@@ -4,6 +4,7 @@ import { inspectIdentitySurface } from './identity-detector'
 import { fillIdentitySurface } from './identity-writer'
 import { inspectCardSurface } from './card-detector'
 import { fillCardSurface } from './card-writer'
+import { fillOneTimeCodeSurface, inspectOneTimeCodeSurface } from './one-time-code'
 import { attachInlineButton } from './overlay'
 import { fillPasswordChangeSurface } from './password-change'
 import { fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
@@ -16,6 +17,8 @@ type GlobalApi = {
   sesameFillIdentitySurface: typeof fillIdentitySurface
   sesameInspectCardSurface: typeof inspectCardSurface
   sesameFillCardSurface: typeof fillCardSurface
+  sesameInspectOneTimeCodeSurface: typeof inspectOneTimeCodeSurface
+  sesameFillOneTimeCodeSurface: typeof fillOneTimeCodeSurface
   sesameFillRegistrationSurface: typeof fillRegistrationSurface
   sesameInspectRegistrationSurface: typeof inspectRegistrationSurface
   sesameInspectPasswordSurface: typeof inspectPasswordSurface
@@ -32,6 +35,8 @@ const api: GlobalApi = {
   sesameFillIdentitySurface: fillIdentitySurface,
   sesameInspectCardSurface: inspectCardSurface,
   sesameFillCardSurface: fillCardSurface,
+  sesameInspectOneTimeCodeSurface: inspectOneTimeCodeSurface,
+  sesameFillOneTimeCodeSurface: fillOneTimeCodeSurface,
   sesameFillRegistrationSurface: fillRegistrationSurface,
   sesameInspectRegistrationSurface: inspectRegistrationSurface,
   sesameInspectPasswordSurface: inspectPasswordSurface,
@@ -45,6 +50,7 @@ const api: GlobalApi = {
       onOpenDesktop: () => chrome.runtime.sendMessage({ type: 'sesame:open-desktop' }),
       onFillIdentityRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-identity' }),
       onFillCardRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-card' }),
+      onFillOneTimeCodeRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-one-time-code' }),
     })
   },
   sesameDetachInlineButton: undefined,
@@ -62,6 +68,8 @@ export {
   fillIdentitySurface,
   inspectCardSurface,
   fillCardSurface,
+  inspectOneTimeCodeSurface,
+  fillOneTimeCodeSurface,
   fillRegistrationSurface,
   inspectRegistrationSurface,
   inspectPasswordSurface,

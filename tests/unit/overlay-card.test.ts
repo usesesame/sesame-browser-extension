@@ -93,8 +93,76 @@ function baseOptions() {
     onOpenDesktop: vi.fn(),
     onFillIdentityRequest: vi.fn(),
     onFillCardRequest: vi.fn(),
+    onFillOneTimeCodeRequest: vi.fn(),
   }
 }
+
+describe('the inline control on a one-time code field', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    overlayHost()?.remove()
+    document.body.innerHTML = ''
+  })
+
+  it('offers to fill the code on a single field', () => {
+    const roots = captureShadow()
+    document.body.innerHTML = '<input autocomplete="one-time-code" />'
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusFirstInput()
+    const labels = visibleLabels(roots)
+    expect(labels).toContain('Fill code')
+    expect(labels).not.toContain('Fill with Sesame')
+    expect(labels).not.toContain('Fill card')
+    detach()
+  })
+
+  it('offers the code on any box of a split group', () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `<form>${'<input maxlength="1" />'.repeat(6)}</form>`
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    document.querySelectorAll('input')[3].dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(visibleLabels(roots)).toContain('Fill code')
+    detach()
+  })
+
+  it('asks the background for a code and reports the remaining window', async () => {
+    const roots = captureShadow()
+    const onFillOneTimeCodeRequest = vi.fn().mockResolvedValue({ ok: true, remainingSeconds: 18 })
+    document.body.innerHTML = '<input autocomplete="one-time-code" />'
+    giveInputsLayout()
+    const detach = attachInlineButton({ ...baseOptions(), onFillOneTimeCodeRequest })
+    focusFirstInput()
+    const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
+      .find((candidate) => candidate.textContent === 'Fill code')!
+    button.click()
+    await vi.waitFor(() => expect(onFillOneTimeCodeRequest).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => {
+      expect(roots.flatMap((root) => [...root.querySelectorAll('.status')]).map((node) => node.textContent))
+        .toContain('Code filled. About 18 seconds remain.')
+    })
+    expect(visibleLabels(roots)).not.toContain('Copy password')
+    detach()
+  })
+
+  it('shows an existing failure message when the desktop is unavailable', async () => {
+    const roots = captureShadow()
+    const onFillOneTimeCodeRequest = vi.fn().mockResolvedValue({ ok: false, code: 'desktop-unavailable' })
+    document.body.innerHTML = '<input autocomplete="one-time-code" />'
+    giveInputsLayout()
+    const detach = attachInlineButton({ ...baseOptions(), onFillOneTimeCodeRequest })
+    focusFirstInput()
+    const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
+      .find((candidate) => candidate.textContent === 'Fill code')!
+    button.click()
+    await vi.waitFor(() => {
+      expect(roots.flatMap((root) => [...root.querySelectorAll('.status')]).map((node) => node.textContent))
+        .toContain('Open Sesame, then try again.')
+    })
+    detach()
+  })
+})
 
 describe('the card control matches the login control', () => {
   beforeEach(() => {
