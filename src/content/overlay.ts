@@ -18,6 +18,7 @@ import {
   fillRegistrationSurface,
   inspectPasswordSurface,
   makeRegistrationPassword,
+  type RegistrationPasswordOptions,
 } from './registration'
 import { copyTemporarily, type TemporaryCopyHandle } from './temporary-copy'
 import type { CardFieldKey, IdentityFieldKey } from '../protocol/native'
@@ -39,6 +40,11 @@ const OVERLAY_CSS = `
         .copy{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
           background:var(--surface);color:var(--accent);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.copy[hidden]{display:none}
+        .choice{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:5px 6px;
+          background:var(--surface);color:var(--text-heading);cursor:pointer;
+          font-family:inherit;font-size:var(--type-2)}.choice[hidden]{display:none}
+        .choice:disabled{opacity:.6;cursor:default}
+        .choice:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
         .identity{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
           background:var(--surface);color:var(--accent);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.identity[hidden]{display:none}
@@ -64,6 +70,23 @@ const CAPABILITY_TTL_MS = 15_000
 const GENERATED_PASSWORD_TTL_MS = 120_000
 const MAX_OBSERVED_SHADOW_ROOTS = 64
 
+export const REGISTRATION_CHOICES = [
+  ['characters:20', '20 characters'],
+  ['characters:16', '16 characters'],
+  ['characters:24', '24 characters'],
+  ['characters:32', '32 characters'],
+  ['passphrase:5', '5-word passphrase'],
+  ['passphrase:6', '6-word passphrase'],
+  ['passphrase:7', '7-word passphrase'],
+] as const
+
+export function registrationChoiceOptions(value: string): RegistrationPasswordOptions {
+  const passphrase = /^passphrase:(\d+)$/.exec(value)
+  if (passphrase) return { mode: 'passphrase', words: Number(passphrase[1]) }
+  const characters = /^characters:(\d+)$/.exec(value)
+  return characters ? { mode: 'characters', length: Number(characters[1]) } : {}
+}
+
 let sharedHostId: string | undefined
 
 type OverlayGlobal = typeof globalThis & {
@@ -74,8 +97,6 @@ export function overlayHost(): HTMLDivElement | null {
   return sharedHostId ? (document.getElementById(sharedHostId) as HTMLDivElement | null) : null
 }
 
-// Entry point for a fill started outside the overlay: it shows the same text the
-// overlay button would and reports whether an overlay was attached to show it.
 export function showFillStatus(result: unknown): boolean {
   const present = (globalThis as OverlayGlobal).sesameOverlayPresentStatus
   if (typeof present !== 'function') return false
@@ -100,6 +121,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let registrationMode = false
   let identityFieldsAvailable: IdentityFieldKey[] = []
   let statusPresenter: ((text: string) => void) | undefined
+  let choice: HTMLSelectElement | null = null
+  let choiceValue: string = REGISTRATION_CHOICES[0][0]
   let cardButton: HTMLButtonElement | null = null
   let cardFieldsAvailable: CardFieldKey[] = []
   let cardMode = false
@@ -183,6 +206,18 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     copy.hidden = true
     copy.textContent = 'Copy password'
 
+    const generate = document.createElement('select')
+    generate.className = 'choice'
+    generate.hidden = true
+    generate.setAttribute('aria-label', 'Password format')
+    for (const [value, label] of REGISTRATION_CHOICES) {
+      const option = document.createElement('option')
+      option.value = value
+      option.textContent = label
+      generate.append(option)
+    }
+    generate.value = choiceValue
+
     const statusNode = document.createElement('span')
     statusNode.className = 'status'
     statusNode.setAttribute('role', 'status')
@@ -194,7 +229,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     close.setAttribute('aria-label', 'Dismiss')
     close.textContent = '×'
 
-    card.append(mark, fill, identityFill, cardFill, codeFill, copy, statusNode, close)
+    card.append(mark, fill, identityFill, cardFill, codeFill, copy, generate, statusNode, close)
     shadow.append(card)
 
     button = fill
@@ -202,21 +237,28 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     cardButton = cardFill
     codeButton = codeFill
     copyButton = copy
+    choice = generate
     status = statusNode
     statusPresenter = (text) => { statusNode.textContent = text }
     ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = statusPresenter
-    host.addEventListener('mousedown', preventFieldBlur)
+    card.addEventListener('mousedown', preventFieldBlur)
     fill.addEventListener('click', onFillClick)
     identityFill.addEventListener('click', onFillIdentityClick)
     cardFill.addEventListener('click', onFillCardClick)
     codeFill.addEventListener('click', onFillCodeClick)
     copy.addEventListener('click', onCopyPassword)
+    generate.addEventListener('change', onChoiceChange)
     close.addEventListener('click', dismiss)
     document.documentElement.append(host)
   }
 
   function preventFieldBlur(event: MouseEvent) {
+    if (event.target instanceof HTMLSelectElement) return
     event.preventDefault()
+  }
+
+  function onChoiceChange() {
+    if (choice) choiceValue = choice.value
   }
 
   function showOverlay(field: HTMLInputElement) {
@@ -295,9 +337,14 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       button.hidden = true
       if (identityButton) identityButton.hidden = true
       if (copyButton) copyButton.hidden = true
+      if (choice) choice.hidden = true
       return
     }
     button.hidden = false
+    if (choice) {
+      choice.hidden = !registrationMode
+      choice.disabled = filling
+    }
     if (identityButton) {
       identityButton.hidden = !(registrationMode && identityFieldsAvailable.length > 0)
       identityButton.disabled = filling
@@ -345,7 +392,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       if (registrationMode) {
         copyHandle?.cancel()
         if (expiryTimer !== undefined) clearTimeout(expiryTimer)
-        registrationPassword = makeRegistrationPassword()
+        registrationPassword = makeRegistrationPassword(registrationChoiceOptions(choiceValue))
         const outcome = fillRegistrationSurface(location.origin, registrationPassword)
         if (!outcome.ok) {
           registrationPassword = ''
@@ -583,6 +630,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     codeButton = null
     codeMode = false
     copyButton = null
+    choice = null
     status = null
     anchorField = null
   }
