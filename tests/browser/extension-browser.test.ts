@@ -5,7 +5,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { chromium, type BrowserContext, type Page, type Worker } from 'playwright-core'
+import { chromium, type BrowserContext, type CDPSession, type Page, type Worker } from 'playwright-core'
 
 const root = resolve(import.meta.dirname, '..', '..')
 let extensionDir = join(root, 'dist', 'integration')
@@ -363,6 +363,81 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   } finally {
     await cdp.detach()
   }
+}
+
+function findNamedNode(node: CdpNode, nodeName: string): CdpNode | undefined {
+  if (node.nodeName === nodeName) return node
+  for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
+    const found = findNamedNode(child, nodeName)
+    if (found) return found
+  }
+  return node.contentDocument ? findNamedNode(node.contentDocument, nodeName) : undefined
+}
+
+function findNodeInsideShadowRoot(node: CdpNode, nodeName: string): CdpNode | undefined {
+  for (const shadow of node.shadowRoots ?? []) {
+    const found = findNamedNode(shadow, nodeName)
+    if (found) return found
+  }
+  for (const child of node.children ?? []) {
+    const found = findNodeInsideShadowRoot(child, nodeName)
+    if (found) return found
+  }
+  return node.contentDocument ? findNodeInsideShadowRoot(node.contentDocument, nodeName) : undefined
+}
+
+async function withClosedShadowNode<T>(
+  target: Page,
+  nodeName: string,
+  run: (cdp: CDPSession, nodeId: number) => Promise<T>,
+): Promise<T> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const node = findNodeInsideShadowRoot(root, nodeName)
+    if (!node) throw new Error(`closed shadow node not found: ${nodeName}`)
+    return await run(cdp, node.nodeId)
+  } finally {
+    await cdp.detach()
+  }
+}
+
+async function resolveClosedShadowNode(cdp: CDPSession, nodeId: number): Promise<string> {
+  const { object } = await cdp.send('DOM.resolveNode', { nodeId }) as { object: { objectId?: string } }
+  if (!object.objectId) throw new Error('closed shadow node did not resolve')
+  return object.objectId
+}
+
+async function clickClosedShadowNode(target: Page, nodeName: string): Promise<void> {
+  await withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const { model } = await cdp.send('DOM.getBoxModel', { nodeId }) as { model: { content: number[] } }
+    const [left, top, , , right, bottom] = model.content
+    await target.mouse.click((left + right) / 2, (top + bottom) / 2)
+  })
+}
+
+async function closedShadowValue(target: Page, nodeName: string): Promise<string> {
+  return withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const objectId = await resolveClosedShadowNode(cdp, nodeId)
+    const { result } = await cdp.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function () { return this.value }',
+      returnByValue: true,
+    }) as { result: { value?: string } }
+    return result.value ?? ''
+  })
+}
+
+async function closedShadowFocused(target: Page, nodeName: string): Promise<boolean> {
+  return withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const objectId = await resolveClosedShadowNode(cdp, nodeId)
+    const { result } = await cdp.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function () { return this === this.getRootNode().activeElement }',
+      returnByValue: true,
+    }) as { result: { value?: boolean } }
+    return result.value === true
+  })
 }
 
 async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exact'): Promise<void> {
@@ -1558,6 +1633,51 @@ describe('extension browser suite', () => {
       if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()
     }
+  }, 30000)
+
+  it('creates a password at the format chosen from the inline control', async () => {
+    const current = await openFixture('/registration')
+    await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).focus())
+    await expect.poll(
+      async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+      { timeout: 10000 },
+    ).toBe(true)
+
+    await clickClosedShadowNode(current, 'SELECT')
+    await current.keyboard.press('Escape')
+    await expect.poll(
+      async () => closedShadowFocused(current, 'SELECT'),
+      { timeout: 5000 },
+    ).toBe(true)
+    await current.keyboard.press('ArrowDown')
+    await current.keyboard.press('ArrowDown')
+    await current.keyboard.press('ArrowDown')
+    await expect.poll(
+      async () => closedShadowValue(current, 'SELECT'),
+      { timeout: 5000 },
+    ).toBe('characters:32')
+
+    await clickClosedShadowNode(current, 'BUTTON')
+    await expect.poll(
+      async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value.length),
+      { timeout: 10000 },
+    ).toBe(32)
+    const values = await current.evaluate(() => ({
+      password: (document.getElementById('password') as HTMLInputElement).value,
+      confirm: (document.getElementById('confirm') as HTMLInputElement).value,
+    }))
+    expect(values.confirm).toBe(values.password)
+    await expect.poll(
+      async () => current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement | null
+        return host !== null && host.style.display === 'block'
+      }),
+      { timeout: 5000 },
+    ).toBe(true)
+
+    const stored = await worker.evaluate(async () => chrome.storage.local.get(null))
+    expect(JSON.stringify(stored)).not.toContain(values.password)
+    expect(Object.keys(stored).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
   }, 30000)
 
   it('saves a registration only after the popup action', async () => {
