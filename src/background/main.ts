@@ -3,8 +3,9 @@ import { chromeBrowser } from '../platform/chrome'
 import { NATIVE_HOST, normalizeFillOrigin } from '../protocol/native'
 import { createInlineRegistrationSync, syncInlineContentScript } from './inline-registration'
 import { handleExtensionCommand } from './command-handler'
+import { createContextMenuFillHandler, ensureFillContextMenu } from './context-menu'
 import { INLINE_SETTINGS_KEY, loadInlineSettings, normalizePausedOrigins } from '../permissions/inline-access'
-import { publicFillResult } from './fill-result'
+import { publicFillResult, type PublicFillResult } from './fill-result'
 import { createLastFillTracker } from './last-fill'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
@@ -31,6 +32,13 @@ async function checkConnection(force = false) {
 
 const ensureContentScriptRegistered = createInlineRegistrationSync(() =>
   syncInlineContentScript({ permissions: chrome.permissions, scripting: chrome.scripting }))
+
+const handleFillContextMenuClick = createContextMenuFillHandler({
+  queryActiveTab: async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0],
+  fillActivePage: () => coordinator.fillActivePage(),
+  toPublicResult: publicFillResult,
+  showStatus: (tabId, result) => presentFillStatus(tabId, result),
+})
 
 async function refreshInlineRegistration() {
   await ensureContentScriptRegistered()
@@ -62,17 +70,23 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 })
 chrome.runtime.onInstalled.addListener((details) => {
   void syncInlineAccess()
+  void ensureFillContextMenu(chrome.contextMenus)
   if (details.reason === 'install') {
     void chrome.tabs.create({ url: chrome.runtime.getURL('onboarding.html') })
   }
 })
-chrome.runtime.onStartup.addListener(() => { void syncInlineAccess() })
+chrome.runtime.onStartup.addListener(() => {
+  void syncInlineAccess()
+  void ensureFillContextMenu(chrome.contextMenus)
+})
 chrome.commands.onCommand.addListener((command) => {
   void handleExtensionCommand(command, coordinator).then((handled) => {
     if (handled && command === 'fill-login') recordLastFillResult(coordinator.state())
   })
 })
+chrome.contextMenus.onClicked.addListener((info, tab) => { void handleFillContextMenuClick(info, tab) })
 void refreshInlineRegistration()
+void ensureFillContextMenu(chrome.contextMenus)
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   saveSession.handleTabUpdated(tabId, changeInfo)
@@ -388,6 +402,24 @@ function detachInlineOverlay() {
   const target = globalThis as typeof globalThis & { sesameDetachInlineButton?: () => void }
   target.sesameDetachInlineButton?.()
   target.sesameDetachInlineButton = undefined
+}
+
+function presentOverlayStatus(result: unknown): boolean {
+  const target = globalThis as typeof globalThis & { sesameShowFillStatus?: (value: unknown) => boolean }
+  return target.sesameShowFillStatus?.(result) === true
+}
+
+async function presentFillStatus(tabId: number, result: PublicFillResult): Promise<boolean> {
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: presentOverlayStatus,
+      args: [result],
+    })
+    return injection?.result === true
+  } catch {
+    return false
+  }
 }
 
 async function detachAllOpenTabs() {

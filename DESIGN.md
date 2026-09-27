@@ -6,7 +6,7 @@ Status: pre-release Windows integration. Page filling works today between the Ch
 
 The unlocked vault may be read only by the desktop application. The browser helper reaches it over Chromium native messaging and a private local Windows named pipe. There is no localhost HTTP server, network listener, cloud-vault request, web vault, or web-page message bridge.
 
-The extension holds the `activeTab`, `nativeMessaging`, `scripting`, and `storage` permissions. Opening the popup grants a narrow, temporary look at the active page. That look reports capped field counts and a form classification only; it does not read field values, page text, form actions, paths, query strings, cookies, or storage. During one-time onboarding the user can grant optional access to all HTTPS pages, so the inline control is available without per-site setup. Extension storage keeps only the first-run preference and the exact origins where the user explicitly paused that control; it never contains credentials or visited-site history.
+The extension holds the `activeTab`, `contextMenus`, `nativeMessaging`, `scripting`, and `storage` permissions. Opening the popup grants a narrow, temporary look at the active page. That look reports capped field counts and a form classification only; it does not read field values, page text, form actions, paths, query strings, cookies, or storage. During one-time onboarding the user can grant optional access to all HTTPS pages, so the inline control is available without per-site setup. Extension storage keeps only the first-run preference and the exact origins where the user explicitly paused that control; it never contains credentials or visited-site history.
 
 ## Inline overlay
 
@@ -18,7 +18,7 @@ The native-messaging manifest is pinned to the fixed development extension ID. T
 
 ## Fill flow
 
-1. The user opens the extension popup, clicks the inline overlay on a focused sign-in field, or presses `Ctrl+Shift+L`. A capability probe reports whether the native host and desktop broker are present and whether the vault is unlocked.
+1. The user opens the extension popup, clicks the inline overlay on a focused sign-in field, presses `Ctrl+Shift+L`, or chooses **Fill with Sesame** from the field's context menu. A capability probe reports whether the native host and desktop broker are present and whether the vault is unlocked.
 2. The extension inspects the active tab for one plausible sign-in surface. It supports conservatively classified username-only, password-only, and combined login steps, and fails closed on multiple forms, registration fields, and password-change fields.
 3. The user clicks **Fill this page**. The helper then checks autocomplete hints, static form attributes, and labels on related submit controls to reject signup and password-change surfaces. It never reads current input values or sends those markers away. A page loading, or the popup opening, is never enough on its own to start a fill.
 4. The extension binds the request to the active tab, window, exact normalized origin, and a random token held in that document's isolated execution world.

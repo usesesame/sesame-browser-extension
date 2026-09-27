@@ -66,8 +66,21 @@ const MAX_OBSERVED_SHADOW_ROOTS = 64
 
 let sharedHostId: string | undefined
 
+type OverlayGlobal = typeof globalThis & {
+  sesameOverlayPresentStatus?: (text: string) => void
+}
+
 export function overlayHost(): HTMLDivElement | null {
   return sharedHostId ? (document.getElementById(sharedHostId) as HTMLDivElement | null) : null
+}
+
+// Entry point for a fill started outside the overlay: it shows the same text the
+// overlay button would and reports whether an overlay was attached to show it.
+export function showFillStatus(result: unknown): boolean {
+  const present = (globalThis as OverlayGlobal).sesameOverlayPresentStatus
+  if (typeof present !== 'function') return false
+  present(fillMessage(result))
+  return true
 }
 
 function ensureHostId(): string {
@@ -86,6 +99,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let dismissedField: HTMLInputElement | null = null
   let registrationMode = false
   let identityFieldsAvailable: IdentityFieldKey[] = []
+  let statusPresenter: ((text: string) => void) | undefined
   let cardButton: HTMLButtonElement | null = null
   let cardFieldsAvailable: CardFieldKey[] = []
   let cardMode = false
@@ -189,6 +203,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     codeButton = codeFill
     copyButton = copy
     status = statusNode
+    statusPresenter = (text) => { statusNode.textContent = text }
+    ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = statusPresenter
     host.addEventListener('mousedown', preventFieldBlur)
     fill.addEventListener('click', onFillClick)
     identityFill.addEventListener('click', onFillIdentityClick)
@@ -553,6 +569,10 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (connectionRefreshTimer !== undefined) clearTimeout(connectionRefreshTimer)
     copyHandle?.cancel()
     registrationPassword = ''
+    if ((globalThis as OverlayGlobal).sesameOverlayPresentStatus === statusPresenter) {
+      ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = undefined
+    }
+    statusPresenter = undefined
     host?.remove()
     host = null
     button = null

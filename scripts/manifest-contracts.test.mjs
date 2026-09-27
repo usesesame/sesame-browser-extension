@@ -9,7 +9,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
 const PINNED_ID = JSON.parse(read('contracts', 'native-host.json')).official_extension_id
-const PERMISSIONS = ['activeTab', 'nativeMessaging', 'scripting', 'storage']
+const PERMISSIONS = ['activeTab', 'contextMenus', 'nativeMessaging', 'scripting', 'storage']
 
 function idFor(publicKeyBase64) {
   const digest = createHash('sha256').update(Buffer.from(publicKeyBase64, 'base64')).digest().subarray(0, 16)
