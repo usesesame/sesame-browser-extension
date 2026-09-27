@@ -1362,6 +1362,40 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
+  it('fills a one-time code from the popup without touching storage', async () => {
+    const code = '287082'
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill code', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill code', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/Code filled\. About 18 seconds remain\./)
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe(code)
+      const storage = await worker.evaluate(async () => chrome.storage.local.get(null))
+      expect(Object.keys(storage).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
+      expect(JSON.stringify(storage)).not.toContain(code)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
   it('fills a one-time code inside nested open shadow roots', async () => {
     const code = '287082'
     const current = await openFixture('/shadow-one-time-code')

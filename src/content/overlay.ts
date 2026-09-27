@@ -6,6 +6,7 @@ import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
 import { isVisibleInput } from '../shared/dom'
 import { fillMatchExplanation } from '../shared/fill-match'
+import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
 import {
   DEFAULT_MAX_SCAN_DEPTH,
   collectInputs,
@@ -702,9 +703,8 @@ export function oneTimeCodeMessage(result: unknown): string {
   const remainingSeconds = isRecord(result) && result.ok === true && typeof result.remainingSeconds === 'number'
     ? result.remainingSeconds
     : 0
-  if (remainingSeconds > 0) {
-    return `Code filled. About ${remainingSeconds} second${remainingSeconds === 1 ? '' : 's'} remain.`
-  }
+  const secondsMessage = oneTimeCodeSecondsMessage(remainingSeconds)
+  if (secondsMessage) return secondsMessage
   const code = recordString(result, 'code')
   if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
   if (code === 'no-match') return 'No one-time code is available for this site.'

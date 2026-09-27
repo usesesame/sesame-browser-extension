@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { cardFillMessage, fillMessage, identityFillMessage, oneTimeCodeMessage } from '../../src/content/overlay'
 import { fillMatchExplanation } from '../../src/shared/fill-match'
+import { oneTimeCodeSecondsMessage } from '../../src/shared/one-time-code-copy'
 
 describe('inline fill messages', () => {
   it('explains a cancelled login fill instead of going silent', () => {
@@ -79,6 +80,13 @@ describe('inline fill messages', () => {
       .toBe('Code filled. About 18 seconds remain.')
     expect(oneTimeCodeMessage({ ok: true, remainingSeconds: 1 }))
       .toBe('Code filled. About 1 second remain.')
+  })
+
+  it('shares one seconds message with the popup in singular and plural', () => {
+    expect(oneTimeCodeSecondsMessage(12)).toBe('Code filled. About 12 seconds remain.')
+    expect(oneTimeCodeSecondsMessage(1)).toBe('Code filled. About 1 second remain.')
+    expect(oneTimeCodeSecondsMessage(0)).toBe('')
+    expect(oneTimeCodeMessage({ ok: true, remainingSeconds: 12 })).toBe(oneTimeCodeSecondsMessage(12))
   })
 
   it('maps the one-time code failures to the existing fill copy', () => {
