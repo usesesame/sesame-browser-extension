@@ -76,6 +76,49 @@ describe('identity hint fallback', () => {
     expect(identityFieldForInput(first('<input name="first_name" />'))).toBeUndefined()
     expect(identityFieldForInput(first('<input name="last_name" />'))).toBeUndefined()
   })
+
+  it('does not read a wallet, contract, or network address as a street address', () => {
+    expect(identityFieldForInput(first('<input name="wallet_address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input id="contract-address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="ip_address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="mac_address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="bitcoin_address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="eth_address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input placeholder="Web address" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="server_address" />'))).toBeUndefined()
+  })
+
+  it('still reads a shipping, billing, street, or numbered address', () => {
+    expect(identityFieldForInput(first('<input name="shipping_address" />'))).toBe('addressLine1')
+    expect(identityFieldForInput(first('<input name="billing_address" />'))).toBe('addressLine1')
+    expect(identityFieldForInput(first('<input placeholder="Street address" />'))).toBe('addressLine1')
+    expect(identityFieldForInput(first('<input placeholder="Address line 1" />'))).toBe('addressLine1')
+    expect(identityFieldForInput(first('<input name="mailing_address" />'))).toBe('addressLine1')
+    expect(identityFieldForInput(first('<input name="home_address" />'))).toBe('addressLine1')
+  })
+
+  it('trusts an explicit autocomplete token over an address qualifier', () => {
+    expect(identityFieldForInput(first('<input autocomplete="address-line1" name="wallet_address" />')))
+      .toBe('addressLine1')
+  })
+
+  it('leaves a phone country code alone but reads a country field', () => {
+    expect(identityFieldForInput(first('<input name="country_code" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="country" />'))).toBe('country')
+  })
+
+  it('leaves a non-person name field alone', () => {
+    expect(identityFieldForInput(first('<input name="event_name" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="project_name" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="team_name" />'))).toBeUndefined()
+  })
+
+  it('reads only text-like inputs', () => {
+    expect(identityFieldForInput(first('<input type="checkbox" name="email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="radio" name="city" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="search" name="city" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="number" name="postal_code" />'))).toBe('postalCode')
+  })
 })
 
 describe('identity surface inspection', () => {
