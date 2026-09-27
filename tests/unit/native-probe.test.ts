@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Browser, NativePort } from '../../src/platform/chrome'
-import { openDesktop, probeNativeHost } from '../../src/background/native-connection'
+import { openDesktop, probeNativeHost, requestFill } from '../../src/background/native-connection'
 
 interface PortScript {
   reply?: (request: Record<string, unknown>) => unknown
@@ -107,5 +107,26 @@ describe('native connection probe', () => {
       ok: false,
       code: 'desktop-launch-failed',
     })
+  })
+
+  it('carries a lookalike warning and its stored host back to the fill caller', async () => {
+    const { browser, requests } = fakeBrowser([
+      {
+        reply: (request) => ({
+          version: request.version,
+          type: 'fill-unavailable',
+          requestId: request.requestId,
+          reason: 'lookalike',
+          lookalike: 'apple.example',
+        }),
+      },
+    ])
+
+    await expect(requestFill(browser, 'https://example.test', { timeoutMs: 200 })).resolves.toEqual({
+      ok: false,
+      code: 'lookalike-domain',
+      lookalike: 'apple.example',
+    })
+    expect(requests[0]).toMatchObject({ version: 5, type: 'fill', origin: 'https://example.test' })
   })
 })

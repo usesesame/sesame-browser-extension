@@ -5,9 +5,11 @@ export const PROTOCOL_VERSION = 1
 export const CARD_PROTOCOL_VERSION = 2
 export const FILL_MATCH_PROTOCOL_VERSION = 3
 export const TOTP_PROTOCOL_VERSION = 4
+export const FILL_LOOKALIKE_PROTOCOL_VERSION = 5
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
+export const MAX_LOOKALIKE_HOST = 128
 export type FillFields = 'username' | 'password' | 'both'
 export type FillMatchKind = 'exact' | 'wwwAlias'
 
@@ -44,6 +46,7 @@ export type NativeResult =
   | { ok: true; identity: IdentityFields }
   | { ok: true; card: CardFields }
   | { ok: true; saved: true }
+  | { ok: false; code: 'lookalike-domain'; lookalike: string }
   | { ok: false; code: string }
 
 export interface DesktopCapabilities {
@@ -67,6 +70,7 @@ const FILL_BOTH_KEYS = new Set(['version', 'type', 'requestId', 'username', 'pas
 const FILL_USERNAME_KEYS = new Set(['version', 'type', 'requestId', 'username'])
 const FILL_PASSWORD_KEYS = new Set(['version', 'type', 'requestId', 'password'])
 const UNAVAILABLE_KEYS = new Set(['version', 'type', 'requestId', 'reason'])
+const LOOKALIKE_UNAVAILABLE_KEYS = new Set(['version', 'type', 'requestId', 'reason', 'lookalike'])
 const SAVED_KEYS = new Set(['version', 'type', 'requestId', 'saved'])
 const ERROR_KEYS = new Set(['version', 'type', 'requestId', 'message'])
 const BASE_REQUEST_KEYS = new Set(['version', 'type', 'requestId'])
@@ -118,14 +122,16 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
     || (value.version !== PROTOCOL_VERSION
       && value.version !== CARD_PROTOCOL_VERSION
       && value.version !== FILL_MATCH_PROTOCOL_VERSION
-      && value.version !== TOTP_PROTOCOL_VERSION)
+      && value.version !== TOTP_PROTOCOL_VERSION
+      && value.version !== FILL_LOOKALIKE_PROTOCOL_VERSION)
     || !isRequestId(value.requestId)) {
     return false
   }
   if ((value.version === PROTOCOL_VERSION && value.type === 'card')
     || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')
     || (value.version === FILL_MATCH_PROTOCOL_VERSION && value.type !== 'fill')
-    || (value.version === TOTP_PROTOCOL_VERSION && value.type !== 'totp')) {
+    || (value.version === TOTP_PROTOCOL_VERSION && value.type !== 'totp')
+    || (value.version === FILL_LOOKALIKE_PROTOCOL_VERSION && value.type !== 'fill')) {
     return false
   }
   if (value.type === 'capabilities' || value.type === 'activate') {
@@ -280,6 +286,11 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
   }
 
   if (raw.type === 'fill-unavailable') {
+    if (raw.reason === 'lookalike') {
+      return request.version === FILL_LOOKALIKE_PROTOCOL_VERSION
+        ? decodeLookalikeUnavailable(raw)
+        : { ok: false, code: 'protocol-mismatch' }
+    }
     return decodeUnavailable(raw)
   }
   if (raw.type !== 'fill') return { ok: false, code: 'invalid-response' }
@@ -287,6 +298,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
   const expectedKeys = fields === 'username' ? FILL_USERNAME_KEYS
     : fields === 'password' ? FILL_PASSWORD_KEYS : FILL_BOTH_KEYS
   const requiresMatchKind = request.version === FILL_MATCH_PROTOCOL_VERSION
+    || request.version === FILL_LOOKALIKE_PROTOCOL_VERSION
   if (!hasExactKeys(raw, requiresMatchKind ? new Set([...expectedKeys, 'matchKind']) : expectedKeys)) {
     return { ok: false, code: 'unsafe-response' }
   }
@@ -317,6 +329,13 @@ function decodeUnavailable(raw: Record<string, unknown>): NativeResult {
   return { ok: false, code: UNAVAILABLE_CODES[raw.reason] }
 }
 
+function decodeLookalikeUnavailable(raw: Record<string, unknown>): NativeResult {
+  if (!hasExactKeys(raw, LOOKALIKE_UNAVAILABLE_KEYS) || !isLookalikeHost(raw.lookalike)) {
+    return { ok: false, code: 'unsafe-response' }
+  }
+  return { ok: false, code: 'lookalike-domain', lookalike: raw.lookalike }
+}
+
 export function makeRequest(type: 'capabilities'): Extract<NativeRequest, { type: 'capabilities' }>
 export function makeRequest(type: 'activate'): Extract<NativeRequest, { type: 'activate' }>
 export function makeRequest(type: 'fill', origin: string, fields?: FillFields): Extract<NativeRequest, { type: 'fill' }>
@@ -326,8 +345,8 @@ export function makeRequest(type: 'capabilities' | 'activate' | 'fill', origin?:
     const normalizedOrigin = normalizeFillOrigin(origin)
     if (!normalizedOrigin) throw new TypeError('fill request requires a normalized web origin')
     return fields === 'both'
-      ? { version: FILL_MATCH_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
-      : { version: FILL_MATCH_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
+      ? { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
+      : { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
   }
   return { version: PROTOCOL_VERSION, type, requestId }
 }
@@ -418,6 +437,18 @@ function isRequestId(value: unknown): value is string {
 
 function isFillMatchKind(value: unknown): value is FillMatchKind {
   return value === 'exact' || value === 'wwwAlias'
+}
+
+const LOOKALIKE_HOST_FORBIDDEN = new Set([' ', '/', '?', '#', '@', ':'])
+
+function isLookalikeHost(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_LOOKALIKE_HOST) return false
+  return !Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint <= 0x1f
+      || (codePoint >= 0x7f && codePoint <= 0x9f)
+      || LOOKALIKE_HOST_FORBIDDEN.has(character)
+  })
 }
 
 function isOneTimeCode(value: unknown): value is string {

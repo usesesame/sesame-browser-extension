@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CARD_PROTOCOL_VERSION,
+  FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   TOTP_PROTOCOL_VERSION,
@@ -49,6 +50,7 @@ const CONTRACTS = [
   { directory: 'v2', protocolVersion: CARD_PROTOCOL_VERSION },
   { directory: 'v3', protocolVersion: FILL_MATCH_PROTOCOL_VERSION },
   { directory: 'v4', protocolVersion: TOTP_PROTOCOL_VERSION },
+  { directory: 'v5', protocolVersion: FILL_LOOKALIKE_PROTOCOL_VERSION },
 ]
 
 describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {
