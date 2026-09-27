@@ -27,6 +27,7 @@ function baseOptions() {
     onOpenDesktop: vi.fn(),
     onFillIdentityRequest: vi.fn(),
     onFillCardRequest: vi.fn(),
+    onFillOneTimeCodeRequest: vi.fn(),
   }
 }
 

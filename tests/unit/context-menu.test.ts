@@ -10,7 +10,7 @@ import { publicFillResult } from '../../src/background/fill-result'
 import type { FillContext } from '../../src/background/fill-state'
 
 function completedFill(): FillContext {
-  return { phase: { name: 'complete', usernameFilled: true, passwordFilled: true } }
+  return { phase: { name: 'complete', usernameFilled: true, passwordFilled: true, matchKind: 'exact' } }
 }
 
 function deps(overrides: Partial<ContextMenuFillDeps> = {}): ContextMenuFillDeps {
@@ -68,6 +68,7 @@ describe('the fill context menu click', () => {
       state: 'filled',
       usernameFilled: true,
       passwordFilled: true,
+      matchKind: 'exact',
     })
   })
 
