@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { cardFillMessage, fillMessage, identityFillMessage, oneTimeCodeMessage } from '../../src/content/overlay'
+import { fillMatchExplanation } from '../../src/shared/fill-match'
+import { oneTimeCodeSecondsMessage } from '../../src/shared/one-time-code-copy'
 
 describe('inline fill messages', () => {
   it('explains a cancelled login fill instead of going silent', () => {
@@ -19,6 +21,17 @@ describe('inline fill messages', () => {
   it('falls back to a plain review line when the result carries no rule', () => {
     expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true }))
       .toBe('Filled. Review the page and sign in.')
+  })
+
+  it('shares one explanation string with the popup for both match kinds', () => {
+    for (const matchKind of ['exact', 'wwwAlias'] as const) {
+      const explanation = fillMatchExplanation(matchKind)
+      expect(explanation).not.toBeNull()
+      expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true, matchKind }))
+        .toBe(explanation)
+    }
+    expect(fillMatchExplanation('parentDomain')).toBeNull()
+    expect(fillMatchExplanation(undefined)).toBeNull()
   })
 
   it('asks for a desktop update when the host does not speak the fill protocol', () => {
@@ -67,6 +80,13 @@ describe('inline fill messages', () => {
       .toBe('Code filled. About 18 seconds remain.')
     expect(oneTimeCodeMessage({ ok: true, remainingSeconds: 1 }))
       .toBe('Code filled. About 1 second remain.')
+  })
+
+  it('shares one seconds message with the popup in singular and plural', () => {
+    expect(oneTimeCodeSecondsMessage(12)).toBe('Code filled. About 12 seconds remain.')
+    expect(oneTimeCodeSecondsMessage(1)).toBe('Code filled. About 1 second remain.')
+    expect(oneTimeCodeSecondsMessage(0)).toBe('')
+    expect(oneTimeCodeMessage({ ok: true, remainingSeconds: 12 })).toBe(oneTimeCodeSecondsMessage(12))
   })
 
   it('maps the one-time code failures to the existing fill copy', () => {

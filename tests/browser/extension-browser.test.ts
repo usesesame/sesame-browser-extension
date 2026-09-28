@@ -29,6 +29,18 @@ const loginPage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const framedLoginPage = `<!doctype html><html><body>
+<h1>Embedded sign in</h1>
+<iframe id="login-frame" title="Sign in" src="/login" style="width:640px;height:420px"></iframe>
+</body></html>`
+
+function crossOriginLoginPage(): string {
+  return `<!doctype html><html><body>
+<h1>Embedded sign in</h1>
+<iframe id="login-frame" title="Sign in" src="${secondaryOrigin}/login" style="width:640px;height:420px"></iframe>
+</body></html>`
+}
+
 const usernameStepPage = `<!doctype html><html><body>
 <form id="login-form" action="/signin" method="post">
 <h1>Sign in</h1>
@@ -110,14 +122,35 @@ const oneTimeCodePage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const shadowOneTimeCodePage = `<!doctype html><html><body>
+<h1>Two-step verification</h1>
+<div id="code-host"></div>
+<script>
+const outer = document.getElementById('code-host').attachShadow({ mode: 'open' })
+const innerHost = document.createElement('div')
+outer.append(innerHost)
+const inner = innerHost.attachShadow({ mode: 'open' })
+const input = document.createElement('input')
+input.id = 'shadow-code'
+input.type = 'text'
+input.autocomplete = 'one-time-code'
+input.inputMode = 'numeric'
+input.setAttribute('aria-label', 'Verification code')
+inner.append(input)
+</script>
+</body></html>`
+
 function pageBody(path: string): string {
-  return path === '/username' ? usernameStepPage
-    : path === '/password' ? passwordStepPage
-      : path === '/identity' ? identityPage
-        : path === '/card' ? cardPage
-          : path === '/registration' ? registrationPage
-            : path === '/password-change' ? passwordChangePage
-              : path === '/one-time-code' ? oneTimeCodePage : loginPage
+  return path === '/framed-login' ? framedLoginPage
+    : path === '/cross-origin-login' ? crossOriginLoginPage()
+      : path === '/username' ? usernameStepPage
+        : path === '/password' ? passwordStepPage
+          : path === '/identity' ? identityPage
+            : path === '/card' ? cardPage
+              : path === '/registration' ? registrationPage
+                : path === '/password-change' ? passwordChangePage
+                  : path === '/one-time-code' ? oneTimeCodePage
+                    : path === '/shadow-one-time-code' ? shadowOneTimeCodePage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -332,8 +365,8 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   }
 }
 
-async function mockNativeHostInWorker(): Promise<void> {
-  await worker.evaluate(() => {
+async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exact'): Promise<void> {
+  await worker.evaluate((matchKind) => {
     const target = globalThis as typeof globalThis & {
       __sesameTestRestore?: () => void
       __sesameSaveRequests?: number
@@ -372,7 +405,7 @@ async function mockNativeHostInWorker(): Promise<void> {
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'fill',
-                matchKind: 'exact',
+                matchKind,
                 ...(fields === 'password' ? {} : { username: 'jamie@example.test' }),
                 ...(fields === 'username' ? {} : { password: 'fictional-inline-pass' }),
               }))
@@ -407,7 +440,7 @@ async function mockNativeHostInWorker(): Promise<void> {
         },
       }
     }
-  })
+  }, fillMatchKind)
 }
 
 async function installMissingNativeHost(): Promise<void> {
@@ -716,6 +749,58 @@ describe('extension browser suite', () => {
     expect(values.inputs).not.toContain(approved.username)
     expect(values.text).not.toContain(approved.username)
   })
+
+  it('fills a same-origin sign-in form inside a child frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/framed-login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      const frame = current.frameLocator('#login-frame')
+      await expect.poll(
+        async () => frame.locator('#username').inputValue(),
+        { timeout: 15000 },
+      ).toBe('jamie@example.test')
+      expect(await frame.locator('#password').inputValue()).toBe('fictional-inline-pass')
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('does not fill a cross-origin sign-in frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/cross-origin-login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/No visible sign-in fields were found/)
+      expect(await popup.getByRole('button', { name: 'Fill login', exact: true }).count()).toBe(0)
+      const frame = current.frameLocator('#login-frame')
+      expect(await frame.locator('#username').inputValue()).toBe('')
+      expect(await frame.locator('#password').inputValue()).toBe('')
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
 
   it('fills only the approved identity fields after a matching prepare', async () => {
     const approvedIdentity = {
@@ -1273,6 +1358,137 @@ describe('extension browser suite', () => {
       expect(clipboard).toBe(sentinel)
       expect(clipboard).not.toContain(code)
     } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('fills a one-time code from the popup without touching storage', async () => {
+    const code = '287082'
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill code', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill code', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/Code filled\. About 18 seconds remain\./)
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe(code)
+      const storage = await worker.evaluate(async () => chrome.storage.local.get(null))
+      expect(Object.keys(storage).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
+      expect(JSON.stringify(storage)).not.toContain(code)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('fills a one-time code inside nested open shadow roots', async () => {
+    const code = '287082'
+    const current = await openFixture('/shadow-one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      await current.evaluate(() => {
+        const outer = document.getElementById('code-host')?.shadowRoot
+        const inner = outer?.querySelector('div')?.shadowRoot
+        ;(inner?.querySelector('#shadow-code') as HTMLInputElement | null)?.focus()
+      })
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill code')
+      await expect.poll(
+        async () => current.evaluate(() => {
+          const outer = document.getElementById('code-host')?.shadowRoot
+          const inner = outer?.querySelector('div')?.shadowRoot
+          return (inner?.querySelector('#shadow-code') as HTMLInputElement | null)?.value ?? ''
+        }),
+        { timeout: 15000 },
+      ).toBe(code)
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('shows the fill match explanation in the popup after an inline fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    let popup: Page | undefined
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe('fictional-inline-pass')
+      popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup!.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/The saved login matches this site exactly/)
+    } finally {
+      if (popup && !popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('shows the www alias explanation in the popup after a fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker('wwwAlias')
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/through its single www address/)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()
     }
   }, 30000)

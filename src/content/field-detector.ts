@@ -1,5 +1,6 @@
 // Reports only origin and bounded booleans; never reads input values or page text.
 import { isVisibleInput } from '../shared/dom'
+import { collectInputs, labelsForInput } from './input-scan'
 export interface LoginSurface {
   ok: true
   origin: string
@@ -11,7 +12,9 @@ export type LoginInspection =
 
 export function inspectLoginSurface(): LoginInspection {
   // A sign-up honeypot is a real input no person can see, and filling it is what the page is watching for.
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+  const scan = collectInputs(document)
+  if (scan.truncated) return { ok: false, code: 'no-fields' }
+  const inputs = scan.inputs
     .filter((input) => isVisibleInput(input, { rejectAriaHiddenAncestor: true, minimumSize: 1 }))
   const passwordFields = inputs.filter((input) => input.type.toLowerCase() === 'password')
   const usernameFields = inputs.filter(isUsernameField)
@@ -32,15 +35,7 @@ const USERNAME_HINT = /user|login|signin|sign-in|email|e-mail|account|identifier
 const NOT_USERNAME_HINT = /search|query|filter|find|coupon|promo|voucher|captcha|one-?time|verification|security-?code|otp/
 
 export function labelText(input: HTMLInputElement): string {
-  const parts: string[] = []
-  if (input.id) {
-    for (const label of document.querySelectorAll(`label[for="${CSS.escape(input.id)}"]`)) {
-      parts.push(label.textContent ?? '')
-    }
-  }
-  const wrapping = input.closest('label')
-  if (wrapping) parts.push(wrapping.textContent ?? '')
-  return parts.join(' ')
+  return labelsForInput(input).map((label) => label.textContent ?? '').join(' ')
 }
 
 export function isUsernameField(input: HTMLInputElement): boolean {

@@ -4,6 +4,7 @@ import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
 import { labelText } from './field-detector'
 import { setValue } from './field-writer'
+import { collectInputs } from './input-scan'
 
 export type OneTimeCodeKind = 'single' | 'split'
 
@@ -138,7 +139,9 @@ function writeOneTimeCode(
 }
 
 function resolveOneTimeCodeTarget(): OneTimeCodeTarget {
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+  const scan = collectInputs(document)
+  if (scan.truncated) return { ok: false, code: 'no-fields' }
+  const inputs = scan.inputs
     .filter((input) => isVisibleInput(input, { rejectAriaHiddenAncestor: true, minimumSize: 1 }))
   const groups = splitDigitGroups(inputs)
   const singles = inputs.filter((input) => !isSplitDigitField(input) && isOneTimeCodeField(input))

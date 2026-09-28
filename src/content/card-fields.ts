@@ -1,6 +1,7 @@
 import type { CardFieldKey } from '../protocol/native'
 import { tokens } from './field-writer'
 import { isVisibleInput } from '../shared/dom'
+import { collectInputs, labelsForInput } from './input-scan'
 
 const AUTOCOMPLETE_TO_FIELDS: Readonly<Record<string, readonly CardFieldKey[]>> = Object.freeze({
   'cc-name': ['cardholderName'],
@@ -49,7 +50,9 @@ export interface CardSurfaceTargets {
 // so they cannot disagree about what the page contains.
 export function scanCardSurface(): CardSurfaceTargets {
   const targets: CardSurfaceTargets = { fields: {} }
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))) {
+  const scan = collectInputs(document)
+  if (scan.truncated) return targets
+  for (const input of scan.inputs.filter((input) => isVisibleInput(input))) {
     if (hasCombinedExpiryField(input) && !targets.combinedExpiry) {
       targets.combinedExpiry = input
     }
@@ -76,6 +79,6 @@ function inputHint(input: HTMLInputElement): string {
     input.placeholder,
     input.getAttribute('aria-label'),
     input.getAttribute('title'),
-    ...Array.from(input.labels ?? []).map((label) => label.textContent),
+    ...labelsForInput(input).map((label) => label.textContent),
   ].join(' ').toLowerCase()
 }

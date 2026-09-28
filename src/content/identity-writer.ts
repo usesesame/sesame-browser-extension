@@ -2,6 +2,7 @@
 import type { IdentityFieldKey, IdentityFields } from '../protocol/native'
 import { setValue, tokens } from './field-writer'
 import { isVisibleInput } from '../shared/dom'
+import { collectInputs } from './input-scan'
 
 export type IdentityFillOutcome =
   | { ok: true; filledFields: IdentityFieldKey[] }
@@ -86,7 +87,9 @@ export function fillIdentitySurface(
 
 function detectIdentityFields(): Partial<Record<IdentityFieldKey, HTMLInputElement>> {
   const fieldMap: Partial<Record<IdentityFieldKey, HTMLInputElement>> = {}
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))) {
+  const scan = collectInputs(document)
+  if (scan.truncated) return fieldMap
+  for (const input of scan.inputs.filter((input) => isVisibleInput(input))) {
     if (input.type.toLowerCase() === 'password') continue
     for (const token of tokens(input.autocomplete)) {
       const key = AUTOCOMPLETE_TO_FIELD[token]

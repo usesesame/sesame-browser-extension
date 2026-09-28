@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Browser, ScriptInjectionDetails } from '../../src/platform/chrome'
+import type { Browser, ScriptFunctionInjection, ScriptInjectionDetails } from '../../src/platform/chrome'
 
 const native = vi.hoisted(() => ({ requestTotpCode: vi.fn() }))
 
@@ -15,7 +15,22 @@ import { createCoordinator } from '../../src/background/coordinator'
 
 const pageOrigin = 'https://example.test'
 
-function browserForCodePage(surfaceOrigin = pageOrigin, kind: 'single' | 'split' = 'single'): Browser {
+function inspectionResult(surfaceOrigin: string, kind: 'single' | 'split') {
+  return {
+    ok: true,
+    surface: { ok: true, origin: surfaceOrigin },
+    kind,
+    fields: kind === 'split' ? 6 : 1,
+  }
+}
+
+function browserForCodePage(
+  surfaceOrigin = pageOrigin,
+  kind: 'single' | 'split' = 'single',
+  injections: Array<{ frameId: number; result: unknown }> = [
+    { frameId: 0, result: inspectionResult(surfaceOrigin, kind) },
+  ],
+): Browser {
   return {
     runtime: {
       getManifest: () => ({ version: '0.1.0' }),
@@ -28,16 +43,7 @@ function browserForCodePage(surfaceOrigin = pageOrigin, kind: 'single' | 'split'
     scripting: {
       executeScript: vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
         if ('files' in details) return []
-        if (details.func.name === 'invokeBridgeInspection') {
-          return [{
-            result: {
-              ok: true,
-              surface: { ok: true, origin: surfaceOrigin },
-              kind,
-              fields: kind === 'split' ? 6 : 1,
-            },
-          }]
-        }
+        if (details.func.name === 'invokeBridgeInspection') return injections
         const phase = details.args?.[4]
         if (phase === 'prepare') return [{ result: { ok: true, kind, filledFields: kind === 'split' ? 6 : 1 } }]
         if (phase === 'fill') return [{ result: { ok: true, kind, filledFields: kind === 'split' ? 6 : 1 } }]
@@ -45,6 +51,12 @@ function browserForCodePage(surfaceOrigin = pageOrigin, kind: 'single' | 'split'
       }) as unknown as Browser['scripting']['executeScript'],
     },
   }
+}
+
+function bridgeFillCalls(browser: Browser): ScriptFunctionInjection<unknown>[] {
+  return (browser.scripting.executeScript as unknown as ReturnType<typeof vi.fn>).mock.calls
+    .map(([details]) => details as ScriptInjectionDetails<unknown>)
+    .filter((details): details is ScriptFunctionInjection<unknown> => !('files' in details) && details.func.name === 'invokeBridgeFill')
 }
 
 beforeEach(() => {
@@ -112,7 +124,7 @@ describe('one-time code coordinator', () => {
     executeScript.mockImplementation(async (details: ScriptInjectionDetails<unknown>) => {
       if ('files' in details) return []
       if (details.func.name === 'invokeBridgeInspection') {
-        return [{ result: { ok: false, code: 'multiple-matches' } }]
+        return [{ frameId: 0, result: { ok: false, code: 'multiple-matches' } }]
       }
       return [{ result: { ok: true, kind: 'single', filledFields: 1 } }]
     })
@@ -139,5 +151,60 @@ describe('one-time code coordinator', () => {
     controller.abort()
 
     await expect(pending).resolves.toEqual({ ok: false, code: 'cancelled' })
+  })
+
+  it('fills a split group in one same-origin child frame and keeps every write bound to it', async () => {
+    const browser = browserForCodePage(pageOrigin, 'split', [
+      { frameId: 0, result: { ok: false, code: 'no-fields' } },
+      { frameId: 7, result: inspectionResult(pageOrigin, 'split') },
+    ])
+    const coordinator = createCoordinator(browser)
+
+    await expect(coordinator.fillOneTimeCodeActivePage()).resolves.toEqual({
+      ok: true,
+      remainingSeconds: 18,
+    })
+    expect(native.requestTotpCode).toHaveBeenCalledWith(
+      browser,
+      pageOrigin,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    const writes = bridgeFillCalls(browser)
+    expect(writes).toHaveLength(3)
+    for (const details of writes) {
+      expect(details.target).toEqual({ tabId: 11, frameIds: [7] })
+      expect(details.args?.[1]).toBe(pageOrigin)
+    }
+  })
+
+  it('does not fill a cross-origin child frame for the code surface', async () => {
+    const browser = browserForCodePage('https://other.example.test', 'single', [
+      { frameId: 0, result: { ok: false, code: 'no-fields' } },
+      { frameId: 7, result: inspectionResult('https://other.example.test', 'single') },
+    ])
+    const coordinator = createCoordinator(browser)
+
+    await expect(coordinator.fillOneTimeCodeActivePage()).resolves.toEqual({
+      ok: false,
+      code: 'no-fields',
+    })
+    expect(native.requestTotpCode).not.toHaveBeenCalled()
+    expect(bridgeFillCalls(browser)).toHaveLength(0)
+  })
+
+  it('fails closed when two same-origin child frames carry a code surface', async () => {
+    const browser = browserForCodePage(pageOrigin, 'split', [
+      { frameId: 0, result: { ok: false, code: 'no-fields' } },
+      { frameId: 7, result: inspectionResult(pageOrigin, 'split') },
+      { frameId: 9, result: inspectionResult(pageOrigin, 'single') },
+    ])
+    const coordinator = createCoordinator(browser)
+
+    await expect(coordinator.fillOneTimeCodeActivePage()).resolves.toEqual({
+      ok: false,
+      code: 'multiple-matches',
+    })
+    expect(native.requestTotpCode).not.toHaveBeenCalled()
+    expect(bridgeFillCalls(browser)).toHaveLength(0)
   })
 })
