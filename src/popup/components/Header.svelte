@@ -49,9 +49,9 @@
   .brand-name { margin: 0; font-family: var(--font-display); font-size: var(--type-3); font-weight: var(--weight-regular); color: var(--text-heading); letter-spacing: -.01em; }
   .brand-meta { overflow: hidden; color: var(--text-muted); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .topbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-  .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--text-muted); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, color .16s ease, transform .1s ease; }
-  .icon-button:hover { color: var(--text); background: var(--tint); }
-  .icon-button:active { transform: scale(.9); }
+  .icon-button { display: grid; width: var(--control-h-sm); height: var(--control-h-sm); place-items: center; border: 0; border-radius: var(--control-radius); padding: 0; color: var(--text-muted); background: transparent; cursor: pointer; transition: var(--control-transition); }
+  .icon-button:hover { color: var(--text-heading); background: var(--button-secondary-hover-bg); }
+  .icon-button:active { transform: var(--control-press); }
   .icon-button:disabled { cursor: wait; opacity: .62; }
   .icon-button:disabled:active { transform: none; }
   .icon-button svg { width: 16px; height: 16px; }

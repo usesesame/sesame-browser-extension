@@ -781,10 +781,10 @@
   .inline-access > button:disabled { cursor: wait; opacity: .6; }
   .inline-access > button:disabled:active { transform: none; }
   .inline-feedback { grid-column: 1 / -1; }
-  .generate-button { width: 100%; border: 0; border-radius: var(--radius-md); padding: 11px 14px; color: var(--on-accent); background: var(--accent); font-weight: var(--weight-bold); cursor: pointer; box-shadow: inset 0 1px 0 var(--button-edge); transition: background-color .16s ease, transform .1s ease; }
+  .generate-button { width: 100%; min-height: var(--control-h-md); border: 1px solid transparent; border-radius: var(--control-radius); padding: 0 var(--control-px-md); color: var(--on-accent); background: var(--accent); font-weight: var(--control-weight); cursor: pointer; box-shadow: var(--button-shadow); transition: var(--control-transition); }
   .generate-button:hover:not(:disabled) { background: var(--accent-hover); }
-  .generate-button:active:not(:disabled) { background: var(--accent-active); transform: scale(.97); }
-  .generate-button:disabled { cursor: wait; opacity: .65; }
+  .generate-button:active:not(:disabled) { background: var(--accent-active); box-shadow: var(--button-shadow-pressed); transform: var(--control-press); }
+  .generate-button:disabled { cursor: wait; opacity: var(--control-disabled); }
   .generated-password { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 8px; border-radius: var(--radius-sm); background: var(--surface-inset); }
   .generated-password code { flex: 1; overflow: hidden; font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
   .generated-password button { border: 0; border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text); background: var(--surface); font-size: var(--type-2); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }

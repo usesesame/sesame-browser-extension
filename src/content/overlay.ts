@@ -23,16 +23,21 @@ const OVERLAY_CSS = `
         .mark svg{display:block;width:15px;height:15px}
         button{font-family:inherit}
         .fill{border:0;border-radius:var(--radius-sm);padding:6px 12px;cursor:pointer;
-          background:var(--accent);color:var(--on-accent);box-shadow:inset 0 1px 0 var(--button-edge);
-          font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}
-        .fill:hover{background:var(--accent-hover)}.fill:disabled{opacity:.6;cursor:default}
-        .copy{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
-          background:var(--surface);color:var(--accent);
+          background:var(--accent);color:var(--on-accent);box-shadow:var(--button-shadow);
+          font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap;
+          transition:background-color .16s ease,box-shadow .16s ease,transform .1s ease}
+        .fill:hover{background:var(--accent-hover)}
+        .fill:active:not(:disabled){transform:scale(.97);background:var(--accent-active);box-shadow:var(--button-shadow-pressed)}
+        .fill:disabled{opacity:.5;cursor:default}
+        .copy{border:0;border-radius:var(--radius-sm);padding:6px 10px;
+          background:var(--button-secondary-bg);color:var(--text-heading);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.copy[hidden]{display:none}
-        .identity{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;
-          background:var(--surface);color:var(--accent);
+        .identity{border:0;border-radius:var(--radius-sm);padding:6px 10px;
+          background:var(--button-secondary-bg);color:var(--text-heading);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.identity[hidden]{display:none}
-        .identity:disabled{opacity:.6;cursor:default}
+        .identity:disabled{opacity:.5;cursor:default}
+        .copy:hover,.identity:hover:not(:disabled){background:var(--button-secondary-hover-bg)}
+        .copy:active,.identity:active:not(:disabled){transform:scale(.97)}
         .status{max-width:220px;color:var(--text-muted);font-size:var(--type-2);line-height:1.3}
         .card button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
         .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:var(--type-3);line-height:1;display:inline-grid;place-items:center;width:24px;height:24px;padding:0}`

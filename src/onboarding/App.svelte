@@ -214,22 +214,29 @@
   .connection.ok p { color: var(--ok-text); }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
   button, a.primary, a.secondary {
-    border: 0;
-    border-radius: var(--radius-md);
-    padding: 13px 18px;
+    display: inline-flex;
+    min-height: var(--control-h-lg);
+    align-items: center;
+    justify-content: center;
+    gap: var(--control-gap);
+    border: 1px solid transparent;
+    border-radius: var(--control-radius);
+    padding: 0 var(--control-px-lg);
+    font-family: var(--font-ui);
     font-size: var(--type-2);
-    font-weight: var(--weight-medium);
+    font-weight: var(--control-weight);
     cursor: pointer;
-    transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
+    transition: var(--control-transition);
   }
-  button:active, a.primary:active, a.secondary:active { transform: scale(.97); }
+  button:active, a.primary:active, a.secondary:active { transform: var(--control-press); }
   button:disabled:active { transform: none; }
-  a.primary, a.secondary { display: inline-block; text-decoration: none; }
-  .primary { color: var(--on-accent); background: var(--accent); box-shadow: inset 0 1px 0 var(--button-edge); }
+  a.primary, a.secondary { text-decoration: none; }
+  .primary { color: var(--on-accent); background: var(--accent); box-shadow: var(--button-shadow); }
   .primary:hover { background: var(--accent-hover); }
-  .secondary, a.secondary { border: 1px solid var(--border-soft); color: var(--accent-link); background: var(--surface-inset); }
-  .secondary:hover, a.secondary:hover { border-color: var(--border-strong); background: var(--tint); }
-  button:disabled { cursor: wait; opacity: .65; }
+  .primary:active { background: var(--accent-active); box-shadow: var(--button-shadow-pressed); }
+  .secondary, a.secondary { border-color: var(--button-secondary-border); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); }
+  .secondary:hover, a.secondary:hover { background: var(--button-secondary-hover-bg); }
+  button:disabled { cursor: wait; opacity: var(--control-disabled); }
   .permission { display: grid; gap: 10px; margin: 0 0 22px; padding: 13px 16px; border-radius: var(--radius-md); background: var(--surface-inset); }
   .permission strong { font-size: var(--type-3); font-weight: var(--weight-bold); }
   .permission p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
