@@ -101,13 +101,23 @@ const passwordChangePage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const oneTimeCodePage = `<!doctype html><html><body>
+<form id="code-form" action="/verify" method="post">
+<h1>Two-step verification</h1>
+<label for="code">Verification code</label>
+<input id="code" name="code" type="text" autocomplete="one-time-code" inputmode="numeric">
+<button type="submit" id="verify">Verify</button>
+</form>
+</body></html>`
+
 function pageBody(path: string): string {
   return path === '/username' ? usernameStepPage
     : path === '/password' ? passwordStepPage
       : path === '/identity' ? identityPage
         : path === '/card' ? cardPage
           : path === '/registration' ? registrationPage
-            : path === '/password-change' ? passwordChangePage : loginPage
+            : path === '/password-change' ? passwordChangePage
+              : path === '/one-time-code' ? oneTimeCodePage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -365,6 +375,13 @@ async function mockNativeHostInWorker(): Promise<void> {
                 matchKind: 'exact',
                 ...(fields === 'password' ? {} : { username: 'jamie@example.test' }),
                 ...(fields === 'username' ? {} : { password: 'fictional-inline-pass' }),
+              }))
+            } else if (request?.type === 'totp') {
+              messageListeners.forEach((listener) => listener({
+                ...base,
+                type: 'totp',
+                code: '287082',
+                remainingSeconds: 18,
               }))
             } else if (request?.type === 'save') {
               target.__sesameSaveRequests = (target.__sesameSaveRequests ?? 0) + 1
@@ -1222,6 +1239,39 @@ describe('extension browser suite', () => {
         })),
         { timeout: 15000 },
       ).toEqual({ username: 'jamie@example.test', password: 'fictional-inline-pass' })
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('fills a one-time code without touching storage or the clipboard', async () => {
+    const code = '287082'
+    const sentinel = 'fictional-clipboard-sentinel'
+    const current = await openFixture('/one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: primaryOrigin })
+    await current.evaluate(async (value) => { await navigator.clipboard.writeText(value) }, sentinel)
+    try {
+      await current.evaluate(() => (document.getElementById('code') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill code')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe(code)
+      const storage = await worker.evaluate(async () => chrome.storage.local.get(null))
+      expect(Object.keys(storage).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
+      expect(JSON.stringify(storage)).not.toContain(code)
+      const clipboard = await current.evaluate(async () => navigator.clipboard.readText())
+      expect(clipboard).toBe(sentinel)
+      expect(clipboard).not.toContain(code)
     } finally {
       await restoreWorkerMocks()
     }

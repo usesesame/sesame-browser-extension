@@ -1,4 +1,4 @@
-import { probeNativeHost, requestCardFill, requestFill, requestIdentityFill } from './native-connection'
+import { probeNativeHost, requestCardFill, requestFill, requestIdentityFill, requestTotpCode } from './native-connection'
 import { transition, initialFillState, type FillContext } from './fill-state'
 import {
   normalizeFillOutcome,
@@ -17,6 +17,13 @@ import { makeDiagnostic, userMessage } from '../protocol/diagnostics'
 import type { Browser } from '../platform/chrome'
 import { isRecord } from '../shared/values'
 import { normalizePasswordChangeOutcome, type PasswordChangeOutcome } from '../content/password-change'
+import {
+  normalizeOneTimeCodeFillOutcome,
+  normalizeOneTimeCodeInspection,
+  type OneTimeCodeFillOutcome,
+  type OneTimeCodeInspection,
+  type OneTimeCodeKind,
+} from '../content/one-time-code'
 import { isSameActivePage, tabFillContext, type PageTab } from './tab-context'
 import {
   CARD_FIELD_KEYS,
@@ -39,6 +46,8 @@ export interface Coordinator {
   fillIdentityActivePage(signal?: AbortSignal): Promise<IdentityFillResult>
   inspectCardActivePage(): Promise<CardPageCheckResult>
   fillCardActivePage(signal?: AbortSignal): Promise<CardFillResult>
+  inspectOneTimeCodeActivePage(): Promise<OneTimeCodePageCheckResult>
+  fillOneTimeCodeActivePage(signal?: AbortSignal): Promise<OneTimeCodeFillResult>
 }
 
 export interface IdentityPageCheckResult {
@@ -62,6 +71,16 @@ export interface CardPageCheckResult {
   embedded?: boolean
 }
 export type CardFillResult = { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string }
+
+export interface OneTimeCodePageCheckResult {
+  state: 'ready' | 'unavailable'
+  code?: string
+  kind?: OneTimeCodeKind
+}
+
+export type OneTimeCodeFillResult =
+  | { ok: true; remainingSeconds: number }
+  | { ok: false; code: string }
 
 interface CardFrameInspection {
   state: 'ready' | 'unavailable'
@@ -234,6 +253,32 @@ export function createCoordinator(browser: Browser): Coordinator {
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
       }, (signal) => runCardFill(browser, signal))
+    },
+
+    async inspectOneTimeCodeActivePage(): Promise<OneTimeCodePageCheckResult> {
+      try {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+        const page = topLevelPage(tab)
+        if (!page.ok) return { state: 'unavailable', code: page.code }
+        const inspected = await oneTimeCodeSurface().inspect({ browser, tabId: page.tabId, origin: page.origin })
+        if (!inspected.ok) return { state: 'unavailable', code: inspected.code }
+        return { state: 'ready', kind: inspected.ready.kind }
+      } catch {
+        return { state: 'unavailable', code: 'page-restricted' }
+      }
+    },
+
+    async fillOneTimeCodeActivePage(externalSignal): Promise<OneTimeCodeFillResult> {
+      return withFillGuard<OneTimeCodeFillResult>(activeControllers, externalSignal, {
+        cancelled: () => ({ ok: false, code: 'cancelled' }),
+        busy: () => ({ ok: false, code: 'fill-in-progress' }),
+        restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
+      }, async (signal) => {
+        const result = await runSurfaceFill(browser, signal, oneTimeCodeSurface())
+        return result.ok
+          ? { ok: true, remainingSeconds: result.approved.remainingSeconds }
+          : { ok: false, code: result.code }
+      })
     },
   }
 }
@@ -539,6 +584,65 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
         target: { tabId: ctx.tabId },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'clear'],
+      })
+    },
+  }
+}
+
+function oneTimeCodeSurface(): FillSurface<
+  Extract<OneTimeCodeInspection, { ok: true }>,
+  OneTimeCodeKind,
+  { totpCode: string; remainingSeconds: number },
+  OneTimeCodeFillOutcome
+> {
+  let prepared = false
+  return {
+    resolvePage: topLevelPage,
+    async inspect({ browser, tabId, origin }) {
+      await installContentBridge(browser, tabId)
+      const [injection] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: invokeBridgeInspection,
+        args: ['sesameInspectOneTimeCodeSurface'],
+      })
+      const inspection = normalizeOneTimeCodeInspection(injection?.result)
+      if (!inspection.ok) return inspection
+      if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
+      return { ok: true, ready: inspection }
+    },
+    async prepare(ctx, ready) {
+      const [preparation] = await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId },
+        func: invokeBridgeFill,
+        args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'prepare'],
+      })
+      const prep = normalizeOneTimeCodeFillOutcome(preparation?.result)
+      if (!prep.ok) return prep
+      prepared = true
+      return { ok: true, approvalInput: ready.kind }
+    },
+    async requestApproval(browser, origin, _input, signal) {
+      const result = await requestTotpCode(browser, origin, { signal })
+      return result.ok ? { ok: true, approved: result } : result
+    },
+    async fill(ctx, approved) {
+      try {
+        const [injection] = await ctx.browser.scripting.executeScript({
+          target: { tabId: ctx.tabId },
+          func: invokeBridgeFill,
+          args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, approved.totpCode, 'fill'],
+        })
+        return normalizeOneTimeCodeFillOutcome(injection?.result)
+      } finally {
+        approved.totpCode = ''
+      }
+    },
+    async cleanup(ctx) {
+      if (!prepared) return
+      await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId },
+        func: invokeBridgeFill,
+        args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'clear'],
       })
     },
   }

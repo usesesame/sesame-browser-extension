@@ -31,7 +31,7 @@ export function inspectLoginSurface(): LoginInspection {
 const USERNAME_HINT = /user|login|signin|sign-in|email|e-mail|account|identifier|handle/
 const NOT_USERNAME_HINT = /search|query|filter|find|coupon|promo|voucher|captcha|one-?time|verification|security-?code|otp/
 
-function labelText(input: HTMLInputElement): string {
+export function labelText(input: HTMLInputElement): string {
   const parts: string[] = []
   if (input.id) {
     for (const label of document.querySelectorAll(`label[for="${CSS.escape(input.id)}"]`)) {

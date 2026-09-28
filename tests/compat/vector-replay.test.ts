@@ -5,6 +5,7 @@ import {
   CARD_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
+  TOTP_PROTOCOL_VERSION,
   isNativeRequest,
   safeNativeResponse,
   type NativeRequest,
@@ -31,12 +32,23 @@ interface Vectors {
   responseCases: ResponseCase[]
 }
 
+function renameOneTimeCodeSuccess(extensionResult: unknown): unknown {
+  if (typeof extensionResult !== 'object' || extensionResult === null || Array.isArray(extensionResult)) {
+    return extensionResult
+  }
+  const value = extensionResult as Record<string, unknown>
+  if (value.ok !== true || typeof value.code !== 'string') return extensionResult
+  const { code, ...rest } = value
+  return { ...rest, totpCode: code }
+}
+
 const root = resolve(import.meta.dirname, '..', '..')
 
 const CONTRACTS = [
   { directory: 'v1', protocolVersion: PROTOCOL_VERSION },
   { directory: 'v2', protocolVersion: CARD_PROTOCOL_VERSION },
   { directory: 'v3', protocolVersion: FILL_MATCH_PROTOCOL_VERSION },
+  { directory: 'v4', protocolVersion: TOTP_PROTOCOL_VERSION },
 ]
 
 describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {
@@ -66,7 +78,9 @@ describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, 
       // The v1 vectors record the exact extension result; the v2 card vectors
       // record only whether the host accepts the response.
       if (testCase.extensionResult !== undefined) {
-        expect(result).toEqual(testCase.extensionResult)
+        expect(result).toEqual(directory === 'v4'
+          ? renameOneTimeCodeSuccess(testCase.extensionResult)
+          : testCase.extensionResult)
         return
       }
       expect(result).toMatchObject({ ok: testCase.hostValid })

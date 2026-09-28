@@ -7,6 +7,7 @@ import {
   makeCardRequest,
   makeRequest,
   makeSaveRequest,
+  makeTotpRequest,
   safeNativeResponse,
   type FillFields,
   type FillMatchKind,
@@ -177,6 +178,33 @@ export async function requestCardFill(
   return result.response.card ? { ok: true, card: result.response.card } : { ok: false, code: 'invalid-response' }
 }
 
+export interface NativeTotpResult {
+  ok: true
+  totpCode: string
+  remainingSeconds: number
+}
+
+export interface NativeTotpFailure {
+  ok: false
+  code: string
+}
+
+export async function requestTotpCode(
+  browser: Browser,
+  origin: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<NativeTotpResult | NativeTotpFailure> {
+  const result = await connectOnce(
+    browser,
+    makeTotpRequest(origin),
+    { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal }
+  )
+  if (!result.ok) return { ok: false, code: result.code }
+  return result.response.totpCode !== undefined && result.response.remainingSeconds !== undefined
+    ? { ok: true, totpCode: result.response.totpCode, remainingSeconds: result.response.remainingSeconds }
+    : { ok: false, code: 'invalid-response' }
+}
+
 export interface NativeSaveResult {
   ok: true
 }
@@ -211,6 +239,8 @@ interface ConnectOnceResult {
     opened?: true
     credential?: { username: string; password: string }
     matchKind?: FillMatchKind
+    totpCode?: string
+    remainingSeconds?: number
     identity?: IdentityFields
     card?: CardFields
     saved?: true
@@ -287,6 +317,9 @@ export function connectOnce(
       }
       if (response.ok && 'credential' in response) {
         return finish('ok', { credential: response.credential, matchKind: response.matchKind })
+      }
+      if (response.ok && 'totpCode' in response) {
+        return finish('ok', { totpCode: response.totpCode, remainingSeconds: response.remainingSeconds })
       }
       if (response.ok && 'capabilities' in response) {
         return finish('ok', {
