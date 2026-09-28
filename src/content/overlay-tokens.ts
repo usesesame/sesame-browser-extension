@@ -18,6 +18,12 @@ export const OVERLAY_TOKEN_CSS = `:host {
   --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
   --accent: #2e4735;
   --accent-hover: #38543f;
+  --accent-active: #263e2d;
+  --text: #334136;
+  --button-shadow: 0 1px 2px rgba(35, 48, 38, .16);
+  --button-shadow-pressed: none;
+  --button-secondary-bg: color-mix(in srgb, var(--text) 7%, var(--surface));
+  --button-secondary-hover-bg: color-mix(in srgb, var(--text) 11%, var(--surface));
   --on-accent: #fffdf6;
   --gold: #eabf52;
   --gold-soft-bg: #fdedc2;
@@ -44,6 +50,12 @@ export const OVERLAY_TOKEN_CSS = `:host {
     --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
     --accent: #3d6a4b;
     --accent-hover: #487a58;
+    --accent-active: #34603f;
+    --text: #d2dac8;
+    --button-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+    --button-shadow-pressed: none;
+    --button-secondary-bg: color-mix(in srgb, var(--text) 9%, var(--surface));
+    --button-secondary-hover-bg: color-mix(in srgb, var(--text) 14%, var(--surface));
     --on-accent: #f1f7ec;
     --gold: #e6bf58;
     --gold-soft-bg: #38311d;

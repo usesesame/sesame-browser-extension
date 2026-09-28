@@ -164,18 +164,19 @@
   .setting { margin-top: 24px; padding: 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-inset); }
   .setting-actions { display: flex; align-items: center; gap: 8px; }
   strong { font-size: var(--type-3); font-weight: var(--weight-bold); color: var(--text-heading); } p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); }
-  button { border: 0; border-radius: var(--radius-pill); padding: 8px 14px; color: var(--accent-link); background: var(--tint); font-weight: var(--weight-bold); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
-  button:hover { background: var(--tint-hover); }
-  button:active { transform: scale(.96); }
-  button.danger { color: var(--warn-text); background: var(--warn-bg); }
-  button:disabled { cursor: wait; opacity: .6; }
+  button { display: inline-flex; min-height: var(--control-h-md); align-items: center; justify-content: center; gap: var(--control-gap); border: 1px solid var(--button-secondary-border); border-radius: var(--control-radius); padding: 0 var(--control-px-md); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); font-family: var(--font-ui); font-weight: var(--control-weight); cursor: pointer; transition: var(--control-transition); }
+  button:hover { background: var(--button-secondary-hover-bg); }
+  button:active { transform: var(--control-press); }
+  button.danger { border-color: transparent; color: var(--danger); background: transparent; box-shadow: none; }
+  button.danger:hover { background: var(--danger-tint); }
+  button:disabled { cursor: wait; opacity: var(--control-disabled); }
   button:disabled:active { transform: none; }
   .privacy, .shortcut { margin-top: 16px; padding: 13px; border-radius: var(--radius-md); background: var(--tint); line-height: 1.5; }
   .paused { margin-top: 28px; }
   .section-heading > button { font-size: var(--type-2); }
   ul { margin: 12px 0 0; padding: 0; list-style: none; }
   li { padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: var(--type-2); }
-  li button { min-height: 24px; padding: 5px 10px; font-size: var(--type-2); }
+  li button { min-height: var(--control-h-sm); padding: 0 var(--control-px-sm); font-size: var(--type-2); }
   .empty { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-inset); }
   .shortcut { background: var(--surface-inset); }
   kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }

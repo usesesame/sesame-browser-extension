@@ -22,29 +22,31 @@
     gap: 8px;
     width: 100%;
     margin-top: 10px;
-    padding: 11px 14px;
-    border: none;
-    border-radius: var(--radius-md);
+    min-height: var(--control-h-md);
+    padding: 0 var(--control-px-md);
+    border: 1px solid transparent;
+    border-radius: var(--control-radius);
     background: var(--accent);
     color: var(--on-accent);
-    font-weight: var(--weight-medium);
+    font-weight: var(--control-weight);
     cursor: pointer;
-    box-shadow: inset 0 1px 0 var(--button-edge);
-    transition: background-color .16s ease, box-shadow .16s ease, transform .1s ease;
+    box-shadow: var(--button-shadow);
+    transition: var(--control-transition);
   }
   .fill-button:hover:not(:disabled) { background: var(--accent-hover); }
-  .fill-button:active:not(:disabled) { background: var(--accent-active); transform: scale(.97); }
+  .fill-button:active:not(:disabled) { background: var(--accent-active); box-shadow: var(--button-shadow-pressed); transform: var(--control-press); }
   .fill-button:disabled {
-    opacity: 0.6;
+    opacity: var(--control-disabled);
     cursor: not-allowed;
   }
   .fill-button.secondary {
-    color: var(--accent-link);
-    background: var(--surface-inset);
-    box-shadow: none;
+    border-color: var(--button-secondary-border);
+    color: var(--text-heading);
+    background: var(--button-secondary-bg);
+    box-shadow: var(--button-secondary-shadow);
   }
-  .fill-button.secondary:hover:not(:disabled) { background: var(--tint); }
-  .fill-button.secondary:active:not(:disabled) { background: var(--tint-hover); }
+  .fill-button.secondary:hover:not(:disabled) { background: var(--button-secondary-hover-bg); }
+  .fill-button.secondary:active:not(:disabled) { background: var(--control-active-bg), var(--button-secondary-bg); box-shadow: none; }
   .fill-button.secondary .spinner {
     border-color: color-mix(in srgb, var(--accent-link) 40%, transparent);
     border-top-color: var(--accent-link);
