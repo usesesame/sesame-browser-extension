@@ -1,7 +1,8 @@
 import type { FillContext } from './fill-state'
+import type { FillMatchKind } from '../protocol/native'
 
 export type PublicFillResult =
-  | { state: 'filled'; usernameFilled: boolean; passwordFilled: boolean }
+  | { state: 'filled'; usernameFilled: boolean; passwordFilled: boolean; matchKind: FillMatchKind }
   | { state: 'unavailable'; code: string }
 
 export function publicFillResult(context: FillContext): PublicFillResult {
@@ -11,6 +12,7 @@ export function publicFillResult(context: FillContext): PublicFillResult {
       state: 'filled',
       usernameFilled: phase.usernameFilled,
       passwordFilled: phase.passwordFilled,
+      matchKind: phase.matchKind,
     }
   }
   if (phase.name === 'failed' || phase.name === 'cancelled' || phase.name === 'expired') {

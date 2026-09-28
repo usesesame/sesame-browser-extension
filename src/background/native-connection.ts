@@ -9,6 +9,7 @@ import {
   makeSaveRequest,
   safeNativeResponse,
   type FillFields,
+  type FillMatchKind,
   type IdentityFieldKey,
   type IdentityFields,
   type CardFieldKey,
@@ -89,6 +90,7 @@ export async function probeNativeHost(
 export interface NativeFillResult {
   ok: true
   credential: { username: string; password: string }
+  matchKind: FillMatchKind
 }
 
 export interface NativeFillFailure {
@@ -128,10 +130,10 @@ export async function requestFill(
   if (!result.ok) {
     return { ok: false, code: result.code }
   }
-  if (!result.response.credential) {
+  if (!result.response.credential || !result.response.matchKind) {
     return { ok: false, code: 'invalid-response' }
   }
-  return { ok: true, credential: result.response.credential }
+  return { ok: true, credential: result.response.credential, matchKind: result.response.matchKind }
 }
 
 export interface NativeIdentityResult {
@@ -208,6 +210,7 @@ interface ConnectOnceResult {
     capabilities?: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
     opened?: true
     credential?: { username: string; password: string }
+    matchKind?: FillMatchKind
     identity?: IdentityFields
     card?: CardFields
     saved?: true
@@ -283,7 +286,7 @@ export function connectOnce(
         return finish(response.code)
       }
       if (response.ok && 'credential' in response) {
-        return finish('ok', { credential: response.credential })
+        return finish('ok', { credential: response.credential, matchKind: response.matchKind })
       }
       if (response.ok && 'capabilities' in response) {
         return finish('ok', {

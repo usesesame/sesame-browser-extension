@@ -1,5 +1,5 @@
 // Credentials live only in the state that holds them.
-import type { Credential } from '../protocol/native'
+import type { Credential, FillMatchKind } from '../protocol/native'
 import type { PageInspection } from '../protocol/fill'
 
 export type FillPhase =
@@ -10,7 +10,7 @@ export type FillPhase =
   | { name: 'inspecting' }
   | { name: 'awaiting-approval'; origin: string; documentToken: string }
   | { name: 'filling'; origin: string; documentToken: string; credential: Credential }
-  | { name: 'complete'; usernameFilled: boolean; passwordFilled: boolean }
+  | { name: 'complete'; usernameFilled: boolean; passwordFilled: boolean; matchKind: FillMatchKind }
   | { name: 'cancelled'; code: string }
   | { name: 'expired'; code: string }
   | { name: 'failed'; code: string }
@@ -55,7 +55,14 @@ export function transition(state: FillContext, event: FillEvent): FillContext {
         },
       }
     case 'fill-completed':
-      return { phase: { name: 'complete', usernameFilled: event.usernameFilled, passwordFilled: event.passwordFilled } }
+      return {
+        phase: {
+          name: 'complete',
+          usernameFilled: event.usernameFilled,
+          passwordFilled: event.passwordFilled,
+          matchKind: event.matchKind,
+        },
+      }
     case 'cancelled':
       return { phase: { name: 'cancelled', code: event.code } }
     case 'expired':
@@ -73,7 +80,7 @@ export type FillEvent =
   | { type: 'inspection-started' }
   | { type: 'inspection-completed'; inspection: PageInspection; documentToken: string }
   | { type: 'approval-received'; credential: Credential }
-  | { type: 'fill-completed'; usernameFilled: boolean; passwordFilled: boolean }
+  | { type: 'fill-completed'; usernameFilled: boolean; passwordFilled: boolean; matchKind: FillMatchKind }
   | { type: 'cancelled'; code: string }
   | { type: 'expired'; code: string }
   | { type: 'failed'; code: string }

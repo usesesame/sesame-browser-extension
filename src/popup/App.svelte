@@ -43,6 +43,7 @@
     'origin-mismatch': 'The page changed. Open Sesame again to retry.',
     'page-changed': 'The active tab or site changed. Nothing was filled.',
     'page-restricted': 'This page cannot be filled.',
+    'protocol-mismatch': 'The Sesame desktop app needs an update to fill this login.',
     'signup-or-password-change': 'This looks like signup or password change. Sesame did not fill it.',
     'stale-document': 'The page reloaded while you approved. Nothing was filled.',
     'stale-request': 'That approval request expired. Choose Fill to try again.',

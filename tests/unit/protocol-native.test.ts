@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_FIELD_KEYS,
   CARD_PROTOCOL_VERSION,
+  FILL_MATCH_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
   PROTOCOL_VERSION,
   isCapabilities,
@@ -20,8 +21,15 @@ import {
 const fillRequest = (fields?: 'username' | 'password' | 'both'): NativeRequest =>
   makeRequest('fill', 'https://example.test', fields)
 
+const legacyFillRequest = (): NativeRequest => ({
+  version: PROTOCOL_VERSION,
+  type: 'fill',
+  requestId: 'fill-1-legacy',
+  origin: 'https://example.test',
+})
+
 const respond = (request: NativeRequest, extra: Record<string, unknown>) =>
-  safeNativeResponse({ version: PROTOCOL_VERSION, requestId: request.requestId, ...extra }, request)
+  safeNativeResponse({ version: request.version, requestId: request.requestId, ...extra }, request)
 
 describe('normalizeFillOrigin', () => {
   it('keeps the origin of an ordinary secure page', () => {
@@ -59,7 +67,7 @@ describe('normalizeFillOrigin', () => {
 })
 
 describe('makeRequest', () => {
-  it('omits the field selector when asking for both, so a v1 host still understands it', () => {
+  it('omits the field selector when asking for both', () => {
     expect(Object.keys(fillRequest('both')).sort()).toEqual(['origin', 'requestId', 'type', 'version'])
     expect(fillRequest('username')).toHaveProperty('fields', 'username')
   })
@@ -68,9 +76,11 @@ describe('makeRequest', () => {
     expect(() => makeRequest('fill', 'http://example.test')).toThrow(TypeError)
   })
 
-  it('stamps every request with the protocol version the host checks', () => {
+  it('stamps every request with the protocol version its host checks', () => {
     expect(makeRequest('capabilities').version).toBe(PROTOCOL_VERSION)
     expect(makeRequest('activate').version).toBe(PROTOCOL_VERSION)
+    expect(fillRequest('both').version).toBe(FILL_MATCH_PROTOCOL_VERSION)
+    expect(makeCardRequest('https://checkout.example.test', ['number']).version).toBe(CARD_PROTOCOL_VERSION)
   })
 })
 
@@ -97,18 +107,39 @@ describe('makeSaveRequest and makeIdentityRequest', () => {
 describe('isNativeRequest', () => {
   it('accepts what makeRequest builds', () => {
     expect(isNativeRequest(fillRequest('both'))).toBe(true)
+    expect(isNativeRequest(fillRequest('password'))).toBe(true)
     expect(isNativeRequest(makeIdentityRequest('https://example.test', ['email']))).toBe(true)
     expect(isNativeRequest(makeSaveRequest('https://example.test', 'pw', 'update'))).toBe(true)
   })
 
   it('rejects another protocol version', () => {
-    expect(isNativeRequest({ ...fillRequest('both'), version: PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isNativeRequest({ ...fillRequest('both'), version: FILL_MATCH_PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isNativeRequest({ ...fillRequest('both'), version: 0 })).toBe(false)
   })
 
   it('keeps protocol v2 exclusive to card requests', () => {
     expect(isNativeRequest(makeCardRequest('https://checkout.example.test', ['number']))).toBe(true)
     expect(isNativeRequest({ version: CARD_PROTOCOL_VERSION, type: 'capabilities', requestId: 'capabilities-2' })).toBe(false)
     expect(isNativeRequest({ ...fillRequest('both'), version: CARD_PROTOCOL_VERSION })).toBe(false)
+  })
+
+  it('keeps protocol v3 exclusive to fill requests', () => {
+    expect(isNativeRequest({ version: FILL_MATCH_PROTOCOL_VERSION, type: 'capabilities', requestId: 'capabilities-3' })).toBe(false)
+    expect(isNativeRequest({ version: FILL_MATCH_PROTOCOL_VERSION, type: 'activate', requestId: 'activate-3' })).toBe(false)
+    expect(isNativeRequest({
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      type: 'card',
+      requestId: 'card-3',
+      origin: 'https://checkout.example.test',
+      fields: 'number',
+    })).toBe(false)
+    expect(isNativeRequest({
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      type: 'identity',
+      requestId: 'identity-3',
+      origin: 'https://example.test',
+      fields: 'email',
+    })).toBe(false)
   })
 
   it('rejects an unexpected extra key rather than ignoring it', () => {
@@ -132,35 +163,98 @@ describe('redactCard', () => {
 describe('safeNativeResponse', () => {
   it('refuses a reply that answers a different request', () => {
     const request = fillRequest('both')
-    const reply = { version: PROTOCOL_VERSION, requestId: 'someone-elses', type: 'fill', username: 'u', password: 'p' }
+    const reply = {
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      requestId: 'someone-elses',
+      type: 'fill',
+      username: 'u',
+      password: 'p',
+      matchKind: 'exact',
+    }
     expect(safeNativeResponse(reply, request)).toEqual({ ok: false, code: 'request-mismatch' })
   })
 
   it('refuses a reply from a different protocol version', () => {
     const request = fillRequest('both')
-    const reply = { version: PROTOCOL_VERSION + 1, requestId: request.requestId, type: 'fill', username: 'u', password: 'p' }
+    const reply = {
+      version: FILL_MATCH_PROTOCOL_VERSION + 1,
+      requestId: request.requestId,
+      type: 'fill',
+      username: 'u',
+      password: 'p',
+      matchKind: 'exact',
+    }
+    expect(safeNativeResponse(reply, request)).toEqual({ ok: false, code: 'protocol-mismatch' })
+  })
+
+  it('refuses a version three response to a version one request', () => {
+    const request = legacyFillRequest()
+    const reply = {
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      type: 'fill',
+      username: 'u',
+      password: 'p',
+      matchKind: 'exact',
+    }
     expect(safeNativeResponse(reply, request)).toEqual({ ok: false, code: 'protocol-mismatch' })
   })
 
   it('treats an unexpected extra key as unsafe rather than reading around it', () => {
     const request = fillRequest('both')
-    expect(respond(request, { type: 'fill', username: 'u', password: 'p', note: 'x' }))
+    expect(respond(request, { type: 'fill', username: 'u', password: 'p', matchKind: 'exact', note: 'x' }))
       .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('returns the matched rule alongside the credential', () => {
+    const request = fillRequest('both')
+    expect(respond(request, { type: 'fill', username: 'person@example.test', password: 'fictional-value', matchKind: 'exact' }))
+      .toEqual({
+        ok: true,
+        credential: { username: 'person@example.test', password: 'fictional-value' },
+        matchKind: 'exact',
+      })
+    expect(respond(fillRequest('password'), { type: 'fill', password: 'fictional-value', matchKind: 'wwwAlias' }))
+      .toEqual({ ok: true, credential: { username: '', password: 'fictional-value' }, matchKind: 'wwwAlias' })
+  })
+
+  it('refuses a version three fill response that does not name the matched rule', () => {
+    const request = fillRequest('both')
+    expect(respond(request, { type: 'fill', username: 'u', password: 'p' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('refuses a version three fill response with an unknown matched rule', () => {
+    const request = fillRequest('both')
+    expect(respond(request, { type: 'fill', username: 'u', password: 'p', matchKind: 'parentDomain' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('refuses a version one fill response that claims a matched rule', () => {
+    const request = legacyFillRequest()
+    expect(respond(request, { type: 'fill', username: 'u', password: 'p', matchKind: 'exact' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('still decodes a version one fill response without a matched rule', () => {
+    const request = legacyFillRequest()
+    expect(respond(request, { type: 'fill', username: 'u', password: 'p' }))
+      .toEqual({ ok: true, credential: { username: 'u', password: 'p' } })
   })
 
   it('returns only the field that was asked for', () => {
     const request = fillRequest('username')
-    expect(respond(request, { type: 'fill', username: 'someone' }))
-      .toEqual({ ok: true, credential: { username: 'someone', password: '' } })
-    expect(respond(request, { type: 'fill', username: 'someone', password: 'leaked' }))
+    expect(respond(request, { type: 'fill', username: 'someone', matchKind: 'exact' }))
+      .toEqual({ ok: true, credential: { username: 'someone', password: '' }, matchKind: 'exact' })
+    expect(respond(request, { type: 'fill', username: 'someone', password: 'leaked', matchKind: 'exact' }))
       .toEqual({ ok: false, code: 'unsafe-response' })
   })
 
   it('refuses a credential with an empty or oversized password', () => {
     const request = fillRequest('both')
-    expect(respond(request, { type: 'fill', username: 'u', password: '' }))
+    expect(respond(request, { type: 'fill', username: 'u', password: '', matchKind: 'exact' }))
       .toEqual({ ok: false, code: 'invalid-response' })
-    expect(respond(request, { type: 'fill', username: 'u', password: 'p'.repeat(MAX_CREDENTIAL_FIELD + 1) }))
+    expect(respond(request, { type: 'fill', username: 'u', password: 'p'.repeat(MAX_CREDENTIAL_FIELD + 1), matchKind: 'exact' }))
       .toEqual({ ok: false, code: 'invalid-response' })
   })
 
@@ -172,6 +266,8 @@ describe('safeNativeResponse', () => {
       .toEqual({ ok: false, code: 'vault-locked' })
     expect(respond(request, { type: 'fill-unavailable', reason: 'somethingNew' }))
       .toEqual({ ok: false, code: 'invalid-response' })
+    expect(respond(request, { type: 'fill-unavailable', reason: 'noMatch', matchKind: 'exact' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
   })
 
   it('passes back only identity fields that were requested', () => {

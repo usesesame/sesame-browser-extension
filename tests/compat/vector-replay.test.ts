@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CARD_PROTOCOL_VERSION,
+  FILL_MATCH_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   isNativeRequest,
   safeNativeResponse,
@@ -35,6 +36,7 @@ const root = resolve(import.meta.dirname, '..', '..')
 const CONTRACTS = [
   { directory: 'v1', protocolVersion: PROTOCOL_VERSION },
   { directory: 'v2', protocolVersion: CARD_PROTOCOL_VERSION },
+  { directory: 'v3', protocolVersion: FILL_MATCH_PROTOCOL_VERSION },
 ]
 
 describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {

@@ -362,6 +362,7 @@ async function mockNativeHostInWorker(): Promise<void> {
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'fill',
+                matchKind: 'exact',
                 ...(fields === 'password' ? {} : { username: 'jamie@example.test' }),
                 ...(fields === 'username' ? {} : { password: 'fictional-inline-pass' }),
               }))

@@ -3,10 +3,12 @@ import { isRecord } from '../shared/values'
 export const NATIVE_HOST = 'app.usesesame.browser'
 export const PROTOCOL_VERSION = 1
 export const CARD_PROTOCOL_VERSION = 2
+export const FILL_MATCH_PROTOCOL_VERSION = 3
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
 export type FillFields = 'username' | 'password' | 'both'
+export type FillMatchKind = 'exact' | 'wwwAlias'
 
 // Must stay byte-for-byte the same set as the desktop's IDENTITY_FIELD_KEYS.
 export const IDENTITY_FIELD_KEYS = [
@@ -35,7 +37,7 @@ export type NativeRequest =
 export type NativeResult =
   | { ok: true; protocolVersion: number; capabilities: DesktopCapabilities }
   | { ok: true; opened: true }
-  | { ok: true; credential: Credential }
+  | { ok: true; credential: Credential; matchKind?: FillMatchKind }
   | { ok: true; identity: IdentityFields }
   | { ok: true; card: CardFields }
   | { ok: true; saved: true }
@@ -108,11 +110,16 @@ export function isCapabilities(value: unknown): value is DesktopCapabilities {
 }
 
 export function isNativeRequest(value: unknown): value is NativeRequest {
-  if (!isRecord(value) || (value.version !== PROTOCOL_VERSION && value.version !== CARD_PROTOCOL_VERSION) || !isRequestId(value.requestId)) {
+  if (!isRecord(value)
+    || (value.version !== PROTOCOL_VERSION
+      && value.version !== CARD_PROTOCOL_VERSION
+      && value.version !== FILL_MATCH_PROTOCOL_VERSION)
+    || !isRequestId(value.requestId)) {
     return false
   }
   if ((value.version === PROTOCOL_VERSION && value.type === 'card')
-    || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')) {
+    || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')
+    || (value.version === FILL_MATCH_PROTOCOL_VERSION && value.type !== 'fill')) {
     return false
   }
   if (value.type === 'capabilities' || value.type === 'activate') {
@@ -256,7 +263,13 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
   const fields = request.fields ?? 'both'
   const expectedKeys = fields === 'username' ? FILL_USERNAME_KEYS
     : fields === 'password' ? FILL_PASSWORD_KEYS : FILL_BOTH_KEYS
-  if (!hasExactKeys(raw, expectedKeys)) return { ok: false, code: 'unsafe-response' }
+  const requiresMatchKind = request.version === FILL_MATCH_PROTOCOL_VERSION
+  if (!hasExactKeys(raw, requiresMatchKind ? new Set([...expectedKeys, 'matchKind']) : expectedKeys)) {
+    return { ok: false, code: 'unsafe-response' }
+  }
+  if (requiresMatchKind && !isFillMatchKind(raw.matchKind)) {
+    return { ok: false, code: 'unsafe-response' }
+  }
 
   const credential = {
     username: fields === 'password' ? '' : typeof raw.username === 'string' ? raw.username : '',
@@ -267,9 +280,10 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
     : fields === 'password'
       ? typeof credential.password === 'string' && credential.password.length > 0 && credential.password.length <= MAX_CREDENTIAL_FIELD
       : isCredential(credential)
-  return valid
-    ? { ok: true, credential }
-    : { ok: false, code: 'invalid-response' }
+  if (!valid) return { ok: false, code: 'invalid-response' }
+  return requiresMatchKind && isFillMatchKind(raw.matchKind)
+    ? { ok: true, credential, matchKind: raw.matchKind }
+    : { ok: true, credential }
 }
 
 function decodeUnavailable(raw: Record<string, unknown>): NativeResult {
@@ -288,10 +302,9 @@ export function makeRequest(type: 'capabilities' | 'activate' | 'fill', origin?:
   if (type === 'fill') {
     const normalizedOrigin = normalizeFillOrigin(origin)
     if (!normalizedOrigin) throw new TypeError('fill request requires a normalized web origin')
-    // "both" omits the selector field for v1 host compatibility.
     return fields === 'both'
-      ? { version: PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
-      : { version: PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
+      ? { version: FILL_MATCH_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
+      : { version: FILL_MATCH_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
   }
   return { version: PROTOCOL_VERSION, type, requestId }
 }
@@ -372,6 +385,10 @@ export function normalizeFillOrigin(value: unknown): string | null {
 
 function isRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+}
+
+function isFillMatchKind(value: unknown): value is FillMatchKind {
+  return value === 'exact' || value === 'wwwAlias'
 }
 
 function isWireOrigin(value: unknown): value is string {
