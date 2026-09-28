@@ -3,7 +3,14 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const CONTRACT_DIRECTORIES = ['v1', 'v2']
+const CONTRACT_DIRECTORIES = ['v1', 'v2', 'v3', 'v4', 'v5']
+const PROTOCOL_CONSTANTS = {
+  v1: 'PROTOCOL_VERSION',
+  v2: 'CARD_PROTOCOL_VERSION',
+  v3: 'FILL_MATCH_PROTOCOL_VERSION',
+  v4: 'TOTP_PROTOCOL_VERSION',
+  v5: 'FILL_LOOKALIKE_PROTOCOL_VERSION',
+}
 const CONTRACT_FILES = ['contract.json', 'request.schema.json', 'response.schema.json', 'vectors.json']
 const FETCH_TIMEOUT_MS = 30_000
 
@@ -75,7 +82,9 @@ function localProtocolVersion(constant) {
 }
 
 async function checkContract(directory) {
-  const protocolVersion = localProtocolVersion(directory === 'v2' ? 'CARD_PROTOCOL_VERSION' : 'PROTOCOL_VERSION')
+  const constant = PROTOCOL_CONSTANTS[directory]
+  if (!constant) throw new Error(`No local protocol constant is mapped for contract ${directory}.`)
+  const protocolVersion = localProtocolVersion(constant)
   const vendored = join(root, 'contracts', 'browser', directory)
   const source = JSON.parse(readFileSync(join(vendored, 'SOURCE.json'), 'utf8'))
   const publication = source.publication ?? {}

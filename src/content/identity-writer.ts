@@ -1,7 +1,9 @@
 // Gated by the prepare/fill/clear token binding; the form is never submitted.
 import type { IdentityFieldKey, IdentityFields } from '../protocol/native'
-import { setValue, tokens } from './field-writer'
+import { setValue } from './field-writer'
 import { isVisibleInput } from '../shared/dom'
+import { collectInputs } from './input-scan'
+import { identityFieldForInput } from './identity-fields'
 
 export type IdentityFillOutcome =
   | { ok: true; filledFields: IdentityFieldKey[] }
@@ -12,19 +14,6 @@ type PendingIdentityFill = { token: string; origin: string; fields: IdentityFiel
 type IsolatedWorld = typeof globalThis & { __sesamePendingIdentityFillV1?: PendingIdentityFill }
 
 const PENDING_KEY = '__sesamePendingIdentityFillV1'
-
-const AUTOCOMPLETE_TO_FIELD: Readonly<Record<string, IdentityFieldKey>> = Object.freeze({
-  name: 'fullName',
-  email: 'email',
-  tel: 'phone',
-  'address-line1': 'addressLine1',
-  'address-line2': 'addressLine2',
-  'address-level2': 'city',
-  'address-level1': 'region',
-  'postal-code': 'postalCode',
-  country: 'country',
-  'country-name': 'country',
-})
 
 export function fillIdentitySurface(
   expectedOrigin: string,
@@ -86,12 +75,11 @@ export function fillIdentitySurface(
 
 function detectIdentityFields(): Partial<Record<IdentityFieldKey, HTMLInputElement>> {
   const fieldMap: Partial<Record<IdentityFieldKey, HTMLInputElement>> = {}
-  for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))) {
-    if (input.type.toLowerCase() === 'password') continue
-    for (const token of tokens(input.autocomplete)) {
-      const key = AUTOCOMPLETE_TO_FIELD[token]
-      if (key && !fieldMap[key]) fieldMap[key] = input
-    }
+  const scan = collectInputs(document)
+  if (scan.truncated) return fieldMap
+  for (const input of scan.inputs.filter((input) => isVisibleInput(input, { excludePassword: true }))) {
+    const key = identityFieldForInput(input)
+    if (key && !fieldMap[key]) fieldMap[key] = input
   }
   return fieldMap
 }

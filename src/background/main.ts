@@ -3,13 +3,17 @@ import { chromeBrowser } from '../platform/chrome'
 import { NATIVE_HOST, normalizeFillOrigin } from '../protocol/native'
 import { createInlineRegistrationSync, syncInlineContentScript } from './inline-registration'
 import { handleExtensionCommand } from './command-handler'
+import { createContextMenuFillHandler, ensureFillContextMenu } from './context-menu'
 import { INLINE_SETTINGS_KEY, loadInlineSettings, normalizePausedOrigins } from '../permissions/inline-access'
-import { publicFillResult } from './fill-result'
+import { publicFillResult, type PublicFillResult } from './fill-result'
+import { createLastFillTracker } from './last-fill'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
+import type { FillContext } from './fill-state'
 
 const coordinator = createCoordinator(chromeBrowser)
 const saveSession = createSaveSessionController()
+const lastFill = createLastFillTracker()
 const CONNECTION_CACHE_MS = 4_000
 let cachedConnection: { checkedAt: number; value: Awaited<ReturnType<typeof coordinator.checkConnection>> } | undefined
 let connectionCheck: Promise<Awaited<ReturnType<typeof coordinator.checkConnection>>> | undefined
@@ -28,6 +32,13 @@ async function checkConnection(force = false) {
 
 const ensureContentScriptRegistered = createInlineRegistrationSync(() =>
   syncInlineContentScript({ permissions: chrome.permissions, scripting: chrome.scripting }))
+
+const handleFillContextMenuClick = createContextMenuFillHandler({
+  queryActiveTab: async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0],
+  fillActivePage: () => coordinator.fillActivePage(),
+  toPublicResult: publicFillResult,
+  showStatus: (tabId, result) => presentFillStatus(tabId, result),
+})
 
 async function refreshInlineRegistration() {
   await ensureContentScriptRegistered()
@@ -59,16 +70,49 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 })
 chrome.runtime.onInstalled.addListener((details) => {
   void syncInlineAccess()
+  void ensureFillContextMenu(chrome.contextMenus)
   if (details.reason === 'install') {
     void chrome.tabs.create({ url: chrome.runtime.getURL('onboarding.html') })
   }
 })
-chrome.runtime.onStartup.addListener(() => { void syncInlineAccess() })
-chrome.commands.onCommand.addListener((command) => { void handleExtensionCommand(command, coordinator) })
+chrome.runtime.onStartup.addListener(() => {
+  void syncInlineAccess()
+  void ensureFillContextMenu(chrome.contextMenus)
+})
+chrome.commands.onCommand.addListener((command) => {
+  void handleExtensionCommand(command, coordinator).then((handled) => {
+    if (handled && command === 'fill-login') recordLastFillResult(coordinator.state())
+  })
+})
+chrome.contextMenus.onClicked.addListener((info, tab) => { void handleFillContextMenuClick(info, tab) })
 void refreshInlineRegistration()
+void ensureFillContextMenu(chrome.contextMenus)
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => saveSession.handleTabUpdated(tabId, changeInfo))
-chrome.tabs.onRemoved.addListener((tabId) => saveSession.handleTabRemoved(tabId))
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  saveSession.handleTabUpdated(tabId, changeInfo)
+  if (typeof changeInfo.url === 'string' || changeInfo.status === 'loading') lastFill.clear(tabId)
+})
+chrome.tabs.onRemoved.addListener((tabId) => {
+  saveSession.handleTabRemoved(tabId)
+  lastFill.clear(tabId)
+})
+
+function recordLastFillResult(result: FillContext): void {
+  const phase = result.phase
+  if (phase.name !== 'complete') return
+  chrome.tabs.query({ active: true, currentWindow: true })
+    .then(([tab]) => {
+      const tabId = tab?.id
+      if (typeof tabId === 'number' && Number.isInteger(tabId)) {
+        lastFill.record(tabId, {
+          usernameFilled: phase.usernameFilled,
+          passwordFilled: phase.passwordFilled,
+          matchKind: phase.matchKind,
+        })
+      }
+    })
+    .catch(() => { /* noop */ })
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== chrome.runtime.getURL('popup.html')) {
@@ -84,6 +128,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (started || message?.type !== 'start') return
       started = true
       coordinator.fillActivePage(controller.signal).then((result) => {
+        recordLastFillResult(result)
         try { port.postMessage(publicFillResult(result)) } catch { /* noop */ }
       }).catch(() => {
         try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }
@@ -109,7 +154,7 @@ chrome.runtime.onConnect.addListener((port) => {
           saveSession.arm(result.tabId, result.origin, { username: result.username, password: newPassword })
           try { port.postMessage({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled }) } catch { /* noop */ }
         } else {
-          try { port.postMessage({ state: 'unavailable', code: result.code }) } catch { /* noop */ }
+          try { port.postMessage({ state: 'unavailable', code: result.code, lookalike: result.lookalike }) } catch { /* noop */ }
         }
       }).catch(() => {
         try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }
@@ -195,7 +240,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (message?.type === 'sesame:autofill') {
-    coordinator.fillActivePage().then((result) => sendResponse(publicFillResult(result))).catch(() => sendResponse({
+    coordinator.fillActivePage().then((result) => {
+      recordLastFillResult(result)
+      sendResponse(publicFillResult(result))
+    }).catch(() => sendResponse({
       state: 'unavailable',
       code: 'fill-failed',
     }))
@@ -210,6 +258,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === 'sesame:autofill-card') {
     coordinator.fillCardActivePage().then(sendResponse).catch(() => sendResponse({
+      ok: false,
+      code: 'fill-failed',
+    }))
+    return true
+  }
+  if (message?.type === 'sesame:inspect-one-time-code') {
+    coordinator.inspectOneTimeCodeActivePage().then(sendResponse).catch(() => sendResponse({
+      state: 'unavailable',
+      code: 'page-check-failed',
+    }))
+    return true
+  }
+  if (message?.type === 'sesame:autofill-one-time-code') {
+    coordinator.fillOneTimeCodeActivePage().then(sendResponse).catch(() => sendResponse({
       ok: false,
       code: 'fill-failed',
     }))
@@ -267,6 +329,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ ok: false, code: 'save-failed' }))
     return true
   }
+  if (message?.type === 'sesame:last-fill-result') {
+    if (sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ state: 'none' })
+      return false
+    }
+    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      const tabId = tab?.id
+      const record = typeof tabId === 'number' && Number.isInteger(tabId) ? lastFill.lookup(tabId) : undefined
+      sendResponse(record
+        ? {
+            state: 'filled',
+            usernameFilled: record.usernameFilled,
+            passwordFilled: record.passwordFilled,
+            matchKind: record.matchKind,
+          }
+        : { state: 'none' })
+    }).catch(() => sendResponse({ state: 'none' }))
+    return true
+  }
   if (message?.type === 'sesame:open-desktop') {
     openDesktop(chromeBrowser).then((result) => {
       if (result.ok) {
@@ -321,6 +402,24 @@ function detachInlineOverlay() {
   const target = globalThis as typeof globalThis & { sesameDetachInlineButton?: () => void }
   target.sesameDetachInlineButton?.()
   target.sesameDetachInlineButton = undefined
+}
+
+function presentOverlayStatus(result: unknown): boolean {
+  const target = globalThis as typeof globalThis & { sesameShowFillStatus?: (value: unknown) => boolean }
+  return target.sesameShowFillStatus?.(result) === true
+}
+
+async function presentFillStatus(tabId: number, result: PublicFillResult): Promise<boolean> {
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: presentOverlayStatus,
+      args: [result],
+    })
+    return injection?.result === true
+  } catch {
+    return false
+  }
 }
 
 async function detachAllOpenTabs() {

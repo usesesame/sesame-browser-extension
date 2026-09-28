@@ -1,5 +1,6 @@
 // Binds prepare/fill to the same document; never submits.
 import { isVisibleElement, isVisibleInput } from '../shared/dom'
+import { collectInputs } from './input-scan'
 export interface Credential {
   username: string
   password: string
@@ -48,7 +49,9 @@ export function fillLoginSurface(
     preparedMode = pending.mode
   }
 
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))
+  const scan = collectInputs(document)
+  if (scan.truncated) return failure('no-fields')
+  const inputs = scan.inputs.filter((input) => isVisibleInput(input))
   const passwordFields = inputs.filter((input) => input.type.toLowerCase() === 'password')
   if (passwordFields.length === 0) {
     return fillUsernameOnlySurface(inputs, expectedOrigin, documentToken, credential, phase, preparedMode, isolated)

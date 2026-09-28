@@ -6,6 +6,10 @@
   } from './states/store'
   import { makeRegistrationPassword, normalizeRegistrationOutcome, type PasswordSurfaceKind } from '../content/registration'
   import { copyTemporarily, type TemporaryCopyHandle } from '../content/temporary-copy'
+  import type { OneTimeCodeKind } from '../content/one-time-code'
+  import { fillMatchExplanation } from '../shared/fill-match'
+  import { lookalikeWarningForResult } from '../shared/lookalike-warning'
+  import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
   import { normalizeFillOrigin } from '../protocol/native'
   import {
     CHECKING_PRESENTATION, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
@@ -43,6 +47,7 @@
     'origin-mismatch': 'The page changed. Open Sesame again to retry.',
     'page-changed': 'The active tab or site changed. Nothing was filled.',
     'page-restricted': 'This page cannot be filled.',
+    'protocol-mismatch': 'The Sesame desktop app needs an update to fill this login.',
     'signup-or-password-change': 'This looks like signup or password change. Sesame did not fill it.',
     'stale-document': 'The page reloaded while you approved. Nothing was filled.',
     'stale-request': 'That approval request expired. Choose Fill to try again.',
@@ -109,6 +114,9 @@
   let cardFeedback = ''
   let identityWorking = false
   let identityFeedback = ''
+  let codeKind: OneTimeCodeKind | null = null
+  let codeWorking = false
+  let codeFeedback = ''
   let activeTabId: number | null = null
   let activeOrigin = ''
   let inlineGlobalEnabled = false
@@ -267,12 +275,15 @@
           ? 'Cards are filled only on this page or in Stripe payment frames.'
           : cardResponse?.code === 'no-fields'
             ? 'No supported card fields were found on this page.' : ''
+      const codeResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-one-time-code' }), 4_000)
+      codeKind = codeResponse?.state === 'ready' ? normalizeOneTimeCodeKind(codeResponse.kind) : null
     } catch {
       activeTabId = null
       activeOrigin = ''
       inlineSitePaused = false
       identityFields = []
       cardFields = []
+      codeKind = null
       page = { ...page, kind: 'restricted', code: 'page-restricted' }
     }
     const saveState = activeTabId === null ? { armed: false, held: false } : await querySaveState(activeTabId)
@@ -297,6 +308,10 @@
     return value === 'login' || value === 'registration' || value === 'password-change' || value === 'ambiguous' || value === 'none'
       ? value
       : 'ambiguous'
+  }
+
+  function normalizeOneTimeCodeKind(value: unknown): OneTimeCodeKind | null {
+    return value === 'single' || value === 'split' ? value : null
   }
 
   async function enableInlineEverywhere() {
@@ -399,13 +414,15 @@
     fillWorking = false
     if (result?.state === 'filled') {
       if (activeTabId !== null) await armSave(activeTabId)
-      fillFeedback = result.usernameFilled && result.passwordFilled
-        ? 'Username and password filled. Review the page before signing in.'
-        : 'Sign-in field filled. Review the page before continuing.'
+      fillFeedback = fillMatchExplanation(result.matchKind)
+        ?? (result.usernameFilled && result.passwordFilled
+          ? 'Username and password filled. Review the page before signing in.'
+          : 'Sign-in field filled. Review the page before continuing.')
     } else {
-      fillFeedback = result?.code === 'no-match' && page.hostname
-        ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
-        : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.'
+      fillFeedback = lookalikeWarningForResult(result)
+        ?? (result?.code === 'no-match' && page.hostname
+          ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
+          : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
     }
   }
 
@@ -453,6 +470,33 @@
           : result?.code === 'untrusted-frame'
             ? 'Cards are filled only on this page or in Stripe payment frames.'
             : IDENTITY_MESSAGES[result?.code] ?? 'The card fill request could not be completed.'
+  }
+
+  async function fillCode() {
+    if (codeWorking || desktopState !== 'ready' || codeKind === null) return
+    codeWorking = true
+    codeFeedback = 'Waiting for approval in Sesame…'
+    try {
+      const result = await withTimeout(
+        chrome.runtime.sendMessage({ type: 'sesame:autofill-one-time-code' }),
+        POPUP_RESPONSE_TIMEOUT_MS,
+      )
+      const secondsMessage = oneTimeCodeSecondsMessage(
+        result?.ok === true && typeof result.remainingSeconds === 'number' ? result.remainingSeconds : 0,
+      )
+      if (secondsMessage) {
+        codeKind = null
+        codeFeedback = secondsMessage
+      } else {
+        codeFeedback = result?.code === 'protocol-mismatch'
+          ? 'The Sesame desktop app needs an update to fill this code.'
+          : FILL_MESSAGES[result?.code] ?? 'The code fill request could not be completed.'
+      }
+    } catch {
+      codeFeedback = 'The code fill request could not be completed.'
+    } finally {
+      codeWorking = false
+    }
   }
 
   async function generateAndFillPassword() {
@@ -521,7 +565,8 @@
         generatedExpiryTimer = setTimeout(clearGeneratedPassword, REGISTRATION_EXPIRY_MS)
       } else {
         generatedPassword = ''
-        fillFeedback = FILL_MESSAGES[result?.code] ?? 'The change request could not be completed.'
+        fillFeedback = lookalikeWarningForResult(result)
+          ?? FILL_MESSAGES[result?.code] ?? 'The change request could not be completed.'
       }
     } catch {
       generatedPassword = ''
@@ -557,6 +602,16 @@
     } catch {
       return { armed: false, held: false }
     }
+  }
+
+  async function loadLastFillResult() {
+    if (activeTabId === null) return
+    try {
+      const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:last-fill-result' }), 4_000)
+      if (response?.state !== 'filled') return
+      const explanation = fillMatchExplanation(response.matchKind)
+      if (explanation) fillFeedback = explanation
+    } catch { /* noop */ }
   }
 
   async function armSave(tabId: number) {
@@ -644,6 +699,7 @@
     refreshing = true
     fillFeedback = ''
     await Promise.allSettled([checkDesktop(), inspectPage()])
+    await loadLastFillResult()
     refreshing = false
   }
 
@@ -757,6 +813,11 @@
     <FillButton onClick={fillCard} disabled={desktopState !== 'ready'} loading={cardWorking} loadingLabel="Waiting for approval…" label="Fill card" />
   {/if}
   {#if cardFeedback}<p class="fill-feedback" role="status">{cardFeedback}</p>{/if}
+
+  {#if !desktopNeedsOpening && codeKind !== null}
+    <FillButton onClick={fillCode} disabled={desktopState !== 'ready'} loading={codeWorking} loadingLabel="Waiting for approval…" label="Fill code" />
+  {/if}
+  {#if codeFeedback}<p class="fill-feedback" role="status">{codeFeedback}</p>{/if}
 
   <Diagnostics diagnostic={$popupState.diagnostic} pageDiagnostic={$popupState.pageDiagnostic} />
   <footer>Version {chrome.runtime.getManifest().version}</footer>

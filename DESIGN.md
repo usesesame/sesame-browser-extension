@@ -6,11 +6,11 @@ Status: pre-release Windows integration. Page filling works today between the Ch
 
 The unlocked vault may be read only by the desktop application. The browser helper reaches it over Chromium native messaging and a private local Windows named pipe. There is no localhost HTTP server, network listener, cloud-vault request, web vault, or web-page message bridge.
 
-The extension holds the `activeTab`, `nativeMessaging`, `scripting`, and `storage` permissions. Opening the popup grants a narrow, temporary look at the active page. That look reports capped field counts and a form classification only; it does not read field values, page text, form actions, paths, query strings, cookies, or storage. During one-time onboarding the user can grant optional access to all HTTPS pages, so the inline control is available without per-site setup. Extension storage keeps only the first-run preference and the exact origins where the user explicitly paused that control; it never contains credentials or visited-site history.
+The extension holds the `activeTab`, `contextMenus`, `nativeMessaging`, `scripting`, and `storage` permissions. Opening the popup grants a narrow, temporary look at the active page. That look reports capped field counts and a form classification only; it does not read field values, page text, form actions, paths, query strings, cookies, or storage. During one-time onboarding the user can grant optional access to all HTTPS pages, so the inline control is available without per-site setup. Extension storage keeps only the first-run preference and the exact origins where the user explicitly paused that control; it never contains credentials or visited-site history.
 
 ## Inline overlay
 
-After the one-time HTTPS grant, the dynamically registered `content-overlay.js` script is available across websites. It shows a small "Fill with Sesame" control only when a safe field receives focus. Before it attaches, the overlay asks the background worker for an exact-origin pause decision, and if that policy cannot be verified, the control stays hidden. It is a trigger and status surface only, never reads or transmits field values, and lives in a closed shadow root so the page cannot read its UI. Clicking it starts the same fill flow that the popup or `Ctrl+Shift+L` starts: the request still binds to the active tab and exact origin, the desktop app must still approve it, and the strict origin relationship is rechecked before any credential is written. The page itself cannot start a fill because the extension exposes no externally connectable surface. Registration is synchronized on install, startup, and browser permission changes; explicit pause exceptions affect only the inline control.
+After the one-time HTTPS grant, the dynamically registered `content-overlay.js` script is available across websites. It shows a small "Fill with Sesame" control only when a safe field receives focus, and a "Fill code" button when the focused field is a one-time code target. Before it attaches, the overlay asks the background worker for an exact-origin pause decision, and if that policy cannot be verified, the control stays hidden. It is a trigger and status surface only, never reads or transmits field values, and lives in a closed shadow root so the page cannot read its UI. Clicking it starts the same fill flow that the popup or `Ctrl+Shift+L` starts: the request still binds to the active tab and exact origin, the desktop app must still approve it, and the strict origin relationship is rechecked before any credential is written. The page itself cannot start a fill because the extension exposes no externally connectable surface. Registration is synchronized on install, startup, and browser permission changes; explicit pause exceptions affect only the inline control.
 
 Saving is explicit. A successful fill, or a generated registration password, arms the active tab in memory with its page origin and a ten-minute TTL, and the popup offers "Save this login" only while that arm is live. The arm drops on tab close or cross-origin navigation. While armed, the popup may ask `src/content/signup-capture.ts` to read a registration or password-change form, and that helper reads nothing until the popup asks; no submit listener and no navigation trigger remain. The background validates the capture against the delivering frame origin, refuses an unarmed save, and a successful save drops the arm. A change-password fill arms the tab with the generated password held in the background worker's memory, because the site usually clears the form after it accepts the change; that save goes through the same desktop approval and is dropped with the arm. The save itself still goes through desktop approval.
 
@@ -18,18 +18,20 @@ The native-messaging manifest is pinned to the fixed development extension ID. T
 
 ## Fill flow
 
-1. The user opens the extension popup, clicks the inline overlay on a focused sign-in field, or presses `Ctrl+Shift+L`. A capability probe reports whether the native host and desktop broker are present and whether the vault is unlocked.
+1. The user opens the extension popup, clicks the inline overlay on a focused sign-in field, presses `Ctrl+Shift+L`, or chooses **Fill with Sesame** from the field's context menu. A capability probe reports whether the native host and desktop broker are present and whether the vault is unlocked.
 2. The extension inspects the active tab for one plausible sign-in surface. It supports conservatively classified username-only, password-only, and combined login steps, and fails closed on multiple forms, registration fields, and password-change fields.
 3. The user clicks **Fill this page**. The helper then checks autocomplete hints, static form attributes, and labels on related submit controls to reject signup and password-change surfaces. It never reads current input values or sends those markers away. A page loading, or the popup opening, is never enough on its own to start a fill.
 4. The extension binds the request to the active tab, window, exact normalized origin, and a random token held in that document's isolated execution world.
 5. The native host relays `{version, type: "fill", requestId, origin, fields}` to the running desktop app over the local named pipe. `fields` is `username`, `password`, or `both`, based on the bound step. The request carries no page contents or current input values.
-6. Sesame compares the requested origin with saved login URLs, preferring exact origins. A bare hostname and its single `www` form may match when scheme and effective port are identical, and the approval dialog identifies this convenience match and shows the saved origin. Parent domains, other subdomains, different schemes, and different ports are not treated as equivalent.
+6. Sesame compares the requested origin with saved login URLs, preferring exact origins. A bare hostname and its single `www` form may match when scheme and effective port are identical, and the approval dialog identifies this convenience match and shows the saved origin. Parent domains, other subdomains, different schemes, and different ports are not treated as equivalent. A near miss that resembles one saved host answers with the `lookalike` reason and releases nothing; the warning names that host and changes nothing about which origin can fill.
 7. Before bringing its window forward, Sesame stores the bounded, secret-free approval metadata as a pending desktop request. The renderer receives an immediate event and also reconciles that pending request, so a listener race or renderer reload cannot leave a live approval invisible. The user selects a login when needed and explicitly approves the request. Approval expires after 30 seconds.
 8. Before releasing a credential, the desktop rechecks the pipe peer, vault session, request binding, selected entry, and the same strict origin relationship. A lock, vault change, disconnect, timeout, replay, or changed login fails closed.
 9. The extension rechecks the active tab, window, origin, same-document token, and prepared step mode. It writes only the field values present in that step and dispatches ordinary `input` and `change` events.
 10. Sesame never submits the form, clicks a button, presses Enter, or sends a synthetic keyboard action. The user reviews the page and signs in.
 
-Only one pending fill request is allowed between the browser and desktop. Chrome closes an action popup when focus moves to the desktop approval, so a request that has already started continues in the extension background worker. Losing the native connection cancels it, and a fill request is never automatically retried. The active tab, exact origin, and per-document token are checked again before either field is changed.
+One-time codes are a separate surface. When the focused field is a single one-time code field or a split group of three to eight single-character boxes, the inline control offers **Fill code**. The action binds the same active tab, window, exact origin, document token, and prepared surface kind, then asks the desktop for a code for that origin over protocol v4. The desktop offers only logins saved at that origin with a usable one-time secret, requires a fresh approval every time, recomputes the origin match under the vault lock, and releases the derived digits with their remaining window. The extension writes the code into the single field or one digit per split box, drops it from the call stack, and hides the control after a few seconds. The code never reaches the clipboard, extension storage, diagnostics, or logs, and the extension still never submits or clicks.
+
+Only one pending fill request is allowed between the browser and desktop. Chrome closes an action popup when focus moves to the desktop approval, so a request that has already started continues in the extension background worker. Losing the native connection cancels it, and a fill request is never automatically retried. The active tab, exact origin, and per-document token are checked again before any field is changed.
 
 ## Registration flow
 
@@ -44,17 +46,20 @@ Every native message is versioned, request-bound, length-limited, and decoded wi
 The desktop-owned canonical contracts are under
 `src-tauri/contracts/browser/`. The independently buildable extension uses the
 byte-identical, source-commit-stamped snapshots under
-`contracts/browser/v1/` and `contracts/browser/v2/`; it does not import the
+`contracts/browser/v1/`, `contracts/browser/v2/`, `contracts/browser/v3/`,
+`contracts/browser/v4/`, and `contracts/browser/v5/`; it does not import the
 desktop implementation or download a contract at build or runtime. General
 operations use protocol v1. Card filling uses the narrow protocol v2 contract.
+Login filling uses protocol v5. One-time codes use protocol v4.
 
 - Capability request: `{version, type: "capabilities", requestId}`.
 - Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable, locked, fillAvailable}`.
 - Activation request: exactly `{version, type: "activate", requestId}`. It contains no site or credential fields. A running desktop focuses its main window; when the desktop is closed, the registered native helper may start only the sibling Sesame executable from its own install directory.
 - Activation response: exactly `{version, type: "activated", requestId, opened}`. Activation never starts, retries, or resumes a fill request.
-- Fill request: `{version, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. During migration, older version-1 helper requests without `fields` are interpreted as `both`.
-- Successful fill response contains exactly the requested slice: `username`, `password`, or both credential fields, plus `version`, `type`, and `requestId`.
-- Unavailable response: exactly `{version, type: "fill-unavailable", requestId, reason}`, where `reason` is from a small allowlist.
+- Fill request: `{version: 5, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. `fields` is optional and means `both` when omitted. During migration, older version-1 helper requests without `fields` are interpreted as `both`, and version three requests keep their version three behavior.
+- Successful fill response contains exactly the requested slice: `username`, `password`, or both credential fields, plus `version`, `type`, `requestId`, and `matchKind`. `matchKind` is `exact` or `wwwAlias`, naming the rule the desktop enforced before it released the credential. The explanation is additive: it never changes which origin can fill, and the desktop recomputes the rule when it releases the credential.
+- Unavailable response: exactly `{version, type: "fill-unavailable", requestId, reason}`, where `reason` is from a small allowlist. When `reason` is `lookalike`, the response also carries exactly one `lookalike` field: the one stored host the requested page resembles, normalized to a lowercase origin host and bounded to 128 characters with no control character and no path, query, or userinfo. No credential is released on that path.
+- The lookalike warning is advisory. It never produces a fill, never relaxes the exact-origin rule, and never carries a credential or more than one stored host. The named host is the user's own data and is already shown in the normal approval list, so the warning treats it as untrusted display text: the extension normalizes it for display, bounds it, and renders it as text, never as markup.
 - Identity request: `{version, type: "identity", requestId, origin, fields}`,
   where `fields` is a unique comma-separated subset of the nine allowlisted
   identity keys. A successful response is exactly `{version, type:
@@ -63,13 +68,23 @@ operations use protocol v1. Card filling uses the narrow protocol v2 contract.
 - Card request: `{version: 2, type: "card", requestId, origin, fields}`,
   where `fields` is a unique comma-separated subset of the five allowlisted
   card keys. The response contains exactly those requested card fields.
+- One-time code request: `{version: 4, type: "totp", requestId, origin}`.
+  `origin` is a normalized origin, not a hostname or full URL. The request
+  carries no page contents, no current input values, and no seed.
+- Successful one-time code response contains exactly `{version, type: "totp",
+  requestId, code, remainingSeconds}`. `code` is the derived digits only, never
+  the seed, and `remainingSeconds` is the time left in the window that
+  produced it.
+- One-time code unavailable response: exactly `{version, type:
+  "totp-unavailable", requestId, reason}`, where `reason` is from the same
+  allowlist as the other operations.
 - Save request: `{version, type: "save", requestId, origin, kind, password}`
   with optional bounded `title` and `username`; `kind` is exactly `new` or
   `update`. Success is exactly `{version, type: "saved", requestId, saved:
   true}`.
 - Protocol errors use a length-limited `error` response and never carry credentials.
 
-Credential fields are length-limited and an empty password is rejected. A response with an unknown or extra field, including vault data or a TOTP value, is rejected. Capability responses cannot carry credentials.
+Credential fields are length-limited and an empty password is rejected. A response with an unknown or extra field, including vault data, is rejected. A one-time code is accepted only in a response to a version four one-time code request, and only as one to nine digits with a bounded remaining window. Capability responses cannot carry credentials.
 
 ## Local transport
 
@@ -79,7 +94,7 @@ These checks reduce accidental exposure and cross-process confusion. They do not
 
 ## Secret handling limits
 
-Passwords are returned only after desktop approval and only for the pending request. The extension does not write credentials to extension storage, diagnostics, or logs. A generated password reaches the clipboard only through the person's explicit temporary copy action, and that copy clears after 30 seconds. A password generated for a change is held in the background worker's memory until the save, the arm expiry, a tab close, or a cross-origin navigation; the service worker terminating drops it with the arm. Candidate lists remain in the desktop app and contain only login id, title, and username.
+Passwords are returned only after desktop approval and only for the pending request. The extension does not write credentials to extension storage, diagnostics, or logs. A generated password reaches the clipboard only through the person's explicit temporary copy action, and that copy clears after 30 seconds. A password generated for a change is held in the background worker's memory until the save, the arm expiry, a tab close, or a cross-origin navigation; the service worker terminating drops it with the arm. Candidate lists remain in the desktop app and contain only login id, title, and username. One-time codes follow the same rule as passwords: they exist only in the approved fill call stack, and they reach neither the clipboard nor extension storage.
 
 While the approved fill is delivered, credentials necessarily exist briefly as Rust and JavaScript values. Rust response buffers use zeroizing wrappers where practical, but JavaScript strings cannot be reliably wiped. The design therefore promises no persistence or intentional logging, rather than perfect memory erasure.
 

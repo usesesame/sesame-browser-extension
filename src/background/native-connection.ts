@@ -7,8 +7,10 @@ import {
   makeCardRequest,
   makeRequest,
   makeSaveRequest,
+  makeTotpRequest,
   safeNativeResponse,
   type FillFields,
+  type FillMatchKind,
   type IdentityFieldKey,
   type IdentityFields,
   type CardFieldKey,
@@ -89,11 +91,13 @@ export async function probeNativeHost(
 export interface NativeFillResult {
   ok: true
   credential: { username: string; password: string }
+  matchKind: FillMatchKind
 }
 
 export interface NativeFillFailure {
   ok: false
   code: string
+  lookalike?: string
 }
 
 export type NativeActivationResult =
@@ -126,12 +130,12 @@ export async function requestFill(
     { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal }
   )
   if (!result.ok) {
-    return { ok: false, code: result.code }
+    return result
   }
-  if (!result.response.credential) {
+  if (!result.response.credential || !result.response.matchKind) {
     return { ok: false, code: 'invalid-response' }
   }
-  return { ok: true, credential: result.response.credential }
+  return { ok: true, credential: result.response.credential, matchKind: result.response.matchKind }
 }
 
 export interface NativeIdentityResult {
@@ -175,6 +179,33 @@ export async function requestCardFill(
   return result.response.card ? { ok: true, card: result.response.card } : { ok: false, code: 'invalid-response' }
 }
 
+export interface NativeTotpResult {
+  ok: true
+  totpCode: string
+  remainingSeconds: number
+}
+
+export interface NativeTotpFailure {
+  ok: false
+  code: string
+}
+
+export async function requestTotpCode(
+  browser: Browser,
+  origin: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<NativeTotpResult | NativeTotpFailure> {
+  const result = await connectOnce(
+    browser,
+    makeTotpRequest(origin),
+    { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal }
+  )
+  if (!result.ok) return { ok: false, code: result.code }
+  return result.response.totpCode !== undefined && result.response.remainingSeconds !== undefined
+    ? { ok: true, totpCode: result.response.totpCode, remainingSeconds: result.response.remainingSeconds }
+    : { ok: false, code: 'invalid-response' }
+}
+
 export interface NativeSaveResult {
   ok: true
 }
@@ -208,6 +239,9 @@ interface ConnectOnceResult {
     capabilities?: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
     opened?: true
     credential?: { username: string; password: string }
+    matchKind?: FillMatchKind
+    totpCode?: string
+    remainingSeconds?: number
     identity?: IdentityFields
     card?: CardFields
     saved?: true
@@ -217,6 +251,7 @@ interface ConnectOnceResult {
 interface ConnectOnceFailure {
   ok: false
   code: string
+  lookalike?: string
 }
 
 export function connectOnce(
@@ -229,7 +264,7 @@ export function connectOnce(
     let finished = false
     let port: NativePort | undefined
 
-    function finish(code: string, response?: ConnectOnceResult['response']) {
+    function finish(code: string, response?: ConnectOnceResult['response'], lookalike?: string) {
       if (finished) return
       finished = true
       if (timeout !== undefined) clearTimeout(timeout)
@@ -241,6 +276,8 @@ export function connectOnce(
       } catch { /* noop */ }
       if (response) {
         resolve({ ok: true, response })
+      } else if (lookalike !== undefined) {
+        resolve({ ok: false, code, lookalike })
       } else {
         resolve({ ok: false, code })
       }
@@ -280,10 +317,13 @@ export function connectOnce(
     port.onMessage.addListener((raw) => {
       const response = safeNativeResponse(raw, request)
       if (!response.ok) {
-        return finish(response.code)
+        return 'lookalike' in response ? finish(response.code, undefined, response.lookalike) : finish(response.code)
       }
       if (response.ok && 'credential' in response) {
-        return finish('ok', { credential: response.credential })
+        return finish('ok', { credential: response.credential, matchKind: response.matchKind })
+      }
+      if (response.ok && 'totpCode' in response) {
+        return finish('ok', { totpCode: response.totpCode, remainingSeconds: response.remainingSeconds })
       }
       if (response.ok && 'capabilities' in response) {
         return finish('ok', {

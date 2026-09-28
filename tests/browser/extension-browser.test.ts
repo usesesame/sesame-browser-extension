@@ -5,7 +5,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { chromium, type BrowserContext, type Page, type Worker } from 'playwright-core'
+import { chromium, type BrowserContext, type CDPSession, type Page, type Worker } from 'playwright-core'
 
 const root = resolve(import.meta.dirname, '..', '..')
 let extensionDir = join(root, 'dist', 'integration')
@@ -28,6 +28,18 @@ const loginPage = `<!doctype html><html><body>
 <button type="submit" id="signin">Sign in</button>
 </form>
 </body></html>`
+
+const framedLoginPage = `<!doctype html><html><body>
+<h1>Embedded sign in</h1>
+<iframe id="login-frame" title="Sign in" src="/login" style="width:640px;height:420px"></iframe>
+</body></html>`
+
+function crossOriginLoginPage(): string {
+  return `<!doctype html><html><body>
+<h1>Embedded sign in</h1>
+<iframe id="login-frame" title="Sign in" src="${secondaryOrigin}/login" style="width:640px;height:420px"></iframe>
+</body></html>`
+}
 
 const usernameStepPage = `<!doctype html><html><body>
 <form id="login-form" action="/signin" method="post">
@@ -101,13 +113,44 @@ const passwordChangePage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const oneTimeCodePage = `<!doctype html><html><body>
+<form id="code-form" action="/verify" method="post">
+<h1>Two-step verification</h1>
+<label for="code">Verification code</label>
+<input id="code" name="code" type="text" autocomplete="one-time-code" inputmode="numeric">
+<button type="submit" id="verify">Verify</button>
+</form>
+</body></html>`
+
+const shadowOneTimeCodePage = `<!doctype html><html><body>
+<h1>Two-step verification</h1>
+<div id="code-host"></div>
+<script>
+const outer = document.getElementById('code-host').attachShadow({ mode: 'open' })
+const innerHost = document.createElement('div')
+outer.append(innerHost)
+const inner = innerHost.attachShadow({ mode: 'open' })
+const input = document.createElement('input')
+input.id = 'shadow-code'
+input.type = 'text'
+input.autocomplete = 'one-time-code'
+input.inputMode = 'numeric'
+input.setAttribute('aria-label', 'Verification code')
+inner.append(input)
+</script>
+</body></html>`
+
 function pageBody(path: string): string {
-  return path === '/username' ? usernameStepPage
-    : path === '/password' ? passwordStepPage
-      : path === '/identity' ? identityPage
-        : path === '/card' ? cardPage
-          : path === '/registration' ? registrationPage
-            : path === '/password-change' ? passwordChangePage : loginPage
+  return path === '/framed-login' ? framedLoginPage
+    : path === '/cross-origin-login' ? crossOriginLoginPage()
+      : path === '/username' ? usernameStepPage
+        : path === '/password' ? passwordStepPage
+          : path === '/identity' ? identityPage
+            : path === '/card' ? cardPage
+              : path === '/registration' ? registrationPage
+                : path === '/password-change' ? passwordChangePage
+                  : path === '/one-time-code' ? oneTimeCodePage
+                    : path === '/shadow-one-time-code' ? shadowOneTimeCodePage : loginPage
 }
 
 function handlePage(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -322,8 +365,83 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   }
 }
 
-async function mockNativeHostInWorker(): Promise<void> {
-  await worker.evaluate(() => {
+function findNamedNode(node: CdpNode, nodeName: string): CdpNode | undefined {
+  if (node.nodeName === nodeName) return node
+  for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
+    const found = findNamedNode(child, nodeName)
+    if (found) return found
+  }
+  return node.contentDocument ? findNamedNode(node.contentDocument, nodeName) : undefined
+}
+
+function findNodeInsideShadowRoot(node: CdpNode, nodeName: string): CdpNode | undefined {
+  for (const shadow of node.shadowRoots ?? []) {
+    const found = findNamedNode(shadow, nodeName)
+    if (found) return found
+  }
+  for (const child of node.children ?? []) {
+    const found = findNodeInsideShadowRoot(child, nodeName)
+    if (found) return found
+  }
+  return node.contentDocument ? findNodeInsideShadowRoot(node.contentDocument, nodeName) : undefined
+}
+
+async function withClosedShadowNode<T>(
+  target: Page,
+  nodeName: string,
+  run: (cdp: CDPSession, nodeId: number) => Promise<T>,
+): Promise<T> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const node = findNodeInsideShadowRoot(root, nodeName)
+    if (!node) throw new Error(`closed shadow node not found: ${nodeName}`)
+    return await run(cdp, node.nodeId)
+  } finally {
+    await cdp.detach()
+  }
+}
+
+async function resolveClosedShadowNode(cdp: CDPSession, nodeId: number): Promise<string> {
+  const { object } = await cdp.send('DOM.resolveNode', { nodeId }) as { object: { objectId?: string } }
+  if (!object.objectId) throw new Error('closed shadow node did not resolve')
+  return object.objectId
+}
+
+async function clickClosedShadowNode(target: Page, nodeName: string): Promise<void> {
+  await withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const { model } = await cdp.send('DOM.getBoxModel', { nodeId }) as { model: { content: number[] } }
+    const [left, top, , , right, bottom] = model.content
+    await target.mouse.click((left + right) / 2, (top + bottom) / 2)
+  })
+}
+
+async function closedShadowValue(target: Page, nodeName: string): Promise<string> {
+  return withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const objectId = await resolveClosedShadowNode(cdp, nodeId)
+    const { result } = await cdp.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function () { return this.value }',
+      returnByValue: true,
+    }) as { result: { value?: string } }
+    return result.value ?? ''
+  })
+}
+
+async function closedShadowFocused(target: Page, nodeName: string): Promise<boolean> {
+  return withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const objectId = await resolveClosedShadowNode(cdp, nodeId)
+    const { result } = await cdp.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function () { return this === this.getRootNode().activeElement }',
+      returnByValue: true,
+    }) as { result: { value?: boolean } }
+    return result.value === true
+  })
+}
+
+async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exact'): Promise<void> {
+  await worker.evaluate((matchKind) => {
     const target = globalThis as typeof globalThis & {
       __sesameTestRestore?: () => void
       __sesameSaveRequests?: number
@@ -362,8 +480,16 @@ async function mockNativeHostInWorker(): Promise<void> {
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'fill',
+                matchKind,
                 ...(fields === 'password' ? {} : { username: 'jamie@example.test' }),
                 ...(fields === 'username' ? {} : { password: 'fictional-inline-pass' }),
+              }))
+            } else if (request?.type === 'totp') {
+              messageListeners.forEach((listener) => listener({
+                ...base,
+                type: 'totp',
+                code: '287082',
+                remainingSeconds: 18,
               }))
             } else if (request?.type === 'save') {
               target.__sesameSaveRequests = (target.__sesameSaveRequests ?? 0) + 1
@@ -389,7 +515,7 @@ async function mockNativeHostInWorker(): Promise<void> {
         },
       }
     }
-  })
+  }, fillMatchKind)
 }
 
 async function installMissingNativeHost(): Promise<void> {
@@ -698,6 +824,58 @@ describe('extension browser suite', () => {
     expect(values.inputs).not.toContain(approved.username)
     expect(values.text).not.toContain(approved.username)
   })
+
+  it('fills a same-origin sign-in form inside a child frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/framed-login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      const frame = current.frameLocator('#login-frame')
+      await expect.poll(
+        async () => frame.locator('#username').inputValue(),
+        { timeout: 15000 },
+      ).toBe('jamie@example.test')
+      expect(await frame.locator('#password').inputValue()).toBe('fictional-inline-pass')
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('does not fill a cross-origin sign-in frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/cross-origin-login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/No visible sign-in fields were found/)
+      expect(await popup.getByRole('button', { name: 'Fill login', exact: true }).count()).toBe(0)
+      const frame = current.frameLocator('#login-frame')
+      expect(await frame.locator('#username').inputValue()).toBe('')
+      expect(await frame.locator('#password').inputValue()).toBe('')
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
 
   it('fills only the approved identity fields after a matching prepare', async () => {
     const approvedIdentity = {
@@ -1129,6 +1307,73 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
+  it('warns in the popup when the fill host resembles a saved site', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await worker.evaluate(({ tabId: expectedTabId, url }) => {
+      const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+      const runtime = chrome.runtime as unknown as { connectNative: unknown }
+      const tabs = chrome.tabs as unknown as { query: unknown }
+      const originalConnect = runtime.connectNative
+      const originalQuery = tabs.query
+      target.__sesameTestRestore = () => {
+        runtime.connectNative = originalConnect
+        tabs.query = originalQuery
+      }
+      runtime.connectNative = () => {
+        const messageListeners: Array<(message: unknown) => void> = []
+        return {
+          name: 'app.usesesame.browser',
+          postMessage(request: { requestId?: string; version?: number }) {
+            queueMicrotask(() => {
+              messageListeners.forEach((listener) => listener({
+                version: request?.version ?? 1,
+                type: 'fill-unavailable',
+                requestId: request?.requestId,
+                reason: 'lookalike',
+                lookalike: 'apple.example',
+              }))
+            })
+          },
+          disconnect() {},
+          onMessage: {
+            addListener: (callback: (message: unknown) => void) => { messageListeners.push(callback) },
+            removeListener: () => {},
+          },
+          onDisconnect: {
+            addListener: () => {},
+            removeListener: () => {},
+          },
+        }
+      }
+      tabs.query = async () => [{ id: expectedTabId, url }]
+    }, { tabId, url: fixtureUrl })
+
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/This page looks like apple\.example, a site you saved, but the address is different\. Sesame did not fill anything\. Check the address bar before you sign in\./)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await worker.evaluate(() => {
+        const target = globalThis as typeof globalThis & { __sesameTestRestore?: () => void }
+        target.__sesameTestRestore?.()
+        delete target.__sesameTestRestore
+      })
+    }
+  }, 30000)
+
   it('fails closed when the fill port closes before an answer', async () => {
     const extensionId = new URL(worker.url()).host
     const current = await openFixture('/login')
@@ -1224,6 +1469,215 @@ describe('extension browser suite', () => {
     } finally {
       await restoreWorkerMocks()
     }
+  }, 30000)
+
+  it('fills a one-time code without touching storage or the clipboard', async () => {
+    const code = '287082'
+    const sentinel = 'fictional-clipboard-sentinel'
+    const current = await openFixture('/one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: primaryOrigin })
+    await current.evaluate(async (value) => { await navigator.clipboard.writeText(value) }, sentinel)
+    try {
+      await current.evaluate(() => (document.getElementById('code') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill code')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe(code)
+      const storage = await worker.evaluate(async () => chrome.storage.local.get(null))
+      expect(Object.keys(storage).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
+      expect(JSON.stringify(storage)).not.toContain(code)
+      const clipboard = await current.evaluate(async () => navigator.clipboard.readText())
+      expect(clipboard).toBe(sentinel)
+      expect(clipboard).not.toContain(code)
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('fills a one-time code from the popup without touching storage', async () => {
+    const code = '287082'
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill code', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill code', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/Code filled\. About 18 seconds remain\./)
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe(code)
+      const storage = await worker.evaluate(async () => chrome.storage.local.get(null))
+      expect(Object.keys(storage).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
+      expect(JSON.stringify(storage)).not.toContain(code)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('fills a one-time code inside nested open shadow roots', async () => {
+    const code = '287082'
+    const current = await openFixture('/shadow-one-time-code')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      await current.evaluate(() => {
+        const outer = document.getElementById('code-host')?.shadowRoot
+        const inner = outer?.querySelector('div')?.shadowRoot
+        ;(inner?.querySelector('#shadow-code') as HTMLInputElement | null)?.focus()
+      })
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill code')
+      await expect.poll(
+        async () => current.evaluate(() => {
+          const outer = document.getElementById('code-host')?.shadowRoot
+          const inner = outer?.querySelector('div')?.shadowRoot
+          return (inner?.querySelector('#shadow-code') as HTMLInputElement | null)?.value ?? ''
+        }),
+        { timeout: 15000 },
+      ).toBe(code)
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('shows the fill match explanation in the popup after an inline fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    let popup: Page | undefined
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
+        { timeout: 15000 },
+      ).toBe('fictional-inline-pass')
+      popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup!.evaluate(() => document.body.innerText),
+        { timeout: 10000 },
+      ).toMatch(/The saved login matches this site exactly/)
+    } finally {
+      if (popup && !popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('shows the www alias explanation in the popup after a fill', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker('wwwAlias')
+    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    try {
+      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'Fill login', exact: true }).click()
+      await expect.poll(
+        async () => popup.evaluate(() => document.body.innerText),
+        { timeout: 15000 },
+      ).toMatch(/through its single www address/)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('creates a password at the format chosen from the inline control', async () => {
+    const current = await openFixture('/registration')
+    await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).focus())
+    await expect.poll(
+      async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+      { timeout: 10000 },
+    ).toBe(true)
+
+    await clickClosedShadowNode(current, 'SELECT')
+    await current.keyboard.press('Escape')
+    await expect.poll(
+      async () => closedShadowFocused(current, 'SELECT'),
+      { timeout: 5000 },
+    ).toBe(true)
+    await current.keyboard.press('ArrowDown')
+    await current.keyboard.press('ArrowDown')
+    await current.keyboard.press('ArrowDown')
+    await expect.poll(
+      async () => closedShadowValue(current, 'SELECT'),
+      { timeout: 5000 },
+    ).toBe('characters:32')
+
+    await clickClosedShadowNode(current, 'BUTTON')
+    await expect.poll(
+      async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value.length),
+      { timeout: 10000 },
+    ).toBe(32)
+    const values = await current.evaluate(() => ({
+      password: (document.getElementById('password') as HTMLInputElement).value,
+      confirm: (document.getElementById('confirm') as HTMLInputElement).value,
+    }))
+    expect(values.confirm).toBe(values.password)
+    await expect.poll(
+      async () => current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement | null
+        return host !== null && host.style.display === 'block'
+      }),
+      { timeout: 5000 },
+    ).toBe(true)
+
+    const stored = await worker.evaluate(async () => chrome.storage.local.get(null))
+    expect(JSON.stringify(stored)).not.toContain(values.password)
+    expect(Object.keys(stored).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
   }, 30000)
 
   it('saves a registration only after the popup action', async () => {

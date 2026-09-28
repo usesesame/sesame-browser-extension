@@ -1,4 +1,4 @@
-import { probeNativeHost, requestCardFill, requestFill, requestIdentityFill } from './native-connection'
+import { probeNativeHost, requestCardFill, requestFill, requestIdentityFill, requestTotpCode } from './native-connection'
 import { transition, initialFillState, type FillContext } from './fill-state'
 import {
   normalizeFillOutcome,
@@ -17,6 +17,13 @@ import { makeDiagnostic, userMessage } from '../protocol/diagnostics'
 import type { Browser } from '../platform/chrome'
 import { isRecord } from '../shared/values'
 import { normalizePasswordChangeOutcome, type PasswordChangeOutcome } from '../content/password-change'
+import {
+  normalizeOneTimeCodeFillOutcome,
+  normalizeOneTimeCodeInspection,
+  type OneTimeCodeFillOutcome,
+  type OneTimeCodeInspection,
+  type OneTimeCodeKind,
+} from '../content/one-time-code'
 import { isSameActivePage, tabFillContext, type PageTab } from './tab-context'
 import {
   CARD_FIELD_KEYS,
@@ -24,6 +31,7 @@ import {
   type CardFieldKey,
   type CardFields,
   type FillFields,
+  type FillMatchKind,
   type IdentityFieldKey,
   type IdentityFields,
 } from '../protocol/native'
@@ -38,6 +46,8 @@ export interface Coordinator {
   fillIdentityActivePage(signal?: AbortSignal): Promise<IdentityFillResult>
   inspectCardActivePage(): Promise<CardPageCheckResult>
   fillCardActivePage(signal?: AbortSignal): Promise<CardFillResult>
+  inspectOneTimeCodeActivePage(): Promise<OneTimeCodePageCheckResult>
+  fillOneTimeCodeActivePage(signal?: AbortSignal): Promise<OneTimeCodeFillResult>
 }
 
 export interface IdentityPageCheckResult {
@@ -52,7 +62,7 @@ export type IdentityFillResult =
 
 export type ChangePasswordResult =
   | { ok: true; tabId: number; origin: string; username: string; currentFilled: number; newFilled: number }
-  | { ok: false; code: string }
+  | { ok: false; code: string; lookalike?: string }
 
 export interface CardPageCheckResult {
   state: 'ready' | 'unavailable'
@@ -61,6 +71,16 @@ export interface CardPageCheckResult {
   embedded?: boolean
 }
 export type CardFillResult = { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string }
+
+export interface OneTimeCodePageCheckResult {
+  state: 'ready' | 'unavailable'
+  code?: string
+  kind?: OneTimeCodeKind
+}
+
+export type OneTimeCodeFillResult =
+  | { ok: true; remainingSeconds: number }
+  | { ok: false; code: string }
 
 interface CardFrameInspection {
   state: 'ready' | 'unavailable'
@@ -177,7 +197,7 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async changePasswordActivePage(newPassword, externalSignal): Promise<ChangePasswordResult> {
-      return withFillGuard(activeControllers, externalSignal, {
+      return withFillGuard<ChangePasswordResult>(activeControllers, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
@@ -234,6 +254,32 @@ export function createCoordinator(browser: Browser): Coordinator {
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
       }, (signal) => runCardFill(browser, signal))
     },
+
+    async inspectOneTimeCodeActivePage(): Promise<OneTimeCodePageCheckResult> {
+      try {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+        const page = topLevelPage(tab)
+        if (!page.ok) return { state: 'unavailable', code: page.code }
+        const inspected = await oneTimeCodeSurface().inspect({ browser, tabId: page.tabId, origin: page.origin })
+        if (!inspected.ok) return { state: 'unavailable', code: inspected.code }
+        return { state: 'ready', kind: inspected.ready.kind }
+      } catch {
+        return { state: 'unavailable', code: 'page-restricted' }
+      }
+    },
+
+    async fillOneTimeCodeActivePage(externalSignal): Promise<OneTimeCodeFillResult> {
+      return withFillGuard<OneTimeCodeFillResult>(activeControllers, externalSignal, {
+        cancelled: () => ({ ok: false, code: 'cancelled' }),
+        busy: () => ({ ok: false, code: 'fill-in-progress' }),
+        restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
+      }, async (signal) => {
+        const result = await runSurfaceFill(browser, signal, oneTimeCodeSurface())
+        return result.ok
+          ? { ok: true, remainingSeconds: result.approved.remainingSeconds }
+          : { ok: false, code: result.code }
+      })
+    },
   }
 }
 
@@ -286,7 +332,7 @@ interface FillSurface<Ready extends object, ApprovalInput, Approved, Outcome ext
     origin: string,
     input: ApprovalInput,
     signal: AbortSignal
-  ) => Promise<{ ok: true; approved: Approved } | { ok: false; code: string }>
+  ) => Promise<{ ok: true; approved: Approved } | { ok: false; code: string; lookalike?: string }>
   fill: (ctx: SurfaceContext, approved: Approved) => Promise<Outcome>
   cleanup: (ctx: SurfaceContext) => Promise<void>
   events?: {
@@ -316,7 +362,7 @@ async function runSurfaceFill<
   browser: Browser,
   signal: AbortSignal,
   surface: FillSurface<Ready, ApprovalInput, Approved, Outcome>
-): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }> } | { ok: false; code: string }> {
+): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }>; approved: Approved } | { ok: false; code: string; lookalike?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   const resolved = surface.resolvePage(tab)
   if (!resolved.ok) return { ok: false, code: resolved.code }
@@ -348,7 +394,7 @@ async function runSurfaceFill<
 
     const outcome = await surface.fill(ctx, approval.approved)
     return outcome.ok
-      ? { ok: true, outcome: outcome as Extract<Outcome, { ok: true }> }
+      ? { ok: true, outcome: outcome as Extract<Outcome, { ok: true }>, approved: approval.approved }
       : { ok: false, code: (outcome as unknown as { code: string }).code }
   } catch {
     return { ok: false, code: signal.aborted ? 'cancelled' : 'page-restricted' }
@@ -363,28 +409,66 @@ type ReadyLoginInspection = Extract<PageInspection, { ok: true }>
 type ReadyIdentityInspection = Extract<IdentityPageInspection, { ok: true }>
 type ReadyPasswordChange = { origin: string }
 
+export interface FrameInjection {
+  frameId?: number
+  result?: unknown
+}
+
+export function selectSameOriginSurface<Ready extends { ok: true; surface: { origin: string } }>(
+  injections: readonly FrameInjection[],
+  expectedOrigin: string,
+  normalize: (raw: unknown) => Ready | { ok: false; code: string },
+): { ok: true; frameId: number; ready: Ready } | { ok: false; code: string } {
+  let top: { frameId: number; ready: Ready } | undefined
+  let topFailure: string | undefined
+  const sameOriginChildren: Array<{ frameId: number; ready: Ready }> = []
+
+  for (const injection of injections) {
+    const frameId = injection.frameId
+    if (typeof frameId !== 'number' || !Number.isInteger(frameId) || frameId < 0) continue
+    const normalized = normalize(injection.result)
+    if (!normalized.ok) {
+      if (frameId === 0 && normalized.code !== 'no-fields') topFailure ??= normalized.code
+      continue
+    }
+    if (normalized.surface.origin !== expectedOrigin) {
+      if (frameId === 0) topFailure ??= 'origin-mismatch'
+      continue
+    }
+    if (frameId === 0) top = { frameId, ready: normalized }
+    else sameOriginChildren.push({ frameId, ready: normalized })
+  }
+
+  if (topFailure) return { ok: false, code: topFailure }
+  if (top) return { ok: true, frameId: top.frameId, ready: top.ready }
+  if (sameOriginChildren.length > 1) return { ok: false, code: 'multiple-matches' }
+  const child = sameOriginChildren[0]
+  return child ? { ok: true, frameId: child.frameId, ready: child.ready } : { ok: false, code: 'no-fields' }
+}
+
 function loginSurface(
   update?: (event: Parameters<typeof transition>[1]) => FillContext
-): FillSurface<ReadyLoginInspection, FillFields, Credential, FillOutcome> {
+): FillSurface<ReadyLoginInspection, FillFields, { credential: Credential; matchKind: FillMatchKind }, FillOutcome> {
   let prepared = false
+  let frameId = 0
   return {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
+      await installContentBridge(browser, tabId, true)
+      const injections = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
         args: ['sesameInspectLoginSurface'],
       })
-      const inspection = normalizeInspection(injection?.result)
-      if (!inspection.ok) return inspection
-      if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
-      return { ok: true, ready: inspection }
+      const selected = selectSameOriginSurface(injections, origin, normalizeInspection)
+      if (!selected.ok) return selected
+      frameId = selected.frameId
+      return { ok: true, ready: selected.ready }
     },
     unfillableCode: (inspection) => (!inspection.hasPasswordField && !inspection.hasUsernameField ? 'no-fields' : undefined),
     async prepare(ctx) {
       const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillLoginSurface', ctx.origin, ctx.token, null, 'prepare'],
       })
@@ -397,21 +481,23 @@ function loginSurface(
     },
     async requestApproval(browser, origin, input, signal) {
       const fill = await requestFill(browser, origin, { signal, fields: input })
-      return fill.ok ? { ok: true, approved: fill.credential } : fill
+      return fill.ok
+        ? { ok: true, approved: { credential: fill.credential, matchKind: fill.matchKind } }
+        : fill
     },
     async fill(ctx, approved) {
       const [injection] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
-        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, approved, 'fill'],
+        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, approved.credential, 'fill'],
       })
-      redactCredential({ credential: approved })
+      redactCredential({ credential: approved.credential })
       return normalizeFillOutcome(injection?.result)
     },
     async cleanup(ctx) {
       if (!prepared) return
       await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillLoginSurface', ctx.origin, ctx.token, null, 'clear'],
       })
@@ -419,7 +505,7 @@ function loginSurface(
     events: update ? {
       inspectionStarted: () => update({ type: 'inspection-started' }),
       inspectionCompleted: (inspection, documentToken) => update({ type: 'inspection-completed', inspection, documentToken }),
-      approvalReceived: (credential) => update({ type: 'approval-received', credential }),
+      approvalReceived: (approved) => update({ type: 'approval-received', credential: approved.credential }),
     } : undefined,
   }
 }
@@ -492,23 +578,24 @@ function passwordChangeSurface(newPassword: string): {
 
 function identitySurface(): FillSurface<ReadyIdentityInspection, readonly IdentityFieldKey[], IdentityFields, IdentityFillOutcome> {
   let prepared = false
+  let frameId = 0
   return {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
+      await installContentBridge(browser, tabId, true)
+      const injections = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
         args: ['sesameInspectIdentitySurface'],
       })
-      const inspection = normalizeIdentityInspection(injection?.result)
-      if (!inspection.ok) return inspection
-      if (inspection.surface.origin !== origin) return { ok: false, code: 'origin-mismatch' }
-      return { ok: true, ready: inspection }
+      const selected = selectSameOriginSurface(injections, origin, normalizeIdentityInspection)
+      if (!selected.ok) return selected
+      frameId = selected.frameId
+      return { ok: true, ready: selected.ready }
     },
     async prepare(ctx, ready) {
       const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'prepare'],
       })
@@ -523,7 +610,7 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
     },
     async fill(ctx, approved) {
       const [injection] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, approved, 'fill'],
       })
@@ -533,9 +620,69 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
     async cleanup(ctx) {
       if (!prepared) return
       await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
         func: invokeBridgeFill,
         args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'clear'],
+      })
+    },
+  }
+}
+
+function oneTimeCodeSurface(): FillSurface<
+  Extract<OneTimeCodeInspection, { ok: true }>,
+  OneTimeCodeKind,
+  { totpCode: string; remainingSeconds: number },
+  OneTimeCodeFillOutcome
+> {
+  let prepared = false
+  let frameId = 0
+  return {
+    resolvePage: topLevelPage,
+    async inspect({ browser, tabId, origin }) {
+      await installContentBridge(browser, tabId, true)
+      const injections = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: invokeBridgeInspection,
+        args: ['sesameInspectOneTimeCodeSurface'],
+      })
+      const selected = selectSameOriginSurface(injections, origin, normalizeOneTimeCodeInspection)
+      if (!selected.ok) return selected
+      frameId = selected.frameId
+      return { ok: true, ready: selected.ready }
+    },
+    async prepare(ctx, ready) {
+      const [preparation] = await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
+        func: invokeBridgeFill,
+        args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'prepare'],
+      })
+      const prep = normalizeOneTimeCodeFillOutcome(preparation?.result)
+      if (!prep.ok) return prep
+      prepared = true
+      return { ok: true, approvalInput: ready.kind }
+    },
+    async requestApproval(browser, origin, _input, signal) {
+      const result = await requestTotpCode(browser, origin, { signal })
+      return result.ok ? { ok: true, approved: result } : result
+    },
+    async fill(ctx, approved) {
+      try {
+        const [injection] = await ctx.browser.scripting.executeScript({
+          target: { tabId: ctx.tabId, frameIds: [frameId] },
+          func: invokeBridgeFill,
+          args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, approved.totpCode, 'fill'],
+        })
+        return normalizeOneTimeCodeFillOutcome(injection?.result)
+      } finally {
+        approved.totpCode = ''
+      }
+    },
+    async cleanup(ctx) {
+      if (!prepared) return
+      await ctx.browser.scripting.executeScript({
+        target: { tabId: ctx.tabId, frameIds: [frameId] },
+        func: invokeBridgeFill,
+        args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'clear'],
       })
     },
   }
@@ -548,8 +695,13 @@ async function runFill(
 ): Promise<FillContext> {
   const result = await runSurfaceFill(browser, signal, loginSurface(update))
   return result.ok
-    ? update({ type: 'fill-completed', usernameFilled: result.outcome.usernameFilled, passwordFilled: result.outcome.passwordFilled })
-    : update({ type: 'failed', code: result.code })
+    ? update({
+        type: 'fill-completed',
+        usernameFilled: result.outcome.usernameFilled,
+        passwordFilled: result.outcome.passwordFilled,
+        matchKind: result.approved.matchKind,
+      })
+    : update({ type: 'failed', code: result.code, lookalike: result.lookalike })
 }
 
 async function runIdentityFill(browser: Browser, signal: AbortSignal): Promise<IdentityFillResult> {

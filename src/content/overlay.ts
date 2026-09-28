@@ -2,12 +2,23 @@
 import { OVERLAY_TOKEN_CSS } from './overlay-tokens'
 import { inspectIdentitySurfaceScoped } from './identity-detector'
 import { cardFieldsForInput } from './card-fields'
+import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
 import { isVisibleInput } from '../shared/dom'
+import { fillMatchExplanation } from '../shared/fill-match'
+import { lookalikeWarningForResult } from '../shared/lookalike-warning'
+import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
+import {
+  DEFAULT_MAX_SCAN_DEPTH,
+  collectInputs,
+  collectInputsOfType,
+  eventTargetInput,
+} from './input-scan'
 import {
   fillRegistrationSurface,
   inspectPasswordSurface,
   makeRegistrationPassword,
+  type RegistrationPasswordOptions,
 } from './registration'
 import { copyTemporarily, type TemporaryCopyHandle } from './temporary-copy'
 import type { CardFieldKey, IdentityFieldKey } from '../protocol/native'
@@ -32,12 +43,21 @@ const OVERLAY_CSS = `
         .copy{border:0;border-radius:var(--radius-sm);padding:6px 10px;
           background:var(--button-secondary-bg);color:var(--text-heading);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.copy[hidden]{display:none}
+        .choice{border:0;border-radius:var(--radius-sm);padding:5px 10px;
+          background:var(--button-secondary-bg);color:var(--text-heading);cursor:pointer;
+          font-family:inherit;font-size:var(--type-2)}.choice[hidden]{display:none}
+        .choice:disabled{opacity:.5;cursor:default}
+        .choice:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
         .identity{border:0;border-radius:var(--radius-sm);padding:6px 10px;
           background:var(--button-secondary-bg);color:var(--text-heading);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.identity[hidden]{display:none}
         .identity:disabled{opacity:.5;cursor:default}
-        .copy:hover,.identity:hover:not(:disabled){background:var(--button-secondary-hover-bg)}
-        .copy:active,.identity:active:not(:disabled){transform:scale(.97)}
+        .code{border:0;border-radius:var(--radius-sm);padding:6px 10px;
+          background:var(--button-secondary-bg);color:var(--text-heading);
+          cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.code[hidden]{display:none}
+        .code:disabled{opacity:.5;cursor:default}
+        .copy:hover,.identity:hover:not(:disabled),.choice:hover:not(:disabled),.code:hover:not(:disabled){background:var(--button-secondary-hover-bg)}
+        .copy:active,.identity:active:not(:disabled),.choice:active:not(:disabled),.code:active:not(:disabled){transform:scale(.97)}
         .status{max-width:220px;color:var(--text-muted);font-size:var(--type-2);line-height:1.3}
         .card button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
         .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:var(--type-3);line-height:1;display:inline-grid;place-items:center;width:24px;height:24px;padding:0}`
@@ -48,15 +68,45 @@ export interface OverlayOptions {
   onOpenDesktop(): Promise<unknown> | unknown
   onFillIdentityRequest(): Promise<unknown> | unknown
   onFillCardRequest(): Promise<unknown> | unknown
+  onFillOneTimeCodeRequest(): Promise<unknown> | unknown
 }
 
 const CAPABILITY_TTL_MS = 15_000
 const GENERATED_PASSWORD_TTL_MS = 120_000
+const MAX_OBSERVED_SHADOW_ROOTS = 64
+
+export const REGISTRATION_CHOICES = [
+  ['characters:20', '20 characters'],
+  ['characters:16', '16 characters'],
+  ['characters:24', '24 characters'],
+  ['characters:32', '32 characters'],
+  ['passphrase:5', '5-word passphrase'],
+  ['passphrase:6', '6-word passphrase'],
+  ['passphrase:7', '7-word passphrase'],
+] as const
+
+export function registrationChoiceOptions(value: string): RegistrationPasswordOptions {
+  const passphrase = /^passphrase:(\d+)$/.exec(value)
+  if (passphrase) return { mode: 'passphrase', words: Number(passphrase[1]) }
+  const characters = /^characters:(\d+)$/.exec(value)
+  return characters ? { mode: 'characters', length: Number(characters[1]) } : {}
+}
 
 let sharedHostId: string | undefined
 
+type OverlayGlobal = typeof globalThis & {
+  sesameOverlayPresentStatus?: (text: string) => void
+}
+
 export function overlayHost(): HTMLDivElement | null {
   return sharedHostId ? (document.getElementById(sharedHostId) as HTMLDivElement | null) : null
+}
+
+export function showFillStatus(result: unknown): boolean {
+  const present = (globalThis as OverlayGlobal).sesameOverlayPresentStatus
+  if (typeof present !== 'function') return false
+  present(fillMessage(result))
+  return true
 }
 
 function ensureHostId(): string {
@@ -75,9 +125,14 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let dismissedField: HTMLInputElement | null = null
   let registrationMode = false
   let identityFieldsAvailable: IdentityFieldKey[] = []
+  let statusPresenter: ((text: string) => void) | undefined
+  let choice: HTMLSelectElement | null = null
+  let choiceValue: string = REGISTRATION_CHOICES[0][0]
   let cardButton: HTMLButtonElement | null = null
   let cardFieldsAvailable: CardFieldKey[] = []
   let cardMode = false
+  let codeButton: HTMLButtonElement | null = null
+  let codeMode = false
   let filling = false
   let capability: unknown
   let capabilityAt = 0
@@ -144,11 +199,29 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     cardFill.hidden = true
     cardFill.textContent = 'Fill card'
 
+    const codeFill = document.createElement('button')
+    codeFill.className = 'code'
+    codeFill.type = 'button'
+    codeFill.hidden = true
+    codeFill.textContent = 'Fill code'
+
     const copy = document.createElement('button')
     copy.className = 'copy'
     copy.type = 'button'
     copy.hidden = true
     copy.textContent = 'Copy password'
+
+    const generate = document.createElement('select')
+    generate.className = 'choice'
+    generate.hidden = true
+    generate.setAttribute('aria-label', 'Password format')
+    for (const [value, label] of REGISTRATION_CHOICES) {
+      const option = document.createElement('option')
+      option.value = value
+      option.textContent = label
+      generate.append(option)
+    }
+    generate.value = choiceValue
 
     const statusNode = document.createElement('span')
     statusNode.className = 'status'
@@ -161,25 +234,36 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     close.setAttribute('aria-label', 'Dismiss')
     close.textContent = '×'
 
-    card.append(mark, fill, identityFill, cardFill, copy, statusNode, close)
+    card.append(mark, fill, identityFill, cardFill, codeFill, copy, generate, statusNode, close)
     shadow.append(card)
 
     button = fill
     identityButton = identityFill
     cardButton = cardFill
+    codeButton = codeFill
     copyButton = copy
+    choice = generate
     status = statusNode
-    host.addEventListener('mousedown', preventFieldBlur)
+    statusPresenter = (text) => { statusNode.textContent = text }
+    ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = statusPresenter
+    card.addEventListener('mousedown', preventFieldBlur)
     fill.addEventListener('click', onFillClick)
     identityFill.addEventListener('click', onFillIdentityClick)
     cardFill.addEventListener('click', onFillCardClick)
+    codeFill.addEventListener('click', onFillCodeClick)
     copy.addEventListener('click', onCopyPassword)
+    generate.addEventListener('change', onChoiceChange)
     close.addEventListener('click', dismiss)
     document.documentElement.append(host)
   }
 
   function preventFieldBlur(event: MouseEvent) {
+    if (event.target instanceof HTMLSelectElement) return
     event.preventDefault()
+  }
+
+  function onChoiceChange() {
+    if (choice) choiceValue = choice.value
   }
 
   function showOverlay(field: HTMLInputElement) {
@@ -193,7 +277,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
           ? 'username'
           : null
     const cardFields = cardAnchorFields(field, signInField)
-    const kind = signInKind ?? (cardFields.length > 0 ? 'card' : null)
+    const codeKind = oneTimeCodeKindForField(field)
+    const kind = signInKind ?? (cardFields.length > 0 ? 'card' : null) ?? (codeKind ? 'code' : null)
     if (!kind) {
       hideOverlay()
       return
@@ -201,6 +286,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     ensureOverlay()
     anchorField = field
     cardMode = kind === 'card'
+    codeMode = kind === 'code'
     cardFieldsAvailable = cardFields
     registrationMode = kind === 'registration'
     identityFieldsAvailable = registrationMode ? inspectIdentitySurfaceScoped(ownerOf(field)) : []
@@ -217,6 +303,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   function hideOverlay() {
     if (host) host.style.display = 'none'
     anchorField = null
+    codeMode = false
   }
 
   function dismiss() {
@@ -246,13 +333,23 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       cardButton.disabled = filling
       cardButton.textContent = filling ? 'Filling…' : 'Fill card'
     }
-    if (cardMode) {
+    if (codeButton) {
+      codeButton.hidden = !codeMode
+      codeButton.disabled = filling
+      codeButton.textContent = filling ? 'Filling…' : 'Fill code'
+    }
+    if (cardMode || codeMode) {
       button.hidden = true
       if (identityButton) identityButton.hidden = true
       if (copyButton) copyButton.hidden = true
+      if (choice) choice.hidden = true
       return
     }
     button.hidden = false
+    if (choice) {
+      choice.hidden = !registrationMode
+      choice.disabled = filling
+    }
     if (identityButton) {
       identityButton.hidden = !(registrationMode && identityFieldsAvailable.length > 0)
       identityButton.disabled = filling
@@ -300,7 +397,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       if (registrationMode) {
         copyHandle?.cancel()
         if (expiryTimer !== undefined) clearTimeout(expiryTimer)
-        registrationPassword = makeRegistrationPassword()
+        registrationPassword = makeRegistrationPassword(registrationChoiceOptions(choiceValue))
         const outcome = fillRegistrationSurface(location.origin, registrationPassword)
         if (!outcome.ok) {
           registrationPassword = ''
@@ -364,11 +461,19 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     await runFillRequest(options.onFillCardRequest, cardFillMessage)
   }
 
+  async function onFillCodeClick() {
+    await runFillRequest(options.onFillOneTimeCodeRequest, oneTimeCodeMessage, true)
+  }
+
   async function onFillIdentityClick() {
     await runFillRequest(options.onFillIdentityRequest, identityFillMessage)
   }
 
-  async function runFillRequest(request: () => unknown, message: (result: unknown) => string) {
+  async function runFillRequest(
+    request: () => unknown,
+    message: (result: unknown) => string,
+    hideOnSuccess = false,
+  ) {
     if (filling || !anchorField) return
     filling = true
     renderState()
@@ -376,6 +481,9 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     try {
       const result = await request()
       if (status) status.textContent = message(result)
+      if (hideOnSuccess && isRecord(result) && result.ok === true) {
+        hideTimer = setTimeout(hideOverlay, 4_000)
+      }
     } catch {
       if (status) status.textContent = 'Sesame could not fill this form.'
     } finally {
@@ -412,23 +520,25 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       const safeAnchor = findSafeAnchor(anchorField)
       if (safeAnchor) {
         const nextRegistrationMode = inspectPasswordSurface() === 'registration'
-        if (nextRegistrationMode !== registrationMode) showOverlay(safeAnchor)
+        const nextCodeMode = oneTimeCodeKindForField(safeAnchor) !== null
+        if (nextRegistrationMode !== registrationMode || nextCodeMode !== codeMode) showOverlay(safeAnchor)
         else positionOverlay()
         return
       }
       hideOverlay()
     }
-    const active = document.activeElement
-    if (active instanceof HTMLInputElement) {
+    const active = focusedInput()
+    if (active) {
       const safeAnchor = findSafeAnchor(active)
       if (safeAnchor) showOverlay(safeAnchor)
     }
   }
 
   function onFocusIn(event: FocusEvent) {
-    const target = event.target
-    if (!(target instanceof HTMLInputElement)) return
+    const target = eventTargetInput(event)
+    if (!target) return
     if (target !== dismissedField) dismissedField = null
+    observePageRoots()
     const safeAnchor = findSafeAnchor(target)
     if (safeAnchor) showOverlay(safeAnchor)
     else hideOverlay()
@@ -437,8 +547,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   function onFocusOut() {
     setTimeout(() => {
       if (!host || document.activeElement === host) return
-      const active = document.activeElement
-      if (!(active instanceof HTMLInputElement) || !findSafeAnchor(active)) hideOverlay()
+      const active = focusedInput()
+      if (!active || !findSafeAnchor(active)) hideOverlay()
     }, 150)
   }
 
@@ -452,25 +562,45 @@ export function attachInlineButton(options: OverlayOptions): () => void {
         (record) => record.type === 'childList' || record.target instanceof HTMLInputElement,
       )
     ) {
+      if (records.some((record) => record.type === 'childList')) observePageRoots()
       refreshFocusedField()
     }
   })
-  pageObserver.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: [
-      'type',
-      'disabled',
-      'readonly',
-      'hidden',
-      'style',
-      'class',
-      'autocomplete',
-      'name',
-      'id',
-    ],
-  })
+  const observedRoots = new WeakSet<Node>()
+  let observedShadowRoots = 0
+
+  function observeRoot(root: Node) {
+    if (observedRoots.has(root)) return
+    observedRoots.add(root)
+    pageObserver.observe(root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        'type',
+        'disabled',
+        'readonly',
+        'hidden',
+        'style',
+        'class',
+        'autocomplete',
+        'name',
+        'id',
+      ],
+    })
+  }
+
+  function observePageRoots() {
+    observeRoot(document.documentElement)
+    for (const root of collectInputs(document).shadowRoots) {
+      if (observedRoots.has(root)) continue
+      if (observedShadowRoots >= MAX_OBSERVED_SHADOW_ROOTS) return
+      observedShadowRoots += 1
+      observeRoot(root)
+    }
+  }
+
+  observePageRoots()
   document.addEventListener('focusin', onFocusIn, true)
   document.addEventListener('focusout', onFocusOut, true)
   document.addEventListener('keydown', onKeyDown, true)
@@ -491,6 +621,10 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (connectionRefreshTimer !== undefined) clearTimeout(connectionRefreshTimer)
     copyHandle?.cancel()
     registrationPassword = ''
+    if ((globalThis as OverlayGlobal).sesameOverlayPresentStatus === statusPresenter) {
+      ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = undefined
+    }
+    statusPresenter = undefined
     host?.remove()
     host = null
     button = null
@@ -498,15 +632,34 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     cardButton = null
     cardMode = false
     cardFieldsAvailable = []
+    codeButton = null
+    codeMode = false
     copyButton = null
+    choice = null
     status = null
     anchorField = null
   }
 }
 
+function focusedInput(): HTMLInputElement | null {
+  let active: Element | null = document.activeElement
+  let depth = 0
+  while (active && depth < DEFAULT_MAX_SCAN_DEPTH) {
+    const root = active.shadowRoot
+    if (!root?.activeElement) break
+    active = root.activeElement
+    depth += 1
+  }
+  return active instanceof HTMLInputElement ? active : null
+}
+
 function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
+  if (collectInputs(document).truncated) return null
   if (!isVisibleInput(field)) return null
-  if (!isLoginField(field)) return cardFieldsForInput(field).length > 0 ? field : null
+  if (!isLoginField(field)) {
+    if (cardFieldsForInput(field).length > 0) return field
+    return oneTimeCodeKindForField(field) ? field : null
+  }
   const kind = inspectPasswordSurface()
   if (kind === 'none') return isSafeUsernameOnlyAnchor(field) ? field : null
   if (kind !== 'login' && kind !== 'registration') return null
@@ -520,7 +673,9 @@ function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
 
 function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
   if (field.type === 'password') return false
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input')).filter((input) => isVisibleInput(input))
+  const scan = collectInputs(document)
+  if (scan.truncated) return false
+  const inputs = scan.inputs.filter((input) => isVisibleInput(input))
   const candidates = inputs.filter(
     (candidate) => candidate.type !== 'password' && isLoginField(candidate),
   )
@@ -551,9 +706,9 @@ function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
 }
 
 function visiblePasswordFields(): HTMLInputElement[] {
-  return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
-    (input) => isVisibleInput(input),
-  )
+  const scan = collectInputsOfType(document, 'password')
+  if (scan.truncated) return []
+  return scan.inputs.filter((input) => isVisibleInput(input))
 }
 
 function isLoginField(field: HTMLInputElement): boolean {
@@ -575,10 +730,15 @@ function ownerOf(field: HTMLInputElement): Element {
 }
 
 export function fillMessage(result: unknown): string {
-  if (recordString(result, 'state') === 'filled') return 'Filled. Review the page and sign in.'
+  const lookalike = lookalikeWarningForResult(result)
+  if (lookalike) return lookalike
+  if (recordString(result, 'state') === 'filled') {
+    return fillMatchExplanation(recordString(result, 'matchKind')) ?? 'Filled. Review the page and sign in.'
+  }
   const code = recordString(result, 'code') || recordString(result, 'reason')
   if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
   if (code === 'origin-mismatch' || code === 'no-match') return 'No saved login matches this site.'
+  if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this login.'
   if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
   if (code === 'desktop-unavailable' || code === 'host-not-found')
     return 'Open Sesame, then try again.'
@@ -612,6 +772,29 @@ export function cardFillMessage(result: unknown): string {
   if (code === 'insecure-page') return 'Sesame only fills a card on an https page.'
   if (code === 'cancelled') return 'Card fill was declined.'
   if (code === 'page-changed') return 'The page changed before the card was filled.'
+  return 'Sesame could not fill this form.'
+}
+
+export function oneTimeCodeMessage(result: unknown): string {
+  const remainingSeconds = isRecord(result) && result.ok === true && typeof result.remainingSeconds === 'number'
+    ? result.remainingSeconds
+    : 0
+  const secondsMessage = oneTimeCodeSecondsMessage(remainingSeconds)
+  if (secondsMessage) return secondsMessage
+  const code = recordString(result, 'code')
+  if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
+  if (code === 'no-match') return 'No one-time code is available for this site.'
+  if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this code.'
+  if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
+  if (code === 'desktop-unavailable' || code === 'host-not-found') return 'Open Sesame, then try again.'
+  if (/host-disconnected|host-exited|host-communication-failed|timeout/.test(code)) {
+    return 'The desktop connection closed. Keep Sesame open and try again.'
+  }
+  if (/approval-declined/.test(code)) return 'Nothing was filled. The request was declined.'
+  if (/approval-unavailable|approval-timeout|stale-request/.test(code)) return 'Approval expired. Try filling again.'
+  if (/page-changed|stale-document/.test(code)) return 'The page changed. Try filling again.'
+  if (code === 'field-write-failed') return 'This site blocked the field update. Nothing was submitted.'
+  if (/no-fields|multiple-matches/.test(code)) return 'This form cannot be filled automatically.'
   return 'Sesame could not fill this form.'
 }
 
