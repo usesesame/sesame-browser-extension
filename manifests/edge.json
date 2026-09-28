@@ -22,7 +22,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "nativeMessaging", "scripting", "storage"],
+  "permissions": ["activeTab", "contextMenus", "nativeMessaging", "scripting", "storage"],
   "optional_host_permissions": ["https://*/*"],
   "options_page": "options.html",
   "commands": {

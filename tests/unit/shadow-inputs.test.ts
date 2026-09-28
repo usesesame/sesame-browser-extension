@@ -5,6 +5,7 @@ import { fillCardSurface } from '../../src/content/card-writer'
 import { inspectLoginSurface, isUsernameField } from '../../src/content/field-detector'
 import { fillLoginSurface } from '../../src/content/field-writer'
 import { inspectIdentitySurface } from '../../src/content/identity-detector'
+import { fillIdentitySurface } from '../../src/content/identity-writer'
 import { DEFAULT_MAX_SCAN_DEPTH, collectInputs } from '../../src/content/input-scan'
 import { inspectPasswordSurface, visiblePasswordFields } from '../../src/content/registration'
 
@@ -151,6 +152,29 @@ describe('input traversal through open shadow roots', () => {
     layout(email)
 
     expect(inspectIdentitySurface()).toEqual({ ok: true, surface: { ok: true, origin }, fields: ['email'] })
+  })
+
+  it('reads a checkout hint inside an open shadow root', () => {
+    const root = openShadowRoot(document.body)
+    const form = document.createElement('form')
+    const fullName = document.createElement('input')
+    fullName.name = 'full_name'
+    const email = document.createElement('input')
+    email.id = 'checkout_email'
+    form.append(fullName, email)
+    root.append(form)
+    layout(fullName)
+    layout(email)
+
+    expect(inspectIdentitySurface()).toEqual({
+      ok: true,
+      surface: { ok: true, origin },
+      fields: ['fullName', 'email'],
+    })
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({
+      ok: true,
+      filledFields: ['fullName', 'email'],
+    })
   })
 
   it('scans card fields inside open shadow roots', () => {

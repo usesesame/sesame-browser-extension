@@ -23,6 +23,8 @@ The extension asks for the minimum permissions by default:
 - `nativeMessaging`: required to talk to the local Sesame desktop app.
 - `storage`: stores only the origins where the user explicitly pauses the
   inline control and the first-run onboarding preference.
+- `contextMenus`: adds a **Fill with Sesame** right-click entry that starts the
+  same approved fill flow as the popup and the keyboard shortcut.
 
 The inline field button is **optional**. Onboarding or the popup asks once for
 `https://*/*` through `optional_host_permissions`. After approval, the control

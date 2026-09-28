@@ -1,4 +1,5 @@
 import { isUsernameField } from './field-detector'
+import { EFF_WORDLIST } from './eff-wordlist'
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
 import { collectInputs, collectInputsOfType } from './input-scan'
@@ -12,10 +13,35 @@ export type RegistrationOutcome =
 type RandomBytes = (buffer: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>
 export type PasswordSurfaceKind = 'none' | 'login' | 'registration' | 'password-change' | 'ambiguous'
 
+export type RegistrationPasswordMode = 'characters' | 'passphrase'
+
+export interface RegistrationPasswordOptions {
+  mode?: RegistrationPasswordMode
+  length?: number
+  words?: number
+}
+
+export const PASSPHRASE_MIN_WORDS = 5
+export const PASSPHRASE_MAX_WORDS = 10
+export const PASSPHRASE_DEFAULT_WORDS = 6
+
 export function makeRegistrationPassword(
-  length = 20,
+  options: RegistrationPasswordOptions = {},
   getRandomValues: RandomBytes = (buffer) => crypto.getRandomValues(buffer),
 ): string {
+  if (options.mode === 'passphrase') {
+    const words = options.words ?? PASSPHRASE_DEFAULT_WORDS
+    if (!Number.isInteger(words) || words < PASSPHRASE_MIN_WORDS || words > PASSPHRASE_MAX_WORDS) {
+      throw new RangeError(
+        `registration passphrase must be between ${PASSPHRASE_MIN_WORDS} and ${PASSPHRASE_MAX_WORDS} words`,
+      )
+    }
+    return Array.from(
+      { length: words },
+      () => EFF_WORDLIST[secureRandomIndex(EFF_WORDLIST.length, getRandomValues)],
+    ).join('-')
+  }
+  const length = options.length ?? 20
   if (!Number.isInteger(length) || length < 16 || length > 64) {
     throw new RangeError('registration password length must be between 16 and 64')
   }
@@ -204,12 +230,20 @@ function tokens(value: unknown): string[] {
 }
 
 function secureRandomIndex(maxExclusive: number, getRandomValues: RandomBytes): number {
-  const limit = 256 - (256 % maxExclusive)
-  const sample = new Uint8Array(1)
+  if (!Number.isInteger(maxExclusive) || maxExclusive < 1) {
+    throw new RangeError('random index bound must be a positive integer')
+  }
+  const byteLength = Math.max(1, Math.ceil(Math.log2(maxExclusive) / 8))
+  const range = 256 ** byteLength
+  const limit = range - (range % maxExclusive)
+  const sample = new Uint8Array(byteLength)
+  let value = 0
   do {
     getRandomValues(sample)
-  } while (sample[0] >= limit)
-  return sample[0] % maxExclusive
+    value = 0
+    for (const byte of sample) value = value * 256 + byte
+  } while (value >= limit)
+  return value % maxExclusive
 }
 
 function failure(code: string): RegistrationOutcome {

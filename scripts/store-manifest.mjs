@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-const REQUIRED_PERMISSIONS = ['activeTab', 'nativeMessaging', 'scripting', 'storage']
+const REQUIRED_PERMISSIONS = ['activeTab', 'contextMenus', 'nativeMessaging', 'scripting', 'storage']
 const REQUIRED_OPTIONAL_HOST_PERMISSIONS = ['https://*/*']
 // `host_permissions` stays in the integration build only.
 const FORBIDDEN_KEYS = ['host_permissions', 'content_scripts', 'web_accessible_resources']

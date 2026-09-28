@@ -5,7 +5,7 @@ import { fillIdentitySurface } from './identity-writer'
 import { inspectCardSurface } from './card-detector'
 import { fillCardSurface } from './card-writer'
 import { fillOneTimeCodeSurface, inspectOneTimeCodeSurface } from './one-time-code'
-import { attachInlineButton } from './overlay'
+import { attachInlineButton, showFillStatus } from './overlay'
 import { fillPasswordChangeSurface } from './password-change'
 import { fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
 import { saveCurrentLogin } from './signup-capture'
@@ -25,6 +25,7 @@ type GlobalApi = {
   sesameFillPasswordChangeSurface: typeof fillPasswordChangeSurface
   sesameSaveCurrentLogin: typeof saveCurrentLogin
   sesameAttachInlineButton: () => (() => void) | undefined
+  sesameShowFillStatus: typeof showFillStatus
   sesameDetachInlineButton: (() => void) | undefined
 }
 
@@ -53,6 +54,7 @@ const api: GlobalApi = {
       onFillOneTimeCodeRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-one-time-code' }),
     })
   },
+  sesameShowFillStatus: showFillStatus,
   sesameDetachInlineButton: undefined,
 }
 
@@ -76,4 +78,5 @@ export {
   fillPasswordChangeSurface,
   saveCurrentLogin,
   attachInlineButton,
+  showFillStatus,
 }
