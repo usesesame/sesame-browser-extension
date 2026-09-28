@@ -62,7 +62,7 @@ export type IdentityFillResult =
 
 export type ChangePasswordResult =
   | { ok: true; tabId: number; origin: string; username: string; currentFilled: number; newFilled: number }
-  | { ok: false; code: string }
+  | { ok: false; code: string; lookalike?: string }
 
 export interface CardPageCheckResult {
   state: 'ready' | 'unavailable'
@@ -197,7 +197,7 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async changePasswordActivePage(newPassword, externalSignal): Promise<ChangePasswordResult> {
-      return withFillGuard(activeControllers, externalSignal, {
+      return withFillGuard<ChangePasswordResult>(activeControllers, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
@@ -332,7 +332,7 @@ interface FillSurface<Ready extends object, ApprovalInput, Approved, Outcome ext
     origin: string,
     input: ApprovalInput,
     signal: AbortSignal
-  ) => Promise<{ ok: true; approved: Approved } | { ok: false; code: string }>
+  ) => Promise<{ ok: true; approved: Approved } | { ok: false; code: string; lookalike?: string }>
   fill: (ctx: SurfaceContext, approved: Approved) => Promise<Outcome>
   cleanup: (ctx: SurfaceContext) => Promise<void>
   events?: {
@@ -362,7 +362,7 @@ async function runSurfaceFill<
   browser: Browser,
   signal: AbortSignal,
   surface: FillSurface<Ready, ApprovalInput, Approved, Outcome>
-): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }>; approved: Approved } | { ok: false; code: string }> {
+): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }>; approved: Approved } | { ok: false; code: string; lookalike?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   const resolved = surface.resolvePage(tab)
   if (!resolved.ok) return { ok: false, code: resolved.code }
@@ -701,7 +701,7 @@ async function runFill(
         passwordFilled: result.outcome.passwordFilled,
         matchKind: result.approved.matchKind,
       })
-    : update({ type: 'failed', code: result.code })
+    : update({ type: 'failed', code: result.code, lookalike: result.lookalike })
 }
 
 async function runIdentityFill(browser: Browser, signal: AbortSignal): Promise<IdentityFillResult> {

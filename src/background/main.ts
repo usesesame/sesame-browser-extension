@@ -140,7 +140,7 @@ chrome.runtime.onConnect.addListener((port) => {
           saveSession.arm(result.tabId, result.origin, { username: result.username, password: newPassword })
           try { port.postMessage({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled }) } catch { /* noop */ }
         } else {
-          try { port.postMessage({ state: 'unavailable', code: result.code }) } catch { /* noop */ }
+          try { port.postMessage({ state: 'unavailable', code: result.code, lookalike: result.lookalike }) } catch { /* noop */ }
         }
       }).catch(() => {
         try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }

@@ -3,7 +3,7 @@ import type { FillMatchKind } from '../protocol/native'
 
 export type PublicFillResult =
   | { state: 'filled'; usernameFilled: boolean; passwordFilled: boolean; matchKind: FillMatchKind }
-  | { state: 'unavailable'; code: string }
+  | { state: 'unavailable'; code: string; lookalike?: string }
 
 export function publicFillResult(context: FillContext): PublicFillResult {
   const phase = context.phase
@@ -14,6 +14,9 @@ export function publicFillResult(context: FillContext): PublicFillResult {
       passwordFilled: phase.passwordFilled,
       matchKind: phase.matchKind,
     }
+  }
+  if (phase.name === 'failed' && phase.lookalike !== undefined) {
+    return { state: 'unavailable', code: phase.code, lookalike: phase.lookalike }
   }
   if (phase.name === 'failed' || phase.name === 'cancelled' || phase.name === 'expired') {
     return { state: 'unavailable', code: phase.code }

@@ -13,7 +13,7 @@ export type FillPhase =
   | { name: 'complete'; usernameFilled: boolean; passwordFilled: boolean; matchKind: FillMatchKind }
   | { name: 'cancelled'; code: string }
   | { name: 'expired'; code: string }
-  | { name: 'failed'; code: string }
+  | { name: 'failed'; code: string; lookalike?: string }
 
 export interface FillContext {
   phase: FillPhase
@@ -68,7 +68,9 @@ export function transition(state: FillContext, event: FillEvent): FillContext {
     case 'expired':
       return { phase: { name: 'expired', code: event.code } }
     case 'failed':
-      return { phase: { name: 'failed', code: event.code } }
+      return event.lookalike !== undefined
+        ? { phase: { name: 'failed', code: event.code, lookalike: event.lookalike } }
+        : { phase: { name: 'failed', code: event.code } }
     default:
       return state
   }
@@ -83,6 +85,6 @@ export type FillEvent =
   | { type: 'fill-completed'; usernameFilled: boolean; passwordFilled: boolean; matchKind: FillMatchKind }
   | { type: 'cancelled'; code: string }
   | { type: 'expired'; code: string }
-  | { type: 'failed'; code: string }
+  | { type: 'failed'; code: string; lookalike?: string }
 
 

@@ -97,6 +97,7 @@ export interface NativeFillResult {
 export interface NativeFillFailure {
   ok: false
   code: string
+  lookalike?: string
 }
 
 export type NativeActivationResult =
@@ -129,7 +130,7 @@ export async function requestFill(
     { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal }
   )
   if (!result.ok) {
-    return { ok: false, code: result.code }
+    return result
   }
   if (!result.response.credential || !result.response.matchKind) {
     return { ok: false, code: 'invalid-response' }
@@ -250,6 +251,7 @@ interface ConnectOnceResult {
 interface ConnectOnceFailure {
   ok: false
   code: string
+  lookalike?: string
 }
 
 export function connectOnce(
@@ -262,7 +264,7 @@ export function connectOnce(
     let finished = false
     let port: NativePort | undefined
 
-    function finish(code: string, response?: ConnectOnceResult['response']) {
+    function finish(code: string, response?: ConnectOnceResult['response'], lookalike?: string) {
       if (finished) return
       finished = true
       if (timeout !== undefined) clearTimeout(timeout)
@@ -274,6 +276,8 @@ export function connectOnce(
       } catch { /* noop */ }
       if (response) {
         resolve({ ok: true, response })
+      } else if (lookalike !== undefined) {
+        resolve({ ok: false, code, lookalike })
       } else {
         resolve({ ok: false, code })
       }
@@ -313,7 +317,7 @@ export function connectOnce(
     port.onMessage.addListener((raw) => {
       const response = safeNativeResponse(raw, request)
       if (!response.ok) {
-        return finish(response.code)
+        return 'lookalike' in response ? finish(response.code, undefined, response.lookalike) : finish(response.code)
       }
       if (response.ok && 'credential' in response) {
         return finish('ok', { credential: response.credential, matchKind: response.matchKind })

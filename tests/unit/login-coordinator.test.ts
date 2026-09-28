@@ -141,6 +141,25 @@ describe('login coordinator', () => {
     })
   })
 
+  it('reports a lookalike warning without writing a credential', async () => {
+    native.requestFill.mockResolvedValue({
+      ok: false,
+      code: 'lookalike-domain',
+      lookalike: 'apple.example',
+    })
+    const browser = browserForLoginPage()
+    const coordinator = createCoordinator(browser)
+
+    await expect(coordinator.fillActivePage()).resolves.toEqual({
+      phase: { name: 'failed', code: 'lookalike-domain', lookalike: 'apple.example' },
+    })
+    const writes = bridgeFillCalls(browser)
+    expect(writes.some((details) => details.args?.[4] === 'fill')).toBe(false)
+    for (const details of writes) {
+      expect(['prepare', 'clear']).toContain(details.args?.[4])
+    }
+  })
+
   it('cancels the fill when the caller aborts while awaiting desktop approval', async () => {
     const browser = browserForLoginPage()
     const coordinator = createCoordinator(browser)

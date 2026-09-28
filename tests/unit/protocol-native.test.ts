@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_FIELD_KEYS,
   CARD_PROTOCOL_VERSION,
+  FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
+  MAX_LOOKALIKE_HOST,
   PROTOCOL_VERSION,
   TOTP_PROTOCOL_VERSION,
   isCapabilities,
@@ -82,7 +84,7 @@ describe('makeRequest', () => {
   it('stamps every request with the protocol version its host checks', () => {
     expect(makeRequest('capabilities').version).toBe(PROTOCOL_VERSION)
     expect(makeRequest('activate').version).toBe(PROTOCOL_VERSION)
-    expect(fillRequest('both').version).toBe(FILL_MATCH_PROTOCOL_VERSION)
+    expect(fillRequest('both').version).toBe(FILL_LOOKALIKE_PROTOCOL_VERSION)
     expect(makeCardRequest('https://checkout.example.test', ['number']).version).toBe(CARD_PROTOCOL_VERSION)
     expect(makeTotpRequest('https://example.test').version).toBe(TOTP_PROTOCOL_VERSION)
   })
@@ -117,8 +119,42 @@ describe('isNativeRequest', () => {
   })
 
   it('rejects another protocol version', () => {
-    expect(isNativeRequest({ ...fillRequest('both'), version: FILL_MATCH_PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isNativeRequest({ ...fillRequest('both'), version: FILL_LOOKALIKE_PROTOCOL_VERSION + 1 })).toBe(false)
     expect(isNativeRequest({ ...fillRequest('both'), version: 0 })).toBe(false)
+  })
+
+  it('accepts the version five fill request shape', () => {
+    expect(isNativeRequest({
+      version: FILL_LOOKALIKE_PROTOCOL_VERSION,
+      type: 'fill',
+      requestId: 'fill-5-1',
+      origin: 'https://example.test',
+    })).toBe(true)
+    expect(isNativeRequest({
+      version: FILL_LOOKALIKE_PROTOCOL_VERSION,
+      type: 'fill',
+      requestId: 'fill-5-2',
+      origin: 'https://example.test',
+      fields: 'password',
+    })).toBe(true)
+  })
+
+  it('keeps protocol v5 exclusive to fill requests', () => {
+    expect(isNativeRequest({
+      version: FILL_LOOKALIKE_PROTOCOL_VERSION,
+      type: 'totp',
+      requestId: 'totp-5-1',
+      origin: 'https://example.test',
+    })).toBe(false)
+    expect(isNativeRequest({ version: FILL_LOOKALIKE_PROTOCOL_VERSION, type: 'capabilities', requestId: 'capabilities-5' })).toBe(false)
+    expect(isNativeRequest({
+      version: FILL_LOOKALIKE_PROTOCOL_VERSION,
+      type: 'save',
+      requestId: 'save-5',
+      origin: 'https://example.test',
+      kind: 'new',
+      password: 'pw',
+    })).toBe(false)
   })
 
   it('keeps protocol v2 exclusive to card requests', () => {
@@ -228,7 +264,7 @@ describe('safeNativeResponse', () => {
   it('refuses a reply that answers a different request', () => {
     const request = fillRequest('both')
     const reply = {
-      version: FILL_MATCH_PROTOCOL_VERSION,
+      version: request.version,
       requestId: 'someone-elses',
       type: 'fill',
       username: 'u',
@@ -282,13 +318,13 @@ describe('safeNativeResponse', () => {
       .toEqual({ ok: true, credential: { username: '', password: 'fictional-value' }, matchKind: 'wwwAlias' })
   })
 
-  it('refuses a version three fill response that does not name the matched rule', () => {
+  it('refuses a fill response that does not name the matched rule', () => {
     const request = fillRequest('both')
     expect(respond(request, { type: 'fill', username: 'u', password: 'p' }))
       .toEqual({ ok: false, code: 'unsafe-response' })
   })
 
-  it('refuses a version three fill response with an unknown matched rule', () => {
+  it('refuses a fill response with an unknown matched rule', () => {
     const request = fillRequest('both')
     expect(respond(request, { type: 'fill', username: 'u', password: 'p', matchKind: 'parentDomain' }))
       .toEqual({ ok: false, code: 'unsafe-response' })
@@ -355,6 +391,84 @@ describe('safeNativeResponse', () => {
     for (const raw of [null, 'fill', 42, ['fill']]) {
       expect(safeNativeResponse(raw, request)).toEqual({ ok: false, code: 'invalid-response' })
     }
+  })
+})
+
+describe('version five lookalike responses', () => {
+  const v5Request = (): NativeRequest => makeRequest('fill', 'https://example.test')
+  const v3Request = (): NativeRequest => ({
+    version: FILL_MATCH_PROTOCOL_VERSION,
+    type: 'fill',
+    requestId: 'fill-3-lookalike',
+    origin: 'https://example.test',
+  })
+  const v4Request = (): NativeRequest => makeTotpRequest('https://example.test')
+
+  it('returns both match kinds from a version five fill', () => {
+    expect(respond(v5Request(), { type: 'fill', username: 'person@example.test', password: 'fictional-value', matchKind: 'exact' }))
+      .toEqual({
+        ok: true,
+        credential: { username: 'person@example.test', password: 'fictional-value' },
+        matchKind: 'exact',
+      })
+    expect(respond(v5Request(), { type: 'fill', username: 'person@example.test', password: 'fictional-value', matchKind: 'wwwAlias' }))
+      .toEqual({
+        ok: true,
+        credential: { username: 'person@example.test', password: 'fictional-value' },
+        matchKind: 'wwwAlias',
+      })
+  })
+
+  it('decodes a lookalike warning with the stored host and no credential', () => {
+    const result = respond(v5Request(), { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'apple.example' })
+    expect(result).toEqual({ ok: false, code: 'lookalike-domain', lookalike: 'apple.example' })
+    expect(result).not.toHaveProperty('credential')
+  })
+
+  it('refuses a lookalike reason without a usable host', () => {
+    for (const message of [
+      { type: 'fill-unavailable', reason: 'lookalike' },
+      { type: 'fill-unavailable', reason: 'lookalike', lookalike: '' },
+      { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'a'.repeat(MAX_LOOKALIKE_HOST + 1) },
+      { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'apple\u0000.example' },
+      { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'apple\u009f.example' },
+      { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'apple.example/sign-in' },
+    ]) {
+      expect(respond(v5Request(), message)).toEqual({ ok: false, code: 'unsafe-response' })
+    }
+  })
+
+  it('forbids the lookalike host on any other reason', () => {
+    expect(respond(v5Request(), { type: 'fill-unavailable', reason: 'noMatch', lookalike: 'apple.example' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(v5Request(), { type: 'fill-unavailable', reason: 'locked', lookalike: 'apple.example' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('refuses a lookalike reason answered over an older protocol', () => {
+    expect(respond(v3Request(), { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'apple.example' }))
+      .toEqual({ ok: false, code: 'protocol-mismatch' })
+    expect(respond(v4Request(), { type: 'totp-unavailable', reason: 'lookalike', lookalike: 'apple.example' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(v4Request(), { type: 'totp-unavailable', reason: 'lookalike' }))
+      .toEqual({ ok: false, code: 'invalid-response' })
+  })
+
+  it('refuses a lookalike answer bound to another request or version', () => {
+    const request = v5Request()
+    expect(safeNativeResponse({
+      version: FILL_LOOKALIKE_PROTOCOL_VERSION,
+      type: 'fill-unavailable',
+      requestId: 'other-request',
+      reason: 'lookalike',
+      lookalike: 'apple.example',
+    }, request)).toEqual({ ok: false, code: 'request-mismatch' })
+    expect(safeNativeResponse({
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      type: 'fill-unavailable',
+      requestId: request.requestId,
+      reason: 'noMatch',
+    }, request)).toEqual({ ok: false, code: 'protocol-mismatch' })
   })
 })
 
