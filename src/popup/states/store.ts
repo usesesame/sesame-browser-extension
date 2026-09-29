@@ -5,8 +5,7 @@ export type PopupPhase =
   | { name: 'checking' }
   | { name: 'unavailable'; code: string; title: string; message: string }
   | { name: 'desktop-offline'; title: string; message: string }
-  | { name: 'locked'; title: string; message: string }
-  | { name: 'ready'; fillAvailable: boolean; pageFillable: boolean }
+  | { name: 'ready'; pageFillable: boolean }
   | { name: 'filling' }
   | { name: 'filled'; usernameFilled: boolean; passwordFilled: boolean }
   | { name: 'failed'; code: string; title: string; message: string }
@@ -46,12 +45,8 @@ export function setDesktopOffline(title: string, message: string) {
   popupState.update((s) => ({ ...s, phase: { name: 'desktop-offline', title, message } }))
 }
 
-export function setLocked(title: string, message: string) {
-  popupState.update((s) => ({ ...s, phase: { name: 'locked', title, message } }))
-}
-
-export function setReady(fillAvailable: boolean, pageFillable: boolean) {
-  popupState.update((s) => ({ ...s, phase: { name: 'ready', fillAvailable, pageFillable } }))
+export function setReady(pageFillable: boolean) {
+  popupState.update((s) => ({ ...s, phase: { name: 'ready', pageFillable } }))
 }
 
 export function setFilling() {

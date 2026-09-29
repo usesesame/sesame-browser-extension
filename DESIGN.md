@@ -18,7 +18,7 @@ The native-messaging manifest is pinned to the fixed development extension ID. T
 
 ## Fill flow
 
-1. The user opens the extension popup, clicks the inline overlay on a focused sign-in field, presses `Ctrl+Shift+L`, or chooses **Fill with Sesame** from the field's context menu. A capability probe reports whether the native host and desktop broker are present and whether the vault is unlocked.
+1. The user opens the extension popup, clicks the inline overlay on a focused sign-in field, presses `Ctrl+Shift+L`, or chooses **Fill with Sesame** from the field's context menu. A capability probe reports whether the native host and desktop broker are present.
 2. The extension inspects the active tab for one plausible sign-in surface. It supports conservatively classified username-only, password-only, and combined login steps, and fails closed on multiple forms, registration fields, and password-change fields.
 3. The user clicks **Fill this page**. The helper then checks autocomplete hints, static form attributes, and labels on related submit controls to reject signup and password-change surfaces. It never reads current input values or sends those markers away. A page loading, or the popup opening, is never enough on its own to start a fill.
 4. The extension binds the request to the active tab, window, exact normalized origin, and a random token held in that document's isolated execution world.
@@ -53,7 +53,7 @@ operations use protocol v1. Card filling uses the narrow protocol v2 contract.
 Login filling uses protocol v5. One-time codes use protocol v4.
 
 - Capability request: `{version, type: "capabilities", requestId}`.
-- Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable, locked, fillAvailable}`.
+- Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable}`.
 - Activation request: exactly `{version, type: "activate", requestId}`. It contains no site or credential fields. A running desktop focuses its main window; when the desktop is closed, the registered native helper may start only the sibling Sesame executable from its own install directory.
 - Activation response: exactly `{version, type: "activated", requestId, opened}`. Activation never starts, retries, or resumes a fill request.
 - Fill request: `{version: 5, type: "fill", requestId, origin, fields}`. `origin` is a normalized origin, not a hostname or full URL. `fields` is optional and means `both` when omitted. During migration, older version-1 helper requests without `fields` are interpreted as `both`, and version three requests keep their version three behavior.

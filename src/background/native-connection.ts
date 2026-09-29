@@ -30,7 +30,7 @@ const TRANSIENT_PROBE_ERRORS = new Set([
 export interface NativeProbeResult {
   ok: true
   protocolVersion: number
-  capabilities: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
+  capabilities: { desktopAvailable: boolean }
   latencyMs: number
   attempts: number
 }
@@ -236,7 +236,7 @@ interface ConnectOnceResult {
   ok: true
   response: {
     protocolVersion?: number
-    capabilities?: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
+    capabilities?: { desktopAvailable: boolean }
     opened?: true
     credential?: { username: string; password: string }
     matchKind?: FillMatchKind

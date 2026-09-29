@@ -10,8 +10,7 @@ export type PermissionState = 'granted' | 'not-granted'
 
 export type DesktopState =
   | { status: 'checking' }
-  | { status: 'ready'; fillAvailable: boolean }
-  | { status: 'locked' }
+  | { status: 'ready' }
   | { status: 'blocked'; code: string }
 
 export interface OnboardingView {
@@ -25,11 +24,7 @@ export interface OnboardingView {
 
 export function desktopStateFromResponse(response: unknown): DesktopState {
   const value = isRecord(response) ? response : {}
-  if (value.state === 'ready') {
-    const capabilities = isRecord(value.capabilities) ? value.capabilities : {}
-    return { status: 'ready', fillAvailable: capabilities.fillAvailable === true }
-  }
-  if (value.state === 'locked') return { status: 'locked' }
+  if (value.state === 'ready') return { status: 'ready' }
   const diagnostic = isRecord(value.diagnostic) ? value.diagnostic : {}
   const code = typeof diagnostic.code === 'string'
     ? diagnostic.code
@@ -64,10 +59,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
       headline: 'Sesame is connected',
       lead: 'One permission is left. Allow Sesame on HTTPS sites so the fill control can appear on sign-in and registration fields.',
       ready: false,
-      connection: {
-        ...READY_PRESENTATION,
-        message: desktop.fillAvailable ? '' : 'Page filling is unavailable in this desktop build.',
-      },
+      connection: READY_PRESENTATION,
       showPermissionStep: true,
       showConnectionAction: false,
     }
@@ -78,9 +70,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
       ? 'Website access is on. Connect the desktop app to make filling available.'
       : 'Connect the desktop app first, then allow website access.',
     ready: false,
-    connection: desktop.status === 'locked'
-      ? presentConnection('vault-locked')
-      : presentConnection(desktop.code),
+    connection: presentConnection(desktop.code),
     showPermissionStep: !permissionGranted,
     showConnectionAction: true,
   }

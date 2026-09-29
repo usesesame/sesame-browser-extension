@@ -12,24 +12,24 @@ describe('onboarding readiness', () => {
   })
 
   it('is ready only when the desktop is connected and website access is granted', () => {
-    expect(onboardingView('granted', { status: 'ready', fillAvailable: true }).ready).toBe(true)
-    expect(onboardingView('not-granted', { status: 'ready', fillAvailable: true }).ready).toBe(false)
-    expect(onboardingView('granted', { status: 'locked' }).ready).toBe(false)
+    expect(onboardingView('granted', { status: 'ready' }).ready).toBe(true)
+    expect(onboardingView('not-granted', { status: 'ready' }).ready).toBe(false)
+    expect(onboardingView('granted', { status: 'blocked', code: 'host-exited' }).ready).toBe(false)
     expect(onboardingView('granted', { status: 'checking' }).ready).toBe(false)
   })
 
   it('asks for website access after the desktop connects', () => {
-    const view = onboardingView('not-granted', { status: 'ready', fillAvailable: true })
+    const view = onboardingView('not-granted', { status: 'ready' })
     expect(view.showPermissionStep).toBe(true)
     expect(view.showConnectionAction).toBe(false)
     expect(view.connection.state).toBe('ready')
   })
 
-  it('offers to open and unlock a locked desktop', () => {
-    const view = onboardingView('granted', { status: 'locked' })
+  it('asks to open the desktop when the helper cannot reach it', () => {
+    const view = onboardingView('granted', { status: 'blocked', code: 'desktop-unavailable' })
     expect(view.ready).toBe(false)
     expect(view.connection.action).toBe('open-desktop')
-    expect(view.connection.actionLabel).toBe('Unlock Sesame')
+    expect(view.connection.actionLabel).toBe('Open Sesame')
   })
 
   it('treats a failed check as not ready with a retry', () => {
@@ -40,11 +40,12 @@ describe('onboarding readiness', () => {
   })
 
   it('parses background responses into desktop states', () => {
-    expect(desktopStateFromResponse({ state: 'ready', capabilities: { fillAvailable: true } }))
-      .toEqual({ status: 'ready', fillAvailable: true })
-    expect(desktopStateFromResponse({ state: 'ready', capabilities: {} }))
-      .toEqual({ status: 'ready', fillAvailable: false })
-    expect(desktopStateFromResponse({ state: 'locked' })).toEqual({ status: 'locked' })
+    expect(desktopStateFromResponse({ state: 'ready', capabilities: { desktopAvailable: true } }))
+      .toEqual({ status: 'ready' })
+    expect(desktopStateFromResponse({ state: 'ready' }))
+      .toEqual({ status: 'ready' })
+    expect(desktopStateFromResponse({ state: 'desktop-offline', diagnostic: { code: 'connected' } }))
+      .toEqual({ status: 'blocked', code: 'connected' })
     expect(desktopStateFromResponse({ state: 'unavailable', diagnostic: { code: 'host-not-found' } }))
       .toEqual({ status: 'blocked', code: 'host-not-found' })
     expect(desktopStateFromResponse({ state: 'unavailable', code: 'page-check-failed' }))

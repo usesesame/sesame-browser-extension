@@ -51,8 +51,6 @@ export type NativeResult =
 
 export interface DesktopCapabilities {
   desktopAvailable: boolean
-  locked: boolean
-  fillAvailable: boolean
 }
 
 export interface Credential {
@@ -62,9 +60,10 @@ export interface Credential {
 
 export type IdentityFields = Partial<Record<IdentityFieldKey, string>>
 
-const CAPABILITY_KEYS = new Set([
+const CAPABILITIES_KEYS = new Set([
   'version', 'type', 'requestId', 'installed', 'desktopAvailable', 'locked', 'fillAvailable',
 ])
+const DECODED_CAPABILITY_KEYS = new Set(['desktopAvailable'])
 const ACTIVATION_KEYS = new Set(['version', 'type', 'requestId', 'opened'])
 const FILL_BOTH_KEYS = new Set(['version', 'type', 'requestId', 'username', 'password'])
 const FILL_USERNAME_KEYS = new Set(['version', 'type', 'requestId', 'username'])
@@ -107,14 +106,20 @@ export function isCredential(value: unknown): value is Credential {
 }
 
 export function isCapabilities(value: unknown): value is DesktopCapabilities {
-  if (!isRecord(value) || !hasExactKeys(value, new Set(['desktopAvailable', 'locked', 'fillAvailable']))) {
+  if (!isRecord(value) || !hasExactKeys(value, DECODED_CAPABILITY_KEYS)) return false
+  return typeof value.desktopAvailable === 'boolean'
+}
+
+function legacyCapabilitiesAreWellFormed(value: Record<string, unknown>): boolean {
+  const locked = value.locked
+  const fillAvailable = value.fillAvailable
+  if ((locked === undefined) !== (fillAvailable === undefined)) return false
+  if (locked !== undefined && typeof locked !== 'boolean') return false
+  if (fillAvailable !== undefined && typeof fillAvailable !== 'boolean') return false
+  if (typeof locked === 'boolean' && typeof fillAvailable === 'boolean' && fillAvailable === locked) {
     return false
   }
-  return typeof value.desktopAvailable === 'boolean'
-    && typeof value.locked === 'boolean'
-    && typeof value.fillAvailable === 'boolean'
-    && value.fillAvailable === !value.locked
-    && (value.desktopAvailable || value.locked)
+  return true
 }
 
 export function isNativeRequest(value: unknown): value is NativeRequest {
@@ -197,12 +202,10 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (request.type === 'capabilities') {
     if (raw.type !== 'capabilities') return { ok: false, code: 'invalid-response' }
-    if (!hasExactKeys(raw, CAPABILITY_KEYS)) return { ok: false, code: 'unsafe-response' }
-    const capabilities = {
-      desktopAvailable: raw.desktopAvailable,
-      locked: raw.locked,
-      fillAvailable: raw.fillAvailable,
+    if (!hasOnlyKeys(raw, CAPABILITIES_KEYS) || !legacyCapabilitiesAreWellFormed(raw)) {
+      return { ok: false, code: 'unsafe-response' }
     }
+    const capabilities = { desktopAvailable: raw.desktopAvailable }
     if (raw.installed !== true || !isCapabilities(capabilities)) {
       return { ok: false, code: 'invalid-response' }
     }
@@ -472,4 +475,8 @@ function isWireOrigin(value: unknown): value is string {
 function hasExactKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   const keys = Object.keys(value)
   return keys.length === allowed.size && keys.every((key) => allowed.has(key))
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key))
 }

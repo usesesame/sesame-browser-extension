@@ -56,9 +56,7 @@
     await checkDesktop(true)
     status = desktop.status === 'ready'
       ? 'Sesame is connected.'
-      : desktop.status === 'locked'
-        ? 'Sesame is locked. Unlock it in the desktop app, then check again.'
-        : 'Sesame is still not connected. Install or open the desktop app, then check again.'
+      : 'Sesame is still not connected. Install or open the desktop app, then check again.'
   }
 
   async function openDesktop() {

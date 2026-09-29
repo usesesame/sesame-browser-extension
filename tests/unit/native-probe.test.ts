@@ -63,8 +63,6 @@ function capabilitiesReply(request: Record<string, unknown>): unknown {
     requestId: request.requestId,
     installed: true,
     desktopAvailable: true,
-    locked: false,
-    fillAvailable: true,
   }
 }
 
@@ -89,6 +87,26 @@ describe('native connection probe', () => {
 
     expect(result).toEqual({ ok: false, code: 'host-not-found', latencyMs: expect.any(Number), attempts: 1 })
     expect(requests).toHaveLength(1)
+  })
+
+  it('accepts a legacy capabilities reply and drops its lock state', async () => {
+    const { browser } = fakeBrowser([
+      {
+        reply: (request) => ({
+          version: 1,
+          type: 'capabilities',
+          requestId: request.requestId,
+          installed: true,
+          desktopAvailable: true,
+          locked: true,
+          fillAvailable: false,
+        }),
+      },
+    ])
+    const result = await probeNativeHost(browser, { timeoutMs: 200 })
+
+    expect(result).toMatchObject({ ok: true })
+    if (result.ok) expect(result.capabilities).toEqual({ desktopAvailable: true })
   })
 
   it('reports a failed activation instead of claiming the desktop opened', async () => {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import {
-    popupState, setChecking, setUnavailable, setDesktopOffline, setLocked, setReady,
+    popupState, setChecking, setUnavailable, setDesktopOffline, setReady,
     setHostname, setPageDiagnostic,
   } from './states/store'
   import { makeRegistrationPassword, normalizeRegistrationOutcome, type PasswordSurfaceKind } from '../content/registration'
@@ -190,7 +190,7 @@
 
   function applyConnectionState(response: any) {
     desktopState = response?.state ?? 'unavailable'
-    desktopFillAvailable = desktopState === 'ready' && response?.capabilities?.fillAvailable === true
+    desktopFillAvailable = desktopState === 'ready'
     if (response?.diagnostic?.code && response.diagnostic.code !== 'connected') {
       const code = response.diagnostic.code as string
       connection = presentConnection(code)
@@ -200,12 +200,9 @@
     if (desktopState === 'desktop-offline') {
       connection = presentConnection('desktop-unavailable')
       setDesktopOffline(connection.title, connection.message)
-    } else if (desktopState === 'locked') {
-      connection = presentConnection('vault-locked')
-      setLocked(connection.title, connection.message)
     } else if (desktopState === 'ready') {
       connection = presentConnection('connected')
-      setReady(desktopFillAvailable, false)
+      setReady(false)
     } else {
       const code = response?.diagnostic?.code ?? 'extension-error'
       connection = presentConnection(code)
@@ -370,16 +367,14 @@
   async function openDesktop() {
     if (desktopOpening) return
     desktopOpening = true
-    fillFeedback = desktopState === 'locked' ? 'Bringing Sesame forward…' : 'Opening Sesame…'
+    fillFeedback = 'Opening Sesame…'
     try {
       const result = await withTimeout(
         chrome.runtime.sendMessage({ type: 'sesame:open-desktop' }),
         POPUP_RESPONSE_TIMEOUT_MS,
       )
       if (result?.state === 'opened') {
-        fillFeedback = desktopState === 'locked'
-          ? 'Sesame is open. Unlock it to continue.'
-          : 'Sesame is opening. Unlock it, then return to this page.'
+        fillFeedback = 'Sesame is opening. Unlock it, then return to this page.'
         scheduleReconnect()
       } else {
         fillFeedback = 'Sesame could not be opened. Start the desktop app once and try again.'
@@ -727,7 +722,7 @@
   $: phase = $popupState.phase
   $: pageCard = pagePresentation(page)
   $: pageFillable = page.kind === 'login' || page.kind === 'username'
-  $: desktopNeedsOpening = desktopState === 'locked' || desktopState === 'desktop-offline' || desktopState === 'unavailable'
+  $: desktopNeedsOpening = desktopState === 'desktop-offline' || desktopState === 'unavailable'
   $: retryNote = reconnectScheduled ? 'Trying the desktop connection again while this window is open.' : ''
 </script>
 
@@ -740,10 +735,8 @@
     <StatusCard title={phase.title} message={phase.message} note={retryNote} tone="warning" />
   {:else if phase.name === 'desktop-offline'}
     <StatusCard title={phase.title} message={phase.message} note={retryNote} tone="warning" />
-  {:else if phase.name === 'locked'}
-    <StatusCard title={phase.title} message={phase.message} />
   {:else if phase.name === 'ready'}
-    <StatusCard title="Connected" message={desktopFillAvailable ? '' : 'Page filling is unavailable in this desktop build.'} tone="success" />
+    <StatusCard title="Connected" message="" tone="success" />
   {/if}
 
   <section class="page-context" class:success={pageCard.tone === 'success'} class:warning={pageCard.tone === 'warning'} aria-live="polite">
@@ -790,7 +783,7 @@
         onClick={openDesktop}
         disabled={checkingDesktop}
         loading={desktopOpening}
-        loadingLabel={desktopState === 'locked' ? 'Opening Sesame…' : 'Starting Sesame…'}
+        loadingLabel="Starting Sesame…"
         label={connection.actionLabel}
         secondary={page.kind === 'registration'}
       />

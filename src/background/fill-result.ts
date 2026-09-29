@@ -22,6 +22,5 @@ export function publicFillResult(context: FillContext): PublicFillResult {
     return { state: 'unavailable', code: phase.code }
   }
   if (phase.name === 'desktop-closed') return { state: 'unavailable', code: 'desktop-unavailable' }
-  if (phase.name === 'locked') return { state: 'unavailable', code: 'vault-locked' }
   return { state: 'unavailable', code: 'fill-failed' }
 }
