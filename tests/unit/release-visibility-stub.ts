@@ -55,6 +55,7 @@ export function trustedClick(element: Element, init: MouseEventInit = {}): void 
     bubbles: true,
     cancelable: true,
     composed: true,
+    detail: 1,
     clientX: 40,
     clientY: 30,
     ...init,

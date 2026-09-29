@@ -12,6 +12,15 @@ function giveInputsLayout() {
   }
 }
 
+function giveHostCenterLayout(): HTMLElement {
+  const host = overlayHost()
+  if (!host) throw new Error('no overlay host')
+  host.getBoundingClientRect = () => ({
+    width: 120, height: 30, top: 200, left: 100, bottom: 230, right: 220, x: 100, y: 200, toJSON: () => ({}),
+  }) as DOMRect
+  return host
+}
+
 function captureShadow(): ShadowRoot[] {
   const roots: ShadowRoot[] = []
   const original = Element.prototype.attachShadow
@@ -249,6 +258,47 @@ describe('the inline release gate', () => {
     await settle(0)
 
     expect(onFillRequest).not.toHaveBeenCalled()
+    hitTest.mockRestore()
+    detach()
+  })
+
+  it('releases a trusted keyboard click at the host center', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    const host = giveHostCenterLayout()
+    const hitPoints: Array<{ x: number; y: number }> = []
+    const hitTest = vi.spyOn(document, 'elementFromPoint').mockImplementation((x, y) => {
+      hitPoints.push({ x, y })
+      return host
+    })
+    trustedClick(button, { detail: 0, clientX: 0, clientY: 0 })
+
+    await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
+    expect(hitPoints).toEqual([{ x: 160, y: 215 }])
+    hitTest.mockRestore()
+    detach()
+  })
+
+  it('refuses a trusted keyboard click when a decoy covers the host center', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    const host = giveHostCenterLayout()
+    const decoy = document.createElement('div')
+    document.body.append(decoy)
+    const hitTest = vi.spyOn(document, 'elementFromPoint').mockImplementation((x, y) =>
+      x === 160 && y === 215 ? decoy : host,
+    )
+    trustedClick(button, { detail: 0, clientX: 0, clientY: 0 })
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
     hitTest.mockRestore()
     detach()
   })

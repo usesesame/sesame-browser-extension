@@ -164,9 +164,12 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
       if (!openNow()) return false
       if (event.type !== 'click' || event.isTrusted !== true) return false
       if (!observed || chainUnsafeForRelease(observed)) return false
+      const bounds = event.detail === 0 ? observed.getBoundingClientRect() : null
+      const pointX = bounds ? bounds.left + bounds.width / 2 : event.clientX
+      const pointY = bounds ? bounds.top + bounds.height / 2 : event.clientY
       let hit: Element | null = null
       try {
-        hit = document.elementFromPoint(event.clientX, event.clientY)
+        hit = document.elementFromPoint(pointX, pointY)
       } catch {
         return false
       }
