@@ -123,6 +123,17 @@ describe('isNativeRequest', () => {
     expect(isNativeRequest({ ...fillRequest('both'), version: 0 })).toBe(false)
   })
 
+  it('refuses older fill versions the desktop no longer serves', () => {
+    expect(isNativeRequest(legacyFillRequest())).toBe(false)
+    expect(isNativeRequest({
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      type: 'fill',
+      requestId: 'fill-3-legacy',
+      origin: 'https://example.test',
+      fields: 'both',
+    })).toBe(false)
+  })
+
   it('accepts the version five fill request shape', () => {
     expect(isNativeRequest({
       version: FILL_LOOKALIKE_PROTOCOL_VERSION,

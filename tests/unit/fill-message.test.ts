@@ -46,7 +46,7 @@ describe('inline fill messages', () => {
 
   it('keeps the ordinary no-match copy and shows no lookalike warning', () => {
     const message = fillMessage({ state: 'unavailable', code: 'no-match' })
-    expect(message).toBe('No saved login matches this site.')
+    expect(message).toBe('No saved login matches this site. Check that Sesame is unlocked, then try again.')
     expect(message).not.toMatch(/looks like/)
   })
 

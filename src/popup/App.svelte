@@ -40,7 +40,7 @@
     'invalid-response': 'Sesame returned an invalid fill response. Update or restart the app.',
     'invalid-selection': 'That login is no longer available. Try again.',
     'multiple-matches': 'More than one login form was found. Sesame did not guess.',
-    'no-match': 'No saved login matches this exact site.',
+    'no-match': 'No saved login matches this exact site. Check that Sesame is unlocked, then try again.',
     'no-fields': 'No sign-in fields to fill on this page.',
     'not-password-change-form': 'This is not a password-change form. Nothing was filled.',
     'password-change-fill-failed': 'Sesame could not create a new password for this form.',

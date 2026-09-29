@@ -122,29 +122,30 @@ function legacyCapabilitiesAreWellFormed(value: Record<string, unknown>): boolea
   return true
 }
 
+function supportsRequestVersion(type: unknown, version: unknown): boolean {
+  switch (type) {
+    case 'fill': return version === FILL_LOOKALIKE_PROTOCOL_VERSION
+    case 'totp': return version === TOTP_PROTOCOL_VERSION
+    case 'card': return version === CARD_PROTOCOL_VERSION
+    case 'capabilities':
+    case 'activate':
+    case 'identity':
+    case 'save': return version === PROTOCOL_VERSION
+    default: return false
+  }
+}
+
 export function isNativeRequest(value: unknown): value is NativeRequest {
   if (!isRecord(value)
-    || (value.version !== PROTOCOL_VERSION
-      && value.version !== CARD_PROTOCOL_VERSION
-      && value.version !== FILL_MATCH_PROTOCOL_VERSION
-      && value.version !== TOTP_PROTOCOL_VERSION
-      && value.version !== FILL_LOOKALIKE_PROTOCOL_VERSION)
-    || !isRequestId(value.requestId)) {
-    return false
-  }
-  if ((value.version === PROTOCOL_VERSION && value.type === 'card')
-    || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')
-    || (value.version === FILL_MATCH_PROTOCOL_VERSION && value.type !== 'fill')
-    || (value.version === TOTP_PROTOCOL_VERSION && value.type !== 'totp')
-    || (value.version === FILL_LOOKALIKE_PROTOCOL_VERSION && value.type !== 'fill')) {
+    || !isRequestId(value.requestId)
+    || !supportsRequestVersion(value.type, value.version)) {
     return false
   }
   if (value.type === 'capabilities' || value.type === 'activate') {
     return hasExactKeys(value, BASE_REQUEST_KEYS)
   }
   if (value.type === 'totp') {
-    return value.version === TOTP_PROTOCOL_VERSION
-      && isWireOrigin(value.origin)
+    return isWireOrigin(value.origin)
       && hasExactKeys(value, FILL_REQUEST_KEYS)
   }
   if (value.type === 'fill') {
@@ -166,7 +167,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && fields.every((field) => IDENTITY_FIELD_KEYS.includes(field as IdentityFieldKey))
   }
   if (value.type === 'card') {
-    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
+    if (!hasExactKeys(value, FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
     const fields = value.fields.split(',')
     return fields.length > 0 && new Set(fields).size === fields.length && fields.every((field) => CARD_FIELD_KEYS.includes(field as CardFieldKey))
   }

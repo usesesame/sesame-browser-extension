@@ -737,7 +737,7 @@ export function fillMessage(result: unknown): string {
   }
   const code = recordString(result, 'code') || recordString(result, 'reason')
   if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
-  if (code === 'origin-mismatch' || code === 'no-match') return 'No saved login matches this site.'
+  if (code === 'origin-mismatch' || code === 'no-match') return 'No saved login matches this site. Check that Sesame is unlocked, then try again.'
   if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this login.'
   if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
   if (code === 'desktop-unavailable' || code === 'host-not-found')
