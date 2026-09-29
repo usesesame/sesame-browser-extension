@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   attachInlineButton,
   overlayHost,
@@ -7,6 +7,7 @@ import {
   registrationChoiceOptions,
 } from '../../src/content/overlay'
 import { EFF_WORDLIST } from '../../src/content/eff-wordlist'
+import { stubVisibilityObserver, visibilityObserver } from './release-visibility-stub'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -43,6 +44,11 @@ function passwordFields(): HTMLInputElement[] {
   return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]'))
 }
 
+async function armRelease(roots: ShadowRoot[], label: string) {
+  visibilityObserver().report({ isVisible: true, isIntersecting: true })
+  await vi.waitFor(() => expect(buttonIn(roots, label).disabled).toBe(false))
+}
+
 function renderRegistration() {
   document.body.innerHTML = '<input type="password" name="new_password" /><input type="password" name="confirm_password" />'
   giveInputsLayout()
@@ -64,6 +70,11 @@ describe('the registration password format choice', () => {
     vi.restoreAllMocks()
     overlayHost()?.remove()
     document.body.innerHTML = ''
+    stubVisibilityObserver()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('offers every format on a registration form', () => {
@@ -99,6 +110,7 @@ describe('the registration password format choice', () => {
     const detach = attachInlineButton(baseOptions())
     focusFirstInput()
 
+    await armRelease(roots, 'Create password with Sesame')
     buttonIn(roots, 'Create password with Sesame').click()
 
     await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(20))
@@ -115,6 +127,7 @@ describe('the registration password format choice', () => {
     const select = selectIn(roots)
     select.value = 'passphrase:5'
     select.dispatchEvent(new Event('change'))
+    await armRelease(roots, 'Create password with Sesame')
     buttonIn(roots, 'Create password with Sesame').click()
 
     await vi.waitFor(() => expect(passwordFields()[0].value.split('-')).toHaveLength(5))
@@ -133,6 +146,7 @@ describe('the registration password format choice', () => {
     const select = selectIn(roots)
     select.value = 'characters:32'
     select.dispatchEvent(new Event('change'))
+    await armRelease(roots, 'Create password with Sesame')
     buttonIn(roots, 'Create password with Sesame').click()
 
     await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(32))

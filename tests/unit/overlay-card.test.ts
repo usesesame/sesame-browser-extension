@@ -1,6 +1,25 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
+import { stubVisibilityObserver, visibilityObserver } from './release-visibility-stub'
+
+beforeEach(() => {
+  stubVisibilityObserver()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+function buttonIn(roots: ShadowRoot[], label: string): HTMLButtonElement {
+  return roots.flatMap((root) => [...root.querySelectorAll('button')])
+    .find((button) => button.textContent === label) as HTMLButtonElement
+}
+
+async function armRelease(roots: ShadowRoot[], label: string) {
+  visibilityObserver().report({ isVisible: true, isIntersecting: true })
+  await vi.waitFor(() => expect(buttonIn(roots, label).disabled).toBe(false))
+}
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -78,6 +97,7 @@ describe('the inline control on a payment field', () => {
     giveInputsLayout()
     const detach = attachInlineButton({ ...baseOptions(), onFillCardRequest })
     focusFirstInput()
+    await armRelease(roots, 'Fill card')
     const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
       .find((candidate) => candidate.textContent === 'Fill card')!
     button.click()
@@ -134,6 +154,7 @@ describe('the inline control on a one-time code field', () => {
     giveInputsLayout()
     const detach = attachInlineButton({ ...baseOptions(), onFillOneTimeCodeRequest })
     focusFirstInput()
+    await armRelease(roots, 'Fill code')
     const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
       .find((candidate) => candidate.textContent === 'Fill code')!
     button.click()
@@ -153,6 +174,7 @@ describe('the inline control on a one-time code field', () => {
     giveInputsLayout()
     const detach = attachInlineButton({ ...baseOptions(), onFillOneTimeCodeRequest })
     focusFirstInput()
+    await armRelease(roots, 'Fill code')
     const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
       .find((candidate) => candidate.textContent === 'Fill code')!
     button.click()

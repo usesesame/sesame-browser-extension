@@ -29,9 +29,14 @@ The extension asks for the minimum permissions by default:
 The inline field button is **optional**. Onboarding or the popup asks once for
 `https://*/*` through `optional_host_permissions`. After approval, the control
 appears on focused, unambiguous sign-in and registration fields. It uses a
-closed shadow root. You can pause it for the current origin, manage exceptions
-in Options, or revoke the permission. The popup and `Ctrl+Shift+L` remain
-available.
+closed shadow root. It releases nothing until an IntersectionObserver v2
+`trackVisibility` reading stays visible for at least 100 ms, re-armed after any
+top-layer change, so a covered, transparent, or animated control cannot be
+activated. A page popover, modal dialog, fullscreen element, or a browser without
+that visibility check keeps the control disabled; use the popup in those cases.
+The popup, options, and onboarding pages refuse to run inside a frame. You can
+pause the control for the current origin, manage exceptions in Options, or
+revoke the permission. The popup and `Ctrl+Shift+L` remain available.
 
 ## Build
 
@@ -73,8 +78,10 @@ validation, and card and identity filling. `npm run test:browser` builds the
 integration bundle and drives it in a real Chromium through `tests/browser`. It
 asserts sign-in form inspection, origin and document-token binding, fail-closed
 behavior when a document is replaced between approval and fill, overlay
-detachment when a site is paused, the fill port staying closed to non-popup
-callers, and the onboarding and popup connection states and actions. Install a
+detachment when a site is paused, the inline release gate on hidden, transparent,
+and popover-covered overlays, framed extension page refusal, the fill port
+staying closed to non-popup callers, and the onboarding and popup connection
+states and actions. Install a
 test browser with `npx playwright-core install chromium`; the lockfile pins the
 browser build. Set `SESAME_BROWSER_TEST_EXECUTABLE` when Chromium is not on a
 standard path. Desktop approval needs the desktop binary, so it stays covered
