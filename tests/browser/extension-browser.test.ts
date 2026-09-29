@@ -365,6 +365,22 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   }
 }
 
+async function mouseClickClosedShadowText(target: Page, text: string): Promise<void> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const textNode = findTextNode(root, text)
+    if (!textNode?.parentId) throw new Error(`closed shadow text not found: ${text}`)
+    const { model } = await cdp.send('DOM.getBoxModel', { nodeId: textNode.parentId }) as {
+      model: { content: number[] }
+    }
+    const [left, top, , , right, bottom] = model.content
+    await target.mouse.click((left + right) / 2, (top + bottom) / 2)
+  } finally {
+    await cdp.detach()
+  }
+}
+
 function findNamedNode(node: CdpNode, nodeName: string): CdpNode | undefined {
   if (node.nodeName === nodeName) return node
   for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
@@ -1609,7 +1625,7 @@ describe('extension browser suite', () => {
         { timeout: 10000 },
       ).toBe(true)
       await waitForReleaseEnabled(current, 'Fill with Sesame')
-      await clickClosedShadowText(current, 'Fill with Sesame')
+      await mouseClickClosedShadowText(current, 'Fill with Sesame')
       await expect.poll(
         async () => current.evaluate(() => ({
           username: (document.getElementById('username') as HTMLInputElement).value,
@@ -1640,7 +1656,7 @@ describe('extension browser suite', () => {
         { timeout: 10000 },
       ).toBe(true)
       await waitForReleaseEnabled(current, 'Fill code')
-      await clickClosedShadowText(current, 'Fill code')
+      await mouseClickClosedShadowText(current, 'Fill code')
       await expect.poll(
         async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
         { timeout: 15000 },
@@ -1709,7 +1725,7 @@ describe('extension browser suite', () => {
         { timeout: 10000 },
       ).toBe(true)
       await waitForReleaseEnabled(current, 'Fill code')
-      await clickClosedShadowText(current, 'Fill code')
+      await mouseClickClosedShadowText(current, 'Fill code')
       await expect.poll(
         async () => current.evaluate(() => {
           const outer = document.getElementById('code-host')?.shadowRoot
@@ -1746,7 +1762,7 @@ describe('extension browser suite', () => {
         { timeout: 10000 },
       ).toBe(true)
       await waitForReleaseEnabled(current, 'Fill with Sesame')
-      await clickClosedShadowText(current, 'Fill with Sesame')
+      await mouseClickClosedShadowText(current, 'Fill with Sesame')
       await expect.poll(
         async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
         { timeout: 15000 },

@@ -404,16 +404,17 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     renderState()
   }
 
-  function refuseRelease(): boolean {
-    if (releaseGate.isOpen()) return false
+  function refuseRelease(event: MouseEvent): boolean {
+    if (releaseGate.allowsClick(event)) return false
     if (status) status.textContent = RELEASE_BLOCKED_MESSAGE
+    releaseGate.invalidate()
     renderState()
     return true
   }
 
-  async function onFillClick() {
+  async function onFillClick(event: MouseEvent) {
     if (filling || !anchorField) return
-    if (refuseRelease()) return
+    if (refuseRelease(event)) return
     filling = true
     renderState()
     if (status) status.textContent = ''
@@ -481,25 +482,26 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     }
   }
 
-  async function onFillCardClick() {
-    await runFillRequest(options.onFillCardRequest, cardFillMessage)
+  async function onFillCardClick(event: MouseEvent) {
+    await runFillRequest(event, options.onFillCardRequest, cardFillMessage)
   }
 
-  async function onFillCodeClick() {
-    await runFillRequest(options.onFillOneTimeCodeRequest, oneTimeCodeMessage, true)
+  async function onFillCodeClick(event: MouseEvent) {
+    await runFillRequest(event, options.onFillOneTimeCodeRequest, oneTimeCodeMessage, true)
   }
 
-  async function onFillIdentityClick() {
-    await runFillRequest(options.onFillIdentityRequest, identityFillMessage)
+  async function onFillIdentityClick(event: MouseEvent) {
+    await runFillRequest(event, options.onFillIdentityRequest, identityFillMessage)
   }
 
   async function runFillRequest(
+    event: MouseEvent,
     request: () => unknown,
     message: (result: unknown) => string,
     hideOnSuccess = false,
   ) {
     if (filling || !anchorField) return
-    if (refuseRelease()) return
+    if (refuseRelease(event)) return
     filling = true
     renderState()
     if (status) status.textContent = ''
@@ -517,9 +519,9 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     }
   }
 
-  async function onCopyPassword() {
+  async function onCopyPassword(event: MouseEvent) {
     if (!registrationPassword || !copyButton) return
-    if (refuseRelease()) return
+    if (refuseRelease(event)) return
     try {
       copyHandle?.cancel()
       copyHandle = await copyTemporarily(registrationPassword, {

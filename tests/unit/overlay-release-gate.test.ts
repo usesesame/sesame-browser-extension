@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
-import { stubVisibilityObserver, visibilityObserver } from './release-visibility-stub'
+import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -130,7 +130,7 @@ describe('the inline release gate', () => {
     visibilityObserver().report({ isVisible: true, isIntersecting: true })
     expect(button.disabled).toBe(true)
     await vi.waitFor(() => expect(button.disabled).toBe(false))
-    button.click()
+    trustedClick(button)
     await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
     detach()
   })
@@ -158,6 +158,8 @@ describe('the inline release gate', () => {
     popover.remove()
     document.body.dispatchEvent(new Event('toggle'))
     await vi.waitFor(() => expect(button.disabled).toBe(false))
+    trustedClick(button)
+    await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
     detach()
   })
 
@@ -187,6 +189,147 @@ describe('the inline release gate', () => {
     button.click()
     await settle(0)
     expect(onFillRequest).not.toHaveBeenCalled()
+    detach()
+  })
+
+  it('refuses release when the host turns transparent after confirmation', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    overlayHost()!.style.setProperty('opacity', '0', 'important')
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    expect(button.disabled).toBe(true)
+    detach()
+  })
+
+  it('refuses release when pointer events turn off after confirmation', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    overlayHost()!.style.pointerEvents = 'none'
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it('refuses an untrusted click while the gate is open', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    button.click()
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    detach()
+  })
+
+  it('refuses release when the pointer hit test lands on another element', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    const decoy = document.createElement('div')
+    document.body.append(decoy)
+    const hitTest = vi.spyOn(document, 'elementFromPoint').mockReturnValue(decoy)
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    hitTest.mockRestore()
+    detach()
+  })
+
+  it('requires a fresh reading after a failed click check', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    overlayHost()!.style.setProperty('opacity', '0', 'important')
+    trustedClick(button)
+    await settle(0)
+    expect(button.disabled).toBe(true)
+
+    overlayHost()!.style.removeProperty('opacity')
+    await settle(150)
+    expect(button.disabled).toBe(true)
+
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    trustedClick(button)
+    await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
+    detach()
+  })
+
+  it('applies the same check to copy password', async () => {
+    const roots = captureShadow()
+    document.body.innerHTML =
+      '<input type="password" name="new_password" /><input type="password" name="confirm_password" />'
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusFirstInput()
+    const create = buttonIn(roots, 'Create password with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(create.disabled).toBe(false))
+    trustedClick(create)
+    const copy = buttonIn(roots, 'Copy password')
+    await vi.waitFor(() => expect(copy.hidden).toBe(false))
+    await vi.waitFor(() => expect(copy.disabled).toBe(false))
+
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    overlayHost()!.style.setProperty('opacity', '0', 'important')
+    trustedClick(copy)
+    await settle(0)
+
+    expect(writeText).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it('re-arms only after a fresh reading once the overlay was hidden and shown', async () => {
+    const roots = captureShadow()
+    document.body.innerHTML =
+      '<input type="text" autocomplete="username" /><input type="password" />'
+    giveInputsLayout()
+    const onFillRequest = vi.fn().mockResolvedValue({ state: 'filled', matchKind: 'exact' })
+    const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
+    focusFirstInput()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    const dismiss = roots.flatMap((root) => [...root.querySelectorAll('button')])
+      .find((candidate) => candidate.title === 'Dismiss') as HTMLButtonElement
+    dismiss.click()
+    await settle(0)
+    document.querySelectorAll('input')[1].dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    await vi.waitFor(() => expect(overlayHost()?.style.display).toBe('block'))
+    await settle(150)
+
+    expect(button.disabled).toBe(true)
+    trustedClick(button)
+    await settle(0)
+    expect(onFillRequest).not.toHaveBeenCalled()
+
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    trustedClick(button)
+    await settle(0)
+    await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
     detach()
   })
 })

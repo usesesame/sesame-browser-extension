@@ -41,6 +41,26 @@ export class StubVisibilityObserver {
 export function stubVisibilityObserver(): void {
   StubVisibilityObserver.instances = []
   vi.stubGlobal('IntersectionObserver', StubVisibilityObserver)
+  const documentPrototype = Object.getPrototypeOf(document) as {
+    elementFromPoint: (x: number, y: number) => Element | null
+  }
+  documentPrototype.elementFromPoint = function elementFromPoint() {
+    const observer = StubVisibilityObserver.instances[StubVisibilityObserver.instances.length - 1]
+    return observer?.observed[observer.observed.length - 1] ?? null
+  }
+}
+
+export function trustedClick(element: Element, init: MouseEventInit = {}): void {
+  const event = new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    clientX: 40,
+    clientY: 30,
+    ...init,
+  })
+  Object.defineProperty(event, 'isTrusted', { value: true })
+  element.dispatchEvent(event)
 }
 
 export function visibilityObserver(): StubVisibilityObserver {

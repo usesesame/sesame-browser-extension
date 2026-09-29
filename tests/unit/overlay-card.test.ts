@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
-import { stubVisibilityObserver, visibilityObserver } from './release-visibility-stub'
+import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 beforeEach(() => {
   stubVisibilityObserver()
@@ -100,7 +100,7 @@ describe('the inline control on a payment field', () => {
     await armRelease(roots, 'Fill card')
     const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
       .find((candidate) => candidate.textContent === 'Fill card')!
-    button.click()
+    trustedClick(button)
     await vi.waitFor(() => expect(onFillCardRequest).toHaveBeenCalledTimes(1))
     detach()
   })
@@ -157,7 +157,7 @@ describe('the inline control on a one-time code field', () => {
     await armRelease(roots, 'Fill code')
     const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
       .find((candidate) => candidate.textContent === 'Fill code')!
-    button.click()
+    trustedClick(button)
     await vi.waitFor(() => expect(onFillOneTimeCodeRequest).toHaveBeenCalledTimes(1))
     await vi.waitFor(() => {
       expect(roots.flatMap((root) => [...root.querySelectorAll('.status')]).map((node) => node.textContent))
@@ -177,7 +177,7 @@ describe('the inline control on a one-time code field', () => {
     await armRelease(roots, 'Fill code')
     const button = roots.flatMap((root) => [...root.querySelectorAll('button')])
       .find((candidate) => candidate.textContent === 'Fill code')!
-    button.click()
+    trustedClick(button)
     await vi.waitFor(() => {
       expect(roots.flatMap((root) => [...root.querySelectorAll('.status')]).map((node) => node.textContent))
         .toContain('Open Sesame, then try again.')

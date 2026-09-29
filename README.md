@@ -31,9 +31,11 @@ The inline field button is **optional**. Onboarding or the popup asks once for
 appears on focused, unambiguous sign-in and registration fields. It uses a
 closed shadow root. It releases nothing until an IntersectionObserver v2
 `trackVisibility` reading stays visible for at least 100 ms, re-armed after any
-top-layer change, so a covered, transparent, or animated control cannot be
-activated. A page popover, modal dialog, fullscreen element, or a browser without
-that visibility check keeps the control disabled; use the popup in those cases.
+top-layer change, so the control stays disabled while it is covered, transparent
+or animated. Every release action also rechecks the host and its ancestors, the
+element under the pointer and that the click is trusted. A page popover, modal
+dialog, fullscreen element, or a browser without that visibility check keeps the
+control disabled; use the popup in those cases.
 The popup, options, and onboarding pages refuse to run inside a frame. You can
 pause the control for the current origin, manage exceptions in Options, or
 revoke the permission. The popup and `Ctrl+Shift+L` remain available.

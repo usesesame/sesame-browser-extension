@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
-import { stubVisibilityObserver, visibilityObserver } from './release-visibility-stub'
+import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 const WARNING =
   'This page looks like apple.example, a site you saved, but the address is different. Sesame did not fill anything. Check the address bar before you sign in.'
@@ -85,7 +85,7 @@ describe('the inline control after a lookalike fill result', () => {
     const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
     focusFirstInput()
     await armRelease(roots)
-    loginButton(roots).click()
+    trustedClick(loginButton(roots))
     await vi.waitFor(() => expect(statusText(roots)).toBe(WARNING))
     expect(onFillRequest).toHaveBeenCalledTimes(1)
     expect(visibleLabels(roots)).toContain('Fill with Sesame')
@@ -107,7 +107,7 @@ describe('the inline control after a lookalike fill result', () => {
     const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
     focusFirstInput()
     await armRelease(roots)
-    loginButton(roots).click()
+    trustedClick(loginButton(roots))
     await vi.waitFor(() => expect(statusText(roots)).toContain('<b>sign in</b>'))
     for (const root of roots) expect(root.querySelector('b')).toBeNull()
     detach()
@@ -121,7 +121,7 @@ describe('the inline control after a lookalike fill result', () => {
     const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
     focusFirstInput()
     await armRelease(roots)
-    loginButton(roots).click()
+    trustedClick(loginButton(roots))
     await vi.waitFor(() => expect(statusText(roots)).toBe('No saved login matches this site.'))
     expect(statusText(roots)).not.toMatch(/looks like/)
     detach()

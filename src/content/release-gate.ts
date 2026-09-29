@@ -22,7 +22,30 @@ export interface ReleaseGate {
   observe(target: Element): void
   rearm(): void
   isOpen(): boolean
+  allowsClick(event: MouseEvent): boolean
+  invalidate(): void
   destroy(): void
+}
+
+function styleUnsafeForRelease(style: CSSStyleDeclaration): boolean {
+  if (style.display === 'none') return true
+  if (style.visibility !== '' && style.visibility !== 'visible') return true
+  if (style.opacity !== '') {
+    const opacity = Number.parseFloat(style.opacity)
+    if (Number.isNaN(opacity) || opacity <= 0) return true
+  }
+  if (style.filter !== '' && style.filter !== 'none') return true
+  if (style.transform !== '' && style.transform !== 'none') return true
+  return style.pointerEvents === 'none'
+}
+
+function chainUnsafeForRelease(element: Element): boolean {
+  let node: Element | null = element
+  while (node) {
+    if (styleUnsafeForRelease(getComputedStyle(node))) return true
+    node = node.parentElement
+  }
+  return false
 }
 
 export function topLayerElementOpen(documentRef: Document = document): boolean {
@@ -92,6 +115,15 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
     if (lastVisible) hold()
   }
 
+  function openNow(): boolean {
+    return (
+      supported &&
+      confirmed &&
+      document.visibilityState === 'visible' &&
+      !topLayerElementOpen()
+    )
+  }
+
   return {
     get supported() {
       return supported
@@ -119,15 +151,30 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
     },
     rearm() {
       disarm()
+      if (observed && chainUnsafeForRelease(observed)) {
+        lastVisible = false
+        return
+      }
       if (supported && lastVisible) hold()
     },
     isOpen() {
-      return (
-        supported &&
-        confirmed &&
-        document.visibilityState === 'visible' &&
-        !topLayerElementOpen()
-      )
+      return openNow()
+    },
+    allowsClick(event: MouseEvent) {
+      if (!openNow()) return false
+      if (event.type !== 'click' || event.isTrusted !== true) return false
+      if (!observed || chainUnsafeForRelease(observed)) return false
+      let hit: Element | null = null
+      try {
+        hit = document.elementFromPoint(event.clientX, event.clientY)
+      } catch {
+        return false
+      }
+      return hit !== null && (hit === observed || observed.contains(hit))
+    },
+    invalidate() {
+      lastVisible = false
+      disarm()
     },
     destroy() {
       clearHold()

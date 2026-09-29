@@ -7,7 +7,7 @@ import {
   registrationChoiceOptions,
 } from '../../src/content/overlay'
 import { EFF_WORDLIST } from '../../src/content/eff-wordlist'
-import { stubVisibilityObserver, visibilityObserver } from './release-visibility-stub'
+import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -111,7 +111,7 @@ describe('the registration password format choice', () => {
     focusFirstInput()
 
     await armRelease(roots, 'Create password with Sesame')
-    buttonIn(roots, 'Create password with Sesame').click()
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
     await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(20))
     expect(passwordFields()[1].value).toBe(passwordFields()[0].value)
@@ -128,7 +128,7 @@ describe('the registration password format choice', () => {
     select.value = 'passphrase:5'
     select.dispatchEvent(new Event('change'))
     await armRelease(roots, 'Create password with Sesame')
-    buttonIn(roots, 'Create password with Sesame').click()
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
     await vi.waitFor(() => expect(passwordFields()[0].value.split('-')).toHaveLength(5))
     for (const word of passwordFields()[0].value.split('-')) expect(EFF_WORDLIST).toContain(word)
@@ -147,7 +147,7 @@ describe('the registration password format choice', () => {
     select.value = 'characters:32'
     select.dispatchEvent(new Event('change'))
     await armRelease(roots, 'Create password with Sesame')
-    buttonIn(roots, 'Create password with Sesame').click()
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
     await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(32))
     expect(storage.local.set).not.toHaveBeenCalled()
