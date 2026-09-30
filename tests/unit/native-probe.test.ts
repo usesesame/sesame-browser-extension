@@ -58,7 +58,7 @@ function fakeBrowser(scripts: PortScript[]): { browser: Browser; requests: Recor
 
 function capabilitiesReply(request: Record<string, unknown>): unknown {
   return {
-    version: 1,
+    version: request.version,
     type: 'capabilities',
     requestId: request.requestId,
     installed: true,
@@ -89,7 +89,7 @@ describe('native connection probe', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('accepts a legacy capabilities reply and drops its lock state', async () => {
+  it('rejects a retired capabilities reply during the current probe', async () => {
     const { browser } = fakeBrowser([
       {
         reply: (request) => ({
@@ -105,8 +105,7 @@ describe('native connection probe', () => {
     ])
     const result = await probeNativeHost(browser, { timeoutMs: 200 })
 
-    expect(result).toMatchObject({ ok: true })
-    if (result.ok) expect(result.capabilities).toEqual({ desktopAvailable: true })
+    expect(result).toMatchObject({ ok: false, code: 'protocol-mismatch' })
   })
 
   it('reports a failed activation instead of claiming the desktop opened', async () => {

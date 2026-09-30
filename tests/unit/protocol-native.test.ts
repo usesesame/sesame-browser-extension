@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_FIELD_KEYS,
   CARD_PROTOCOL_VERSION,
+  CAPABILITIES_PROTOCOL_VERSION,
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
@@ -82,7 +83,7 @@ describe('makeRequest', () => {
   })
 
   it('stamps every request with the protocol version its host checks', () => {
-    expect(makeRequest('capabilities').version).toBe(PROTOCOL_VERSION)
+    expect(makeRequest('capabilities').version).toBe(CAPABILITIES_PROTOCOL_VERSION)
     expect(makeRequest('activate').version).toBe(PROTOCOL_VERSION)
     expect(fillRequest('both').version).toBe(FILL_LOOKALIKE_PROTOCOL_VERSION)
     expect(makeCardRequest('https://checkout.example.test', ['number']).version).toBe(CARD_PROTOCOL_VERSION)
@@ -581,13 +582,13 @@ describe('capabilities responses', () => {
     expect(respond(request, { type: 'capabilities', installed: true, desktopAvailable: true }))
       .toEqual({
         ok: true,
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: CAPABILITIES_PROTOCOL_VERSION,
         capabilities: { desktopAvailable: true },
       })
   })
 
   it('accepts and drops the legacy lock fields', () => {
-    expect(respond(request, {
+    expect(respond({ ...request, version: PROTOCOL_VERSION }, {
       type: 'capabilities',
       installed: true,
       desktopAvailable: true,
@@ -641,4 +642,14 @@ describe('protocol constants', () => {
     expect(new Set(IDENTITY_FIELD_KEYS).size).toBe(IDENTITY_FIELD_KEYS.length)
     expect(IDENTITY_FIELD_KEYS).toContain('email')
   })
+})
+
+
+it('requires the new capabilities version and rejects lock fields on it', () => {
+  const request = makeRequest('capabilities')
+  expect(isNativeRequest(request)).toBe(true)
+  expect(isNativeRequest({ ...request, version: PROTOCOL_VERSION })).toBe(false)
+  expect(respond(request, {
+    type: 'capabilities', installed: true, desktopAvailable: true, locked: true, fillAvailable: false,
+  })).toEqual({ ok: false, code: 'unsafe-response' })
 })

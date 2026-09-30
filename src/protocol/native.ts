@@ -2,6 +2,7 @@
 import { isRecord } from '../shared/values'
 export const NATIVE_HOST = 'app.usesesame.browser'
 export const PROTOCOL_VERSION = 1
+export const CAPABILITIES_PROTOCOL_VERSION = 6
 export const CARD_PROTOCOL_VERSION = 2
 export const FILL_MATCH_PROTOCOL_VERSION = 3
 export const TOTP_PROTOCOL_VERSION = 4
@@ -127,7 +128,7 @@ function supportsRequestVersion(type: unknown, version: unknown): boolean {
     case 'fill': return version === FILL_LOOKALIKE_PROTOCOL_VERSION
     case 'totp': return version === TOTP_PROTOCOL_VERSION
     case 'card': return version === CARD_PROTOCOL_VERSION
-    case 'capabilities':
+    case 'capabilities': return version === CAPABILITIES_PROTOCOL_VERSION
     case 'activate':
     case 'identity':
     case 'save': return version === PROTOCOL_VERSION
@@ -203,14 +204,17 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (request.type === 'capabilities') {
     if (raw.type !== 'capabilities') return { ok: false, code: 'invalid-response' }
-    if (!hasOnlyKeys(raw, CAPABILITIES_KEYS) || !legacyCapabilitiesAreWellFormed(raw)) {
+    const allowedKeys = request.version === CAPABILITIES_PROTOCOL_VERSION
+      ? new Set(['version', 'type', 'requestId', 'installed', 'desktopAvailable'])
+      : CAPABILITIES_KEYS
+    if (!hasOnlyKeys(raw, allowedKeys) || !legacyCapabilitiesAreWellFormed(raw)) {
       return { ok: false, code: 'unsafe-response' }
     }
     const capabilities = { desktopAvailable: raw.desktopAvailable }
     if (raw.installed !== true || !isCapabilities(capabilities)) {
       return { ok: false, code: 'invalid-response' }
     }
-    return { ok: true, protocolVersion: PROTOCOL_VERSION, capabilities }
+    return { ok: true, protocolVersion: request.version, capabilities }
   }
 
   if (request.type === 'activate') {
@@ -352,7 +356,7 @@ export function makeRequest(type: 'capabilities' | 'activate' | 'fill', origin?:
       ? { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
       : { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
   }
-  return { version: PROTOCOL_VERSION, type, requestId }
+  return { version: type === 'capabilities' ? CAPABILITIES_PROTOCOL_VERSION : PROTOCOL_VERSION, type, requestId }
 }
 
 export function makeIdentityRequest(

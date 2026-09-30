@@ -2,7 +2,7 @@ import {
   NATIVE_HOST,
   NATIVE_PROBE_TIMEOUT_MS,
   NATIVE_FILL_TIMEOUT_MS,
-  PROTOCOL_VERSION,
+  CAPABILITIES_PROTOCOL_VERSION,
   makeIdentityRequest,
   makeCardRequest,
   makeRequest,
@@ -81,7 +81,7 @@ export async function probeNativeHost(
   }
   return {
     ok: true,
-    protocolVersion: result.response.protocolVersion ?? PROTOCOL_VERSION,
+    protocolVersion: result.response.protocolVersion ?? CAPABILITIES_PROTOCOL_VERSION,
     capabilities: result.response.capabilities,
     latencyMs,
     attempts,
