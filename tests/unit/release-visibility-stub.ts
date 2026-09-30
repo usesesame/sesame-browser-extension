@@ -10,7 +10,11 @@ export class StubVisibilityObserver {
 
   readonly options: IntersectionObserverInit | undefined
   readonly observed: Element[] = []
+  readonly unobserved: Element[] = []
+  reading: StubVisibilityEntry = { isVisible: true, isIntersecting: true }
   private readonly callback: IntersectionObserverCallback
+  private readonly active = new Set<Element>()
+  private readonly queued: IntersectionObserverEntry[] = []
 
   constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
     this.callback = callback
@@ -19,22 +23,32 @@ export class StubVisibilityObserver {
   }
 
   observe(target: Element) {
+    const forced = !this.active.has(target) && this.observed.includes(target)
+    this.active.add(target)
     this.observed.push(target)
+    if (!forced) return
+    queueMicrotask(() => this.report(this.reading))
   }
 
-  unobserve() {}
+  unobserve(target: Element) {
+    this.unobserved.push(target)
+    this.active.delete(target)
+  }
 
-  disconnect() {}
+  disconnect() {
+    this.active.clear()
+  }
 
   takeRecords(): IntersectionObserverEntry[] {
-    return []
+    return this.queued.splice(0)
+  }
+
+  queue(entry: StubVisibilityEntry) {
+    this.queued.push(entry as unknown as IntersectionObserverEntry)
   }
 
   report(entry: StubVisibilityEntry) {
-    this.callback(
-      [entry as unknown as IntersectionObserverEntry],
-      this as unknown as IntersectionObserver,
-    )
+    this.callback([entry as unknown as IntersectionObserverEntry], this as unknown as IntersectionObserver)
   }
 }
 

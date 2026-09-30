@@ -262,6 +262,91 @@ describe('the inline release gate', () => {
     detach()
   })
 
+  it('refuses a trusted click when a pointer-transparent cover is added', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    const observer = visibilityObserver()
+    observer.report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    observer.reading = { isVisible: false, isIntersecting: true }
+    const cover = document.createElement('div')
+    cover.style.cssText = 'position:fixed;inset:0;pointer-events:none'
+    document.body.append(cover)
+    await settle(0)
+    expect(button.disabled).toBe(true)
+
+    trustedClick(button)
+    await settle(0)
+    expect(onFillRequest).not.toHaveBeenCalled()
+
+    observer.reading = { isVisible: true, isIntersecting: true }
+    cover.remove()
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    trustedClick(button)
+    await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
+    detach()
+  })
+
+  it('refuses a trusted click when an existing cover is restyled or reclassed', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    const observer = visibilityObserver()
+    const cover = document.createElement('div')
+    cover.style.cssText = 'position:fixed;inset:0;pointer-events:none'
+    document.body.append(cover)
+    observer.report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    observer.reading = { isVisible: false, isIntersecting: true }
+    cover.setAttribute('class', 'covering')
+    await settle(0)
+    expect(button.disabled).toBe(true)
+    trustedClick(button)
+    await settle(0)
+    expect(onFillRequest).not.toHaveBeenCalled()
+
+    observer.reading = { isVisible: true, isIntersecting: true }
+    cover.removeAttribute('class')
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    observer.reading = { isVisible: false, isIntersecting: true }
+    cover.style.opacity = '1'
+    await settle(0)
+    expect(button.disabled).toBe(true)
+    trustedClick(button)
+    await settle(0)
+    expect(onFillRequest).not.toHaveBeenCalled()
+    detach()
+  })
+
+  it('applies a queued hidden reading at click time', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    const observer = visibilityObserver()
+    observer.report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    observer.queue({ isVisible: false, isIntersecting: true })
+    trustedClick(button)
+    await settle(0)
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it('keeps the gate open when only the host moves', async () => {
+    const { roots, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    overlayHost()!.style.top = '40px'
+    await settle(0)
+    expect(button.disabled).toBe(false)
+    detach()
+  })
+
   it('releases a trusted keyboard click at the host center', async () => {
     const { roots, onFillRequest, detach } = openLogin()
     const button = buttonIn(roots, 'Fill with Sesame')
@@ -303,23 +388,23 @@ describe('the inline release gate', () => {
     detach()
   })
 
-  it('requires a fresh reading after a failed click check', async () => {
+  it('re-arms from a forced reading after a failed click check', async () => {
     const { roots, onFillRequest, detach } = openLogin()
     const button = buttonIn(roots, 'Fill with Sesame')
-    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    const observer = visibilityObserver()
+    observer.report({ isVisible: true, isIntersecting: true })
     await vi.waitFor(() => expect(button.disabled).toBe(false))
 
+    observer.reading = { isVisible: false, isIntersecting: true }
     overlayHost()!.style.setProperty('opacity', '0', 'important')
     trustedClick(button)
-    await settle(0)
     expect(button.disabled).toBe(true)
+    expect(onFillRequest).not.toHaveBeenCalled()
 
+    observer.reading = { isVisible: true, isIntersecting: true }
     overlayHost()!.style.removeProperty('opacity')
-    await settle(150)
-    expect(button.disabled).toBe(true)
-
-    visibilityObserver().report({ isVisible: true, isIntersecting: true })
     await vi.waitFor(() => expect(button.disabled).toBe(false))
+
     trustedClick(button)
     await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
     detach()

@@ -10,6 +10,7 @@ declare global {
 
 const OBSERVER_DELAY_MS = 100
 const VISIBLE_HOLD_MS = 100
+const VISIBILITY_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'popover']
 
 export const RELEASE_BLOCKED_MESSAGE =
   'Sesame cannot confirm this control is visible. Close anything covering the page and try again.'
@@ -48,6 +49,12 @@ function chainUnsafeForRelease(element: Element): boolean {
   return false
 }
 
+function mutationInsideHost(record: MutationRecord, host: Element): boolean {
+  if (record.target === host || host.contains(record.target)) return true
+  const root = record.target.getRootNode()
+  return root instanceof ShadowRoot && root.host === host
+}
+
 export function topLayerElementOpen(documentRef: Document = document): boolean {
   if (documentRef.fullscreenElement) return true
   for (const candidate of documentRef.querySelectorAll('[popover], dialog[open]')) {
@@ -60,10 +67,12 @@ export function topLayerElementOpen(documentRef: Document = document): boolean {
 
 export function createReleaseGate(onChange: () => void): ReleaseGate {
   let observer: IntersectionObserver | null = null
+  let mutationObserver: MutationObserver | null = null
   let observed: Element | null = null
   let supported = false
   let lastVisible = false
   let confirmed = false
+  let readingPending = false
   let holdTimer: ReturnType<typeof setTimeout> | undefined
 
   function clearHold() {
@@ -92,6 +101,7 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
   }
 
   function onEntries(entries: IntersectionObserverEntry[]) {
+    readingPending = false
     const entry = entries[entries.length - 1]
     if (!entry) return
     if (entry.isVisible === undefined) {
@@ -108,6 +118,36 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
       return
     }
     if (!confirmed) hold()
+  }
+
+  function requestReading() {
+    if (!observer || !observed || readingPending) return
+    readingPending = true
+    observer.unobserve(observed)
+    observer.observe(observed)
+  }
+
+  function flushPendingEntries() {
+    if (!observer || typeof observer.takeRecords !== 'function') return
+    let entries: IntersectionObserverEntry[]
+    try {
+      entries = observer.takeRecords()
+    } catch {
+      return
+    }
+    if (entries.length > 0) onEntries(entries)
+  }
+
+  function invalidate() {
+    lastVisible = false
+    disarm()
+    requestReading()
+  }
+
+  function onMutations(records: MutationRecord[]) {
+    const host = observed
+    if (!host) return
+    if (records.some((record) => !mutationInsideHost(record, host))) invalidate()
   }
 
   function onLayerChange() {
@@ -144,6 +184,13 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
       }
       supported = true
       observer.observe(element)
+      mutationObserver = new MutationObserver(onMutations)
+      mutationObserver.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: VISIBILITY_ATTRIBUTES,
+      })
       document.addEventListener('toggle', onLayerChange, true)
       document.addEventListener('fullscreenchange', onLayerChange, true)
       document.addEventListener('visibilitychange', onLayerChange, true)
@@ -161,6 +208,7 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
       return openNow()
     },
     allowsClick(event: MouseEvent) {
+      flushPendingEntries()
       if (!openNow()) return false
       if (event.type !== 'click' || event.isTrusted !== true) return false
       if (!observed || chainUnsafeForRelease(observed)) return false
@@ -175,18 +223,18 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
       }
       return hit !== null && (hit === observed || observed.contains(hit))
     },
-    invalidate() {
-      lastVisible = false
-      disarm()
-    },
+    invalidate,
     destroy() {
       clearHold()
       observer?.disconnect()
       observer = null
+      mutationObserver?.disconnect()
+      mutationObserver = null
       observed = null
       supported = false
       confirmed = false
       lastVisible = false
+      readingPending = false
       document.removeEventListener('toggle', onLayerChange, true)
       document.removeEventListener('fullscreenchange', onLayerChange, true)
       document.removeEventListener('visibilitychange', onLayerChange, true)

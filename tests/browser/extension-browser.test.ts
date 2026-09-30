@@ -1161,6 +1161,57 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
+  it('refuses the inline release control while a pointer-transparent cover is over it', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+
+      const clickPoint = await withClosedShadowNode(current, 'BUTTON', async (cdp, nodeId) => {
+        const { model } = await cdp.send('DOM.getBoxModel', { nodeId }) as { model: { content: number[] } }
+        const [left, top, , , right, bottom] = model.content
+        return { x: (left + right) / 2, y: (top + bottom) / 2 }
+      })
+      await current.evaluate(() => {
+        const cover = document.createElement('div')
+        cover.id = 'sesame-test-transparent-cover'
+        cover.style.cssText =
+          'position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:rgba(255,255,255,.9)'
+        document.documentElement.append(cover)
+      })
+      await current.mouse.click(clickPoint.x, clickPoint.y)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+      expect(await closedShadowTextDisabled(current, 'Fill with Sesame')).toBe(true)
+
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await current.evaluate(() => {
+        document.getElementById('sesame-test-transparent-cover')?.remove()
+      })
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+      expect(await current.evaluate(() => document.activeElement?.id)).toBe('username')
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
   it('refuses to run an extension page inside a frame', async () => {
     const extensionId = new URL(worker.url()).host
     const popup = await context.newPage()
