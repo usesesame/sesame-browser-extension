@@ -6,6 +6,7 @@ import {
   PASSPHRASE_MAX_WORDS,
   PASSPHRASE_MIN_WORDS,
 } from '../../src/content/registration'
+import { passphraseWordCounts } from './passphrase-words'
 
 function repeatingBytes(bytes: number[]) {
   let index = 0
@@ -53,16 +54,20 @@ describe('makeRegistrationPassword', () => {
 
   it('makes a default six-word passphrase from the EFF list', () => {
     const passphrase = makeRegistrationPassword({ mode: 'passphrase' })
-    const words = passphrase.split('-')
-    expect(words).toHaveLength(PASSPHRASE_DEFAULT_WORDS)
-    for (const word of words) expect(EFF_WORDLIST).toContain(word)
+    expect(passphraseWordCounts(passphrase)).toContain(PASSPHRASE_DEFAULT_WORDS)
+  })
+
+  it('counts hyphenated list words as one word', () => {
+    expect(passphraseWordCounts('t-shirt-yo-yo-abacus')).toEqual([3])
+    expect(passphraseWordCounts('drop-down-felt-tip')).toEqual([2])
+    expect(passphraseWordCounts('abacus-qqqq')).toEqual([])
   })
 
   it('honours an explicit word count inside the bounds', () => {
-    expect(makeRegistrationPassword({ mode: 'passphrase', words: PASSPHRASE_MIN_WORDS }).split('-'))
-      .toHaveLength(PASSPHRASE_MIN_WORDS)
-    expect(makeRegistrationPassword({ mode: 'passphrase', words: PASSPHRASE_MAX_WORDS }).split('-'))
-      .toHaveLength(PASSPHRASE_MAX_WORDS)
+    expect(passphraseWordCounts(makeRegistrationPassword({ mode: 'passphrase', words: PASSPHRASE_MIN_WORDS })))
+      .toContain(PASSPHRASE_MIN_WORDS)
+    expect(passphraseWordCounts(makeRegistrationPassword({ mode: 'passphrase', words: PASSPHRASE_MAX_WORDS })))
+      .toContain(PASSPHRASE_MAX_WORDS)
   })
 
   it('refuses a word count outside the bounds', () => {

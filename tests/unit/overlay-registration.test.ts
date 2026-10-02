@@ -6,7 +6,7 @@ import {
   REGISTRATION_CHOICES,
   registrationChoiceOptions,
 } from '../../src/content/overlay'
-import { EFF_WORDLIST } from '../../src/content/eff-wordlist'
+import { passphraseWordCounts } from './passphrase-words'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -117,8 +117,7 @@ describe('the registration password format choice', () => {
     select.dispatchEvent(new Event('change'))
     buttonIn(roots, 'Create password with Sesame').click()
 
-    await vi.waitFor(() => expect(passwordFields()[0].value.split('-')).toHaveLength(5))
-    for (const word of passwordFields()[0].value.split('-')) expect(EFF_WORDLIST).toContain(word)
+    await vi.waitFor(() => expect(passphraseWordCounts(passwordFields()[0].value)).toContain(5))
     detach()
   })
 
