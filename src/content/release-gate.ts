@@ -11,6 +11,7 @@ declare global {
 const OBSERVER_DELAY_MS = 100
 const VISIBLE_HOLD_MS = 100
 const VISIBILITY_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'popover']
+const FRESH_READING_TIMEOUT_MS = 1000
 
 export const RELEASE_BLOCKED_MESSAGE =
   'Sesame cannot confirm this control is visible. Close anything covering the page and try again.'
@@ -24,6 +25,7 @@ export interface ReleaseGate {
   rearm(): void
   isOpen(): boolean
   allowsClick(event: MouseEvent): boolean
+  confirmFresh(): Promise<boolean>
   invalidate(): void
   destroy(): void
 }
@@ -74,6 +76,13 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
   let confirmed = false
   let readingPending = false
   let holdTimer: ReturnType<typeof setTimeout> | undefined
+  let freshWaiters: Array<(visible: boolean) => void> = []
+
+  function settleFresh(visible: boolean) {
+    const waiters = freshWaiters
+    freshWaiters = []
+    for (const settle of waiters) settle(visible)
+  }
 
   function clearHold() {
     if (holdTimer === undefined) return
@@ -105,6 +114,7 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
     const entry = entries[entries.length - 1]
     if (!entry) return
     if (entry.isVisible === undefined) {
+      settleFresh(false)
       if (!supported) return
       supported = false
       disarm()
@@ -113,10 +123,12 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
     }
     lastVisible = entry.isVisible === true && entry.isIntersecting === true
     if (!lastVisible) {
+      settleFresh(false)
       disarm()
       onChange()
       return
     }
+    settleFresh(openNow())
     if (!confirmed) hold()
   }
 
@@ -223,8 +235,28 @@ export function createReleaseGate(onChange: () => void): ReleaseGate {
       }
       return hit !== null && (hit === observed || observed.contains(hit))
     },
+    confirmFresh() {
+      if (!observer || !observed || !openNow()) return Promise.resolve(false)
+      const target = observed
+      const reading = observer
+      return new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          freshWaiters = freshWaiters.filter((waiter) => waiter !== settle)
+          resolve(false)
+        }, FRESH_READING_TIMEOUT_MS)
+        const settle = (visible: boolean) => {
+          clearTimeout(timer)
+          resolve(visible && observed === target && !chainUnsafeForRelease(target))
+        }
+        freshWaiters.push(settle)
+        readingPending = true
+        reading.unobserve(target)
+        reading.observe(target)
+      })
+    },
     invalidate,
     destroy() {
+      settleFresh(false)
       clearHold()
       observer?.disconnect()
       observer = null

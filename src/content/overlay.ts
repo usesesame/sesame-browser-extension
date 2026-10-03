@@ -148,6 +148,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let hideTimer: ReturnType<typeof setTimeout> | undefined
   let connectionRefreshTimer: ReturnType<typeof setTimeout> | undefined
   const releaseGate = createReleaseGate(renderState)
+  let releasing = false
 
   function ensureOverlay() {
     if (host) return
@@ -404,8 +405,18 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     renderState()
   }
 
-  function refuseRelease(event: MouseEvent): boolean {
-    if (releaseGate.allowsClick(event)) return false
+  async function refuseRelease(event: MouseEvent): Promise<boolean> {
+    if (releasing) return true
+    if (releaseGate.allowsClick(event)) {
+      releasing = true
+      let visible = false
+      try {
+        visible = await releaseGate.confirmFresh()
+      } finally {
+        releasing = false
+      }
+      if (visible) return false
+    }
     if (status) status.textContent = RELEASE_BLOCKED_MESSAGE
     releaseGate.invalidate()
     renderState()
@@ -414,7 +425,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   async function onFillClick(event: MouseEvent) {
     if (filling || !anchorField) return
-    if (refuseRelease(event)) return
+    if (await refuseRelease(event)) return
+    if (filling || !anchorField) return
     filling = true
     renderState()
     if (status) status.textContent = ''
@@ -501,7 +513,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     hideOnSuccess = false,
   ) {
     if (filling || !anchorField) return
-    if (refuseRelease(event)) return
+    if (await refuseRelease(event)) return
+    if (filling || !anchorField) return
     filling = true
     renderState()
     if (status) status.textContent = ''
@@ -521,7 +534,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   async function onCopyPassword(event: MouseEvent) {
     if (!registrationPassword || !copyButton) return
-    if (refuseRelease(event)) return
+    if (await refuseRelease(event)) return
+    if (!registrationPassword || !copyButton) return
     try {
       copyHandle?.cancel()
       copyHandle = await copyTemporarily(registrationPassword, {

@@ -29,16 +29,15 @@ The extension asks for the minimum permissions by default:
 The inline field button is **optional**. Onboarding or the popup asks once for
 `https://*/*` through `optional_host_permissions`. After approval, the control
 appears on focused, unambiguous sign-in and registration fields. It uses a
-closed shadow root. It releases nothing until an IntersectionObserver v2
-`trackVisibility` reading stays visible for at least 100 ms, re-armed after any
-top-layer change, so the control stays disabled while it is covered, transparent
-or animated. Every release action also rechecks the host and its ancestors, the
-element under the pointer and that the click is trusted. A page popover, modal
-dialog, fullscreen element, or a browser without that visibility check keeps the
-control disabled; use the popup in those cases.
-The popup, options, and onboarding pages refuse to run inside a frame. You can
-pause the control for the current origin, manage exceptions in Options, or
-revoke the permission. The popup and `Ctrl+Shift+L` remain available.
+closed shadow root and fills only after a click on a control the browser reports
+as visible, using the IntersectionObserver v2 visibility check. It checks again
+after each click and stays disabled while it is covered, transparent, or behind
+a page popover, dialog, or fullscreen element. A cover shown for less than about
+a tenth of a second can still escape that check. Browsers without the check,
+such as Firefox, fill only from the popup. Extension pages refuse to run inside
+a frame. You can pause the control for the current origin, manage exceptions in
+Options, or revoke the permission. The popup and `Ctrl+Shift+L` remain
+available.
 
 ## Build
 
@@ -81,7 +80,7 @@ integration bundle and drives it in a real Chromium through `tests/browser`. It
 asserts sign-in form inspection, origin and document-token binding, fail-closed
 behavior when a document is replaced between approval and fill, overlay
 detachment when a site is paused, the inline release gate on hidden, transparent,
-and popover-covered overlays, framed extension page refusal, the fill port
+popover-covered, and stylesheet-covered overlays, framed extension page refusal, the fill port
 staying closed to non-popup callers, and the onboarding and popup connection
 states and actions. Install a
 test browser with `npx playwright-core install chromium`; the lockfile pins the

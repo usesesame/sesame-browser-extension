@@ -467,4 +467,62 @@ describe('the inline release gate', () => {
     await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
     detach()
   })
+  it('takes a fresh reading after the click before it releases', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    const observer = visibilityObserver()
+    observer.report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    const unobservedBefore = observer.unobserved.length
+    trustedClick(button)
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(observer.unobserved.length).toBe(unobservedBefore + 1)
+    await vi.waitFor(() => expect(onFillRequest).toHaveBeenCalledTimes(1))
+    detach()
+  })
+
+  it('refuses release when a stylesheet cover appears before the next periodic reading', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    const observer = visibilityObserver()
+    observer.report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    observer.reading = { isVisible: false, isIntersecting: true }
+    trustedClick(button)
+    await settle()
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    expect(button.disabled).toBe(true)
+    detach()
+  })
+
+  it('ignores a second click while the fresh reading is pending', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    trustedClick(button)
+    trustedClick(button)
+    await settle()
+    expect(onFillRequest).toHaveBeenCalledTimes(1)
+    detach()
+  })
+
+  it('refuses release when no fresh reading arrives', async () => {
+    const { roots, onFillRequest, detach } = openLogin()
+    const button = buttonIn(roots, 'Fill with Sesame')
+    const observer = visibilityObserver()
+    observer.report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    observer.observe = () => {}
+    trustedClick(button)
+    await settle(1100)
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
 })
