@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_FIELD_KEYS,
   CARD_PROTOCOL_VERSION,
+  CAPABILITIES_PROTOCOL_VERSION,
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
@@ -82,7 +83,7 @@ describe('makeRequest', () => {
   })
 
   it('stamps every request with the protocol version its host checks', () => {
-    expect(makeRequest('capabilities').version).toBe(PROTOCOL_VERSION)
+    expect(makeRequest('capabilities').version).toBe(CAPABILITIES_PROTOCOL_VERSION)
     expect(makeRequest('activate').version).toBe(PROTOCOL_VERSION)
     expect(fillRequest('both').version).toBe(FILL_LOOKALIKE_PROTOCOL_VERSION)
     expect(makeCardRequest('https://checkout.example.test', ['number']).version).toBe(CARD_PROTOCOL_VERSION)
@@ -121,6 +122,17 @@ describe('isNativeRequest', () => {
   it('rejects another protocol version', () => {
     expect(isNativeRequest({ ...fillRequest('both'), version: FILL_LOOKALIKE_PROTOCOL_VERSION + 1 })).toBe(false)
     expect(isNativeRequest({ ...fillRequest('both'), version: 0 })).toBe(false)
+  })
+
+  it('refuses older fill versions the desktop no longer serves', () => {
+    expect(isNativeRequest(legacyFillRequest())).toBe(false)
+    expect(isNativeRequest({
+      version: FILL_MATCH_PROTOCOL_VERSION,
+      type: 'fill',
+      requestId: 'fill-3-legacy',
+      origin: 'https://example.test',
+      fields: 'both',
+    })).toBe(false)
   })
 
   it('accepts the version five fill request shape', () => {
@@ -554,14 +566,63 @@ describe('one-time code responses', () => {
 })
 
 describe('isCapabilities', () => {
-  it('holds the host to its own invariant that filling is possible only while unlocked', () => {
-    expect(isCapabilities({ desktopAvailable: true, locked: false, fillAvailable: true })).toBe(true)
-    expect(isCapabilities({ desktopAvailable: true, locked: true, fillAvailable: false })).toBe(true)
-    expect(isCapabilities({ desktopAvailable: true, locked: true, fillAvailable: true })).toBe(false)
+  it('accepts only desktop availability', () => {
+    expect(isCapabilities({ desktopAvailable: true })).toBe(true)
+    expect(isCapabilities({ desktopAvailable: false })).toBe(true)
+    expect(isCapabilities({ desktopAvailable: true, locked: false })).toBe(false)
+    expect(isCapabilities({})).toBe(false)
+    expect(isCapabilities({ desktopAvailable: 'yes' })).toBe(false)
+  })
+})
+
+describe('capabilities responses', () => {
+  const request = makeRequest('capabilities')
+
+  it('decodes a reply that carries no lock state', () => {
+    expect(respond(request, { type: 'capabilities', installed: true, desktopAvailable: true }))
+      .toEqual({
+        ok: true,
+        protocolVersion: CAPABILITIES_PROTOCOL_VERSION,
+        capabilities: { desktopAvailable: true },
+      })
   })
 
-  it('refuses a desktop that is absent yet reports itself unlocked', () => {
-    expect(isCapabilities({ desktopAvailable: false, locked: false, fillAvailable: true })).toBe(false)
+  it('accepts and drops the legacy lock fields', () => {
+    expect(respond({ ...request, version: PROTOCOL_VERSION }, {
+      type: 'capabilities',
+      installed: true,
+      desktopAvailable: true,
+      locked: true,
+      fillAvailable: false,
+    })).toEqual({
+      ok: true,
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: { desktopAvailable: true },
+    })
+  })
+
+  it('refuses a missing desktop flag, an inconsistent legacy pair, or an extra field', () => {
+    expect(respond(request, { type: 'capabilities', installed: true }))
+      .toEqual({ ok: false, code: 'invalid-response' })
+    expect(respond(request, {
+      type: 'capabilities',
+      installed: true,
+      desktopAvailable: true,
+      locked: true,
+      fillAvailable: true,
+    })).toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(request, {
+      type: 'capabilities',
+      installed: true,
+      desktopAvailable: true,
+      locked: true,
+    })).toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(request, {
+      type: 'capabilities',
+      installed: true,
+      desktopAvailable: true,
+      username: 'must-not-cross',
+    })).toEqual({ ok: false, code: 'unsafe-response' })
   })
 })
 
@@ -581,4 +642,14 @@ describe('protocol constants', () => {
     expect(new Set(IDENTITY_FIELD_KEYS).size).toBe(IDENTITY_FIELD_KEYS.length)
     expect(IDENTITY_FIELD_KEYS).toContain('email')
   })
+})
+
+
+it('requires the new capabilities version and rejects lock fields on it', () => {
+  const request = makeRequest('capabilities')
+  expect(isNativeRequest(request)).toBe(true)
+  expect(isNativeRequest({ ...request, version: PROTOCOL_VERSION })).toBe(false)
+  expect(respond(request, {
+    type: 'capabilities', installed: true, desktopAvailable: true, locked: true, fillAvailable: false,
+  })).toEqual({ ok: false, code: 'unsafe-response' })
 })

@@ -102,10 +102,10 @@ interface CardSurface {
 }
 
 export interface ConnectionState {
-  state: 'checking' | 'unavailable' | 'desktop-offline' | 'locked' | 'ready'
+  state: 'checking' | 'unavailable' | 'desktop-offline' | 'ready'
   title: string
   message: string
-  capabilities?: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
+  capabilities?: { desktopAvailable: boolean }
   diagnostic: ReturnType<typeof makeDiagnostic>
 }
 
@@ -142,7 +142,7 @@ export function createCoordinator(browser: Browser): Coordinator {
         return { state: 'unavailable', title, message, diagnostic }
       }
 
-      const { desktopAvailable, locked, fillAvailable } = result.capabilities
+      const { desktopAvailable } = result.capabilities
       if (!desktopAvailable) {
         update({ type: 'connection-checked', ok: false, code: 'desktop-unavailable' })
         const [title, message] = userMessage('desktop-unavailable')
@@ -150,22 +150,16 @@ export function createCoordinator(browser: Browser): Coordinator {
           state: 'desktop-offline',
           title,
           message,
-          capabilities: { desktopAvailable, locked: true, fillAvailable: false },
+          capabilities: result.capabilities,
           diagnostic,
         }
       }
 
-      update({ type: 'connection-checked', ok: true, desktopAvailable, locked, fillAvailable })
-      if (locked) {
-        const [title, message] = userMessage('vault-locked')
-        return { state: 'locked', title, message, capabilities: result.capabilities, diagnostic }
-      }
+      update({ type: 'connection-checked', ok: true, desktopAvailable })
       return {
         state: 'ready',
         title: 'Connected',
-        message: fillAvailable
-          ? 'Ready to fill from this browser.'
-          : 'Page filling is not available in this desktop build.',
+        message: 'Sesame asks for approval in the desktop app for every fill.',
         capabilities: result.capabilities,
         diagnostic,
       }

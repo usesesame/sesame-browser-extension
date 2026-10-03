@@ -5,7 +5,6 @@ import type { PageInspection } from '../protocol/fill'
 export type FillPhase =
   | { name: 'disconnected' }
   | { name: 'desktop-closed' }
-  | { name: 'locked' }
   | { name: 'ready' }
   | { name: 'inspecting' }
   | { name: 'awaiting-approval'; origin: string; documentToken: string }
@@ -28,7 +27,6 @@ export function transition(state: FillContext, event: FillEvent): FillContext {
     case 'connection-checked':
       if (!event.ok) return { phase: { name: 'failed', code: event.code } }
       if (!event.desktopAvailable) return { phase: { name: 'desktop-closed' } }
-      if (event.locked) return { phase: { name: 'locked' } }
       return { phase: { name: 'ready' } }
     case 'inspection-started':
       return { phase: { name: 'inspecting' } }
@@ -77,7 +75,7 @@ export function transition(state: FillContext, event: FillEvent): FillContext {
 }
 
 export type FillEvent =
-  | { type: 'connection-checked'; ok: true; desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
+  | { type: 'connection-checked'; ok: true; desktopAvailable: boolean }
   | { type: 'connection-checked'; ok: false; code: string }
   | { type: 'inspection-started' }
   | { type: 'inspection-completed'; inspection: PageInspection; documentToken: string }

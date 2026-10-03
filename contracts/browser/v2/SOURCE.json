@@ -2,8 +2,8 @@
   "contractTag": "browser-protocol-v2",
   "sourceRepository": "usesesame/sesame-desktop",
   "sourcePath": "src-tauri/contracts/browser/v2",
-  "implementationSourceCommit": "a984622fb5bb7553ad204cea3886bd669d947b4e",
-  "vendoredAt": "2026-08-20",
+  "implementationSourceCommit": "4a678788e302c30f8e0e72578e47eb5135ccb5ad",
+  "vendoredAt": "2026-09-30",
   "publication": {
     "repository": "usesesame/sesame-desktop",
     "trackingRef": "main",

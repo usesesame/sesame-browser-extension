@@ -94,3 +94,14 @@ test('the security policy tells a reporter where to send a vulnerability', () =>
   assert.match(body, /## Scope/, 'the policy has no scope, so a reporter cannot tell what counts')
   assert.match(body, /extension/i, 'the policy is not scoped to this product')
 })
+
+test('store releases require the desktop main contract before packaging', () => {
+  const workflow = read('.github', 'workflows', 'release.yml')
+  const compatibility = workflow.indexOf('run: npm run compat:host')
+  const release = workflow.indexOf('run: npm run ci')
+  assert.ok(compatibility >= 0 && release > compatibility)
+  assert.doesNotMatch(workflow, /--candidate/)
+  const checker = read('scripts', 'host-compatibility.mjs')
+  assert.match(checker, /options\.candidate && publication\.requiresDesktopMerge === true/)
+  assert.match(checker, /publication\.trackingRef \?\? 'main'/)
+})

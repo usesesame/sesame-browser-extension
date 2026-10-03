@@ -306,8 +306,8 @@ async function openReadyPopup(extensionId: string, tabId: number, url: string): 
       ? {
           state: 'ready',
           title: 'Connected',
-          message: 'Ready to fill from this browser.',
-          capabilities: { desktopAvailable: true, locked: false, fillAvailable: true },
+          message: 'Sesame asks for approval in the desktop app for every fill.',
+          capabilities: { desktopAvailable: true },
           diagnostic: { code: 'connected' },
         }
       : original(message)
@@ -472,8 +472,6 @@ async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exa
                 type: 'capabilities',
                 installed: true,
                 desktopAvailable: true,
-                locked: false,
-                fillAvailable: true,
               }))
             } else if (request?.type === 'fill') {
               const fields = request.fields ?? 'both'
@@ -1182,7 +1180,6 @@ describe('extension browser suite', () => {
   it('maps mocked desktop states to the right primary action', async () => {
     const extensionId = new URL(worker.url()).host
     const cases = [
-      { reply: { state: 'locked', diagnostic: { code: 'connected' } }, action: 'Unlock Sesame' },
       { reply: { state: 'desktop-offline', diagnostic: { code: 'connected' } }, action: 'Open Sesame' },
       { reply: { state: 'unavailable', diagnostic: { code: 'protocol-mismatch' } }, action: 'Update Sesame' },
       { reply: { state: 'unavailable', diagnostic: { code: 'host-not-found' } }, action: 'Get Sesame' },
@@ -1880,12 +1877,12 @@ describe('extension browser suite', () => {
         force: true,
       }) as {
         state?: string
-        capabilities?: { desktopAvailable?: boolean; locked?: boolean; fillAvailable?: boolean }
+        capabilities?: { desktopAvailable?: boolean }
         diagnostic?: { code?: string; host?: string }
       })
       expect(connection?.diagnostic?.host).toBe('app.usesesame.browser')
       expect(connection?.diagnostic?.code).toBe('connected')
-      expect(['desktop-offline', 'locked', 'ready']).toContain(connection?.state)
+      expect(['desktop-offline', 'ready']).toContain(connection?.state)
       if (nativeHostExpectsDesktop) {
         expect(connection?.capabilities?.desktopAvailable).toBe(true)
       }

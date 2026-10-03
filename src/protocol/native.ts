@@ -2,6 +2,7 @@
 import { isRecord } from '../shared/values'
 export const NATIVE_HOST = 'app.usesesame.browser'
 export const PROTOCOL_VERSION = 1
+export const CAPABILITIES_PROTOCOL_VERSION = 6
 export const CARD_PROTOCOL_VERSION = 2
 export const FILL_MATCH_PROTOCOL_VERSION = 3
 export const TOTP_PROTOCOL_VERSION = 4
@@ -51,8 +52,6 @@ export type NativeResult =
 
 export interface DesktopCapabilities {
   desktopAvailable: boolean
-  locked: boolean
-  fillAvailable: boolean
 }
 
 export interface Credential {
@@ -62,9 +61,10 @@ export interface Credential {
 
 export type IdentityFields = Partial<Record<IdentityFieldKey, string>>
 
-const CAPABILITY_KEYS = new Set([
+const CAPABILITIES_KEYS = new Set([
   'version', 'type', 'requestId', 'installed', 'desktopAvailable', 'locked', 'fillAvailable',
 ])
+const DECODED_CAPABILITY_KEYS = new Set(['desktopAvailable'])
 const ACTIVATION_KEYS = new Set(['version', 'type', 'requestId', 'opened'])
 const FILL_BOTH_KEYS = new Set(['version', 'type', 'requestId', 'username', 'password'])
 const FILL_USERNAME_KEYS = new Set(['version', 'type', 'requestId', 'username'])
@@ -107,39 +107,46 @@ export function isCredential(value: unknown): value is Credential {
 }
 
 export function isCapabilities(value: unknown): value is DesktopCapabilities {
-  if (!isRecord(value) || !hasExactKeys(value, new Set(['desktopAvailable', 'locked', 'fillAvailable']))) {
+  if (!isRecord(value) || !hasExactKeys(value, DECODED_CAPABILITY_KEYS)) return false
+  return typeof value.desktopAvailable === 'boolean'
+}
+
+function legacyCapabilitiesAreWellFormed(value: Record<string, unknown>): boolean {
+  const locked = value.locked
+  const fillAvailable = value.fillAvailable
+  if ((locked === undefined) !== (fillAvailable === undefined)) return false
+  if (locked !== undefined && typeof locked !== 'boolean') return false
+  if (fillAvailable !== undefined && typeof fillAvailable !== 'boolean') return false
+  if (typeof locked === 'boolean' && typeof fillAvailable === 'boolean' && fillAvailable === locked) {
     return false
   }
-  return typeof value.desktopAvailable === 'boolean'
-    && typeof value.locked === 'boolean'
-    && typeof value.fillAvailable === 'boolean'
-    && value.fillAvailable === !value.locked
-    && (value.desktopAvailable || value.locked)
+  return true
+}
+
+function supportsRequestVersion(type: unknown, version: unknown): boolean {
+  switch (type) {
+    case 'fill': return version === FILL_LOOKALIKE_PROTOCOL_VERSION
+    case 'totp': return version === TOTP_PROTOCOL_VERSION
+    case 'card': return version === CARD_PROTOCOL_VERSION
+    case 'capabilities': return version === CAPABILITIES_PROTOCOL_VERSION
+    case 'activate':
+    case 'identity':
+    case 'save': return version === PROTOCOL_VERSION
+    default: return false
+  }
 }
 
 export function isNativeRequest(value: unknown): value is NativeRequest {
   if (!isRecord(value)
-    || (value.version !== PROTOCOL_VERSION
-      && value.version !== CARD_PROTOCOL_VERSION
-      && value.version !== FILL_MATCH_PROTOCOL_VERSION
-      && value.version !== TOTP_PROTOCOL_VERSION
-      && value.version !== FILL_LOOKALIKE_PROTOCOL_VERSION)
-    || !isRequestId(value.requestId)) {
-    return false
-  }
-  if ((value.version === PROTOCOL_VERSION && value.type === 'card')
-    || (value.version === CARD_PROTOCOL_VERSION && value.type !== 'card')
-    || (value.version === FILL_MATCH_PROTOCOL_VERSION && value.type !== 'fill')
-    || (value.version === TOTP_PROTOCOL_VERSION && value.type !== 'totp')
-    || (value.version === FILL_LOOKALIKE_PROTOCOL_VERSION && value.type !== 'fill')) {
+    || !isRequestId(value.requestId)
+    || !supportsRequestVersion(value.type, value.version)) {
     return false
   }
   if (value.type === 'capabilities' || value.type === 'activate') {
     return hasExactKeys(value, BASE_REQUEST_KEYS)
   }
   if (value.type === 'totp') {
-    return value.version === TOTP_PROTOCOL_VERSION
-      && isWireOrigin(value.origin)
+    return isWireOrigin(value.origin)
       && hasExactKeys(value, FILL_REQUEST_KEYS)
   }
   if (value.type === 'fill') {
@@ -161,7 +168,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && fields.every((field) => IDENTITY_FIELD_KEYS.includes(field as IdentityFieldKey))
   }
   if (value.type === 'card') {
-    if (value.version !== CARD_PROTOCOL_VERSION || !hasExactKeys(value, FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
+    if (!hasExactKeys(value, FIELDS_REQUEST_KEYS) || !isWireOrigin(value.origin) || typeof value.fields !== 'string') return false
     const fields = value.fields.split(',')
     return fields.length > 0 && new Set(fields).size === fields.length && fields.every((field) => CARD_FIELD_KEYS.includes(field as CardFieldKey))
   }
@@ -197,16 +204,17 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (request.type === 'capabilities') {
     if (raw.type !== 'capabilities') return { ok: false, code: 'invalid-response' }
-    if (!hasExactKeys(raw, CAPABILITY_KEYS)) return { ok: false, code: 'unsafe-response' }
-    const capabilities = {
-      desktopAvailable: raw.desktopAvailable,
-      locked: raw.locked,
-      fillAvailable: raw.fillAvailable,
+    const allowedKeys = request.version === CAPABILITIES_PROTOCOL_VERSION
+      ? new Set(['version', 'type', 'requestId', 'installed', 'desktopAvailable'])
+      : CAPABILITIES_KEYS
+    if (!hasOnlyKeys(raw, allowedKeys) || !legacyCapabilitiesAreWellFormed(raw)) {
+      return { ok: false, code: 'unsafe-response' }
     }
+    const capabilities = { desktopAvailable: raw.desktopAvailable }
     if (raw.installed !== true || !isCapabilities(capabilities)) {
       return { ok: false, code: 'invalid-response' }
     }
-    return { ok: true, protocolVersion: PROTOCOL_VERSION, capabilities }
+    return { ok: true, protocolVersion: request.version, capabilities }
   }
 
   if (request.type === 'activate') {
@@ -348,7 +356,7 @@ export function makeRequest(type: 'capabilities' | 'activate' | 'fill', origin?:
       ? { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
       : { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
   }
-  return { version: PROTOCOL_VERSION, type, requestId }
+  return { version: type === 'capabilities' ? CAPABILITIES_PROTOCOL_VERSION : PROTOCOL_VERSION, type, requestId }
 }
 
 export function makeIdentityRequest(
@@ -472,4 +480,8 @@ function isWireOrigin(value: unknown): value is string {
 function hasExactKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   const keys = Object.keys(value)
   return keys.length === allowed.size && keys.every((key) => allowed.has(key))
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key))
 }

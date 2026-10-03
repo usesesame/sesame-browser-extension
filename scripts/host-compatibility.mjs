@@ -3,13 +3,14 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const CONTRACT_DIRECTORIES = ['v1', 'v2', 'v3', 'v4', 'v5']
+const CONTRACT_DIRECTORIES = ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']
 const PROTOCOL_CONSTANTS = {
   v1: 'PROTOCOL_VERSION',
   v2: 'CARD_PROTOCOL_VERSION',
   v3: 'FILL_MATCH_PROTOCOL_VERSION',
   v4: 'TOTP_PROTOCOL_VERSION',
   v5: 'FILL_LOOKALIKE_PROTOCOL_VERSION',
+  v6: 'CAPABILITIES_PROTOCOL_VERSION',
 }
 const CONTRACT_FILES = ['contract.json', 'request.schema.json', 'response.schema.json', 'vectors.json']
 const FETCH_TIMEOUT_MS = 30_000
@@ -23,6 +24,7 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index]
     if (!flag.startsWith('--')) throw new Error(`Unexpected argument: ${flag}`)
+    if (flag === '--candidate') { parsed.candidate = true; continue }
     const value = argv[index + 1]
     if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value.`)
     parsed[flag.slice(2)] = value
@@ -88,7 +90,8 @@ async function checkContract(directory) {
   const vendored = join(root, 'contracts', 'browser', directory)
   const source = JSON.parse(readFileSync(join(vendored, 'SOURCE.json'), 'utf8'))
   const publication = source.publication ?? {}
-  const trackingRef = options.ref ?? publication.trackingRef ?? 'main'
+  const trackingRef = options.ref
+    ?? (options.candidate && publication.requiresDesktopMerge === true ? source.implementationSourceCommit : publication.trackingRef ?? 'main')
 
   const pinned = await loadFixtures(source.implementationSourceCommit, directory, source)
   for (const name of CONTRACT_FILES) {

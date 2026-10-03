@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CARD_PROTOCOL_VERSION,
+  CAPABILITIES_PROTOCOL_VERSION,
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
@@ -51,6 +52,7 @@ const CONTRACTS = [
   { directory: 'v3', protocolVersion: FILL_MATCH_PROTOCOL_VERSION },
   { directory: 'v4', protocolVersion: TOTP_PROTOCOL_VERSION },
   { directory: 'v5', protocolVersion: FILL_LOOKALIKE_PROTOCOL_VERSION },
+  { directory: 'v6', protocolVersion: CAPABILITIES_PROTOCOL_VERSION },
 ]
 
 describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {
@@ -70,7 +72,10 @@ describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, 
 
   describe.each(vectors.requestCases)('request: $name', (testCase) => {
     it(`is ${testCase.valid ? 'accepted' : 'rejected'} by isNativeRequest`, () => {
-      expect(isNativeRequest(testCase.message)).toBe(testCase.valid)
+      const message = testCase.message as { type?: string; version?: number }
+      const retired = message.type === 'capabilities' && message.version !== CAPABILITIES_PROTOCOL_VERSION
+        || message.type === 'fill' && message.version !== FILL_LOOKALIKE_PROTOCOL_VERSION
+      expect(isNativeRequest(testCase.message)).toBe(testCase.valid && !retired)
     })
   })
 
@@ -80,6 +85,12 @@ describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, 
       // The v1 vectors record the exact extension result; the v2 card vectors
       // record only whether the host accepts the response.
       if (testCase.extensionResult !== undefined) {
+        const expected = testCase.extensionResult as Record<string, unknown>
+        if (directory === 'v1' && testCase.request.type === 'capabilities' && expected.ok === true) {
+          const capabilities = expected.capabilities as { desktopAvailable: boolean }
+          expect(result).toEqual({ ok: true, protocolVersion: 1, capabilities: { desktopAvailable: capabilities.desktopAvailable } })
+          return
+        }
         expect(result).toEqual(directory === 'v4'
           ? renameOneTimeCodeSuccess(testCase.extensionResult)
           : testCase.extensionResult)

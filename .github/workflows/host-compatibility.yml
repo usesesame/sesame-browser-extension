@@ -6,6 +6,12 @@ name: Host protocol compatibility
 # report that filling stopped working.
 
 on:
+  pull_request:
+    paths:
+      - 'contracts/browser/**'
+      - 'src/protocol/**'
+      - 'scripts/host-compatibility.mjs'
+      - '.github/workflows/host-compatibility.yml'
   schedule:
     - cron: '17 6 * * 1-5'
   workflow_dispatch:
@@ -39,7 +45,17 @@ jobs:
       - run: npm ci
 
       - name: Download the published desktop fixtures
-        run: node scripts/host-compatibility.mjs ${{ inputs.ref && format('--ref {0}', inputs.ref) || '' }}
+        env:
+          DESKTOP_REF: ${{ inputs.ref }}
+          CHECK_CANDIDATE: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref != 'refs/heads/main' }}
+        run: |
+          if [ -n "$DESKTOP_REF" ]; then
+            node scripts/host-compatibility.mjs --ref "$DESKTOP_REF"
+          elif [ "$CHECK_CANDIDATE" = 'true' ]; then
+            node scripts/host-compatibility.mjs --candidate
+          else
+            node scripts/host-compatibility.mjs
+          fi
 
       - name: Replay the published vectors through the extension validators
         run: npx vitest run tests/compat

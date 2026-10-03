@@ -10,7 +10,6 @@ const KNOWN_CODES = [
   'protocol-mismatch',
   'timeout',
   'desktop-unavailable',
-  'vault-locked',
   'extension-response-timeout',
   'extension-error',
   'request-mismatch',
@@ -59,13 +58,6 @@ describe('connection presentation', () => {
     expect(presentConnection('host-exited')).toMatchObject({ state: 'host-stopped', action: 'open-desktop' })
     expect(presentConnection('host-communication-failed').state).toBe('host-stopped')
     expect(presentConnection('host-disconnected').state).toBe('host-stopped')
-  })
-
-  it('names the unlock action for a locked vault', () => {
-    const presentation = presentConnection('vault-locked')
-    expect(presentation.state).toBe('locked')
-    expect(presentation.action).toBe('open-desktop')
-    expect(presentation.actionLabel).toBe('Unlock Sesame')
   })
 
   it('offers retry without navigation for timeouts and unknown codes', () => {
