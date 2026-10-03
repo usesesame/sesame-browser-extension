@@ -2,7 +2,7 @@ import {
   NATIVE_HOST,
   NATIVE_PROBE_TIMEOUT_MS,
   NATIVE_FILL_TIMEOUT_MS,
-  PROTOCOL_VERSION,
+  CAPABILITIES_PROTOCOL_VERSION,
   makeIdentityRequest,
   makeCardRequest,
   makeRequest,
@@ -30,7 +30,7 @@ const TRANSIENT_PROBE_ERRORS = new Set([
 export interface NativeProbeResult {
   ok: true
   protocolVersion: number
-  capabilities: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
+  capabilities: { desktopAvailable: boolean }
   latencyMs: number
   attempts: number
 }
@@ -81,7 +81,7 @@ export async function probeNativeHost(
   }
   return {
     ok: true,
-    protocolVersion: result.response.protocolVersion ?? PROTOCOL_VERSION,
+    protocolVersion: result.response.protocolVersion ?? CAPABILITIES_PROTOCOL_VERSION,
     capabilities: result.response.capabilities,
     latencyMs,
     attempts,
@@ -236,7 +236,7 @@ interface ConnectOnceResult {
   ok: true
   response: {
     protocolVersion?: number
-    capabilities?: { desktopAvailable: boolean; locked: boolean; fillAvailable: boolean }
+    capabilities?: { desktopAvailable: boolean }
     opened?: true
     credential?: { username: string; password: string }
     matchKind?: FillMatchKind

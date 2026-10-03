@@ -38,7 +38,7 @@ function componentsFromLockfile() {
 
 const manifestPackage = readJson('package.json')
 const identity = readJson('contracts', 'native-host.json')
-const contract = readJson('contracts', 'browser', 'v1', 'contract.json')
+const contract = readJson('contracts', 'browser', 'v6', 'contract.json')
 const version = manifestPackage.version
 
 rmSync(output, { recursive: true, force: true })

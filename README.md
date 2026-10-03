@@ -56,7 +56,7 @@ extension in Chrome or Edge.
 The fill flow is represented explicitly as:
 
 ```
-disconnected → desktop-closed → locked → ready
+disconnected → desktop-closed → ready
 ready → inspecting → awaiting-approval → filling → complete
                               ↘ cancelled / expired / failed
 ```

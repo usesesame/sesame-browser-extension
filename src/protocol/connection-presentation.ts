@@ -8,7 +8,6 @@ export type ConnectionStateName =
   | 'forbidden-host'
   | 'host-stopped'
   | 'desktop-closed'
-  | 'locked'
   | 'incompatible'
   | 'timeout'
   | 'failed'
@@ -104,14 +103,6 @@ const PRESENTATIONS: Record<string, ConnectionPresentation> = {
     message: 'The browser helper is installed, but the desktop app is not running.',
     action: 'open-desktop',
     actionLabel: 'Open Sesame',
-    canRetry: true,
-  },
-  'vault-locked': {
-    state: 'locked',
-    title: 'Unlock Sesame',
-    message: 'The desktop app is locked. Unlock the vault there, then check again.',
-    action: 'open-desktop',
-    actionLabel: 'Unlock Sesame',
     canRetry: true,
   },
   'extension-response-timeout': {

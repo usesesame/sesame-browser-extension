@@ -49,6 +49,9 @@ jobs:
             exit 1
           fi
 
+      - name: Require the desktop contracts on main
+        run: npm run compat:host
+
       - name: Run the complete release gate
         run: npm run ci
 

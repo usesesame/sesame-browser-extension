@@ -122,7 +122,7 @@ describe('the inline control after a lookalike fill result', () => {
     focusFirstInput()
     await armRelease(roots)
     trustedClick(loginButton(roots))
-    await vi.waitFor(() => expect(statusText(roots)).toBe('No saved login matches this site.'))
+    await vi.waitFor(() => expect(statusText(roots)).toBe('No saved login matches this site. Check that Sesame is unlocked, then try again.'))
     expect(statusText(roots)).not.toMatch(/looks like/)
     detach()
   })
