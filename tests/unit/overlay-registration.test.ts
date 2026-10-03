@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   attachInlineButton,
   overlayHost,
@@ -7,6 +7,7 @@ import {
   registrationChoiceOptions,
 } from '../../src/content/overlay'
 import { passphraseWordCounts } from './passphrase-words'
+import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -43,6 +44,11 @@ function passwordFields(): HTMLInputElement[] {
   return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]'))
 }
 
+async function armRelease(roots: ShadowRoot[], label: string) {
+  visibilityObserver().report({ isVisible: true, isIntersecting: true })
+  await vi.waitFor(() => expect(buttonIn(roots, label).disabled).toBe(false))
+}
+
 function renderRegistration() {
   document.body.innerHTML = '<input type="password" name="new_password" /><input type="password" name="confirm_password" />'
   giveInputsLayout()
@@ -64,6 +70,11 @@ describe('the registration password format choice', () => {
     vi.restoreAllMocks()
     overlayHost()?.remove()
     document.body.innerHTML = ''
+    stubVisibilityObserver()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('offers every format on a registration form', () => {
@@ -99,7 +110,8 @@ describe('the registration password format choice', () => {
     const detach = attachInlineButton(baseOptions())
     focusFirstInput()
 
-    buttonIn(roots, 'Create password with Sesame').click()
+    await armRelease(roots, 'Create password with Sesame')
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
     await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(20))
     expect(passwordFields()[1].value).toBe(passwordFields()[0].value)
@@ -115,7 +127,8 @@ describe('the registration password format choice', () => {
     const select = selectIn(roots)
     select.value = 'passphrase:5'
     select.dispatchEvent(new Event('change'))
-    buttonIn(roots, 'Create password with Sesame').click()
+    await armRelease(roots, 'Create password with Sesame')
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
     await vi.waitFor(() => expect(passphraseWordCounts(passwordFields()[0].value)).toContain(5))
     detach()
@@ -132,7 +145,8 @@ describe('the registration password format choice', () => {
     const select = selectIn(roots)
     select.value = 'characters:32'
     select.dispatchEvent(new Event('change'))
-    buttonIn(roots, 'Create password with Sesame').click()
+    await armRelease(roots, 'Create password with Sesame')
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
     await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(32))
     expect(storage.local.set).not.toHaveBeenCalled()

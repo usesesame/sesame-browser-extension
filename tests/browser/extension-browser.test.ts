@@ -365,6 +365,22 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   }
 }
 
+async function mouseClickClosedShadowText(target: Page, text: string): Promise<void> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const textNode = findTextNode(root, text)
+    if (!textNode?.parentId) throw new Error(`closed shadow text not found: ${text}`)
+    const { model } = await cdp.send('DOM.getBoxModel', { nodeId: textNode.parentId }) as {
+      model: { content: number[] }
+    }
+    const [left, top, , , right, bottom] = model.content
+    await target.mouse.click((left + right) / 2, (top + bottom) / 2)
+  } finally {
+    await cdp.detach()
+  }
+}
+
 function findNamedNode(node: CdpNode, nodeName: string): CdpNode | undefined {
   if (node.nodeName === nodeName) return node
   for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
@@ -438,6 +454,28 @@ async function closedShadowFocused(target: Page, nodeName: string): Promise<bool
     }) as { result: { value?: boolean } }
     return result.value === true
   })
+}
+
+async function closedShadowTextDisabled(target: Page, text: string): Promise<boolean> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const textNode = findTextNode(root, text)
+    if (!textNode?.parentId) throw new Error(`closed shadow text not found: ${text}`)
+    const objectId = await resolveClosedShadowNode(cdp, textNode.parentId)
+    const { result } = await cdp.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function () { return this.disabled === true }',
+      returnByValue: true,
+    }) as { result: { value?: boolean } }
+    return result.value === true
+  } finally {
+    await cdp.detach()
+  }
+}
+
+async function waitForReleaseEnabled(target: Page, text: string): Promise<void> {
+  await expect.poll(() => closedShadowTextDisabled(target, text), { timeout: 10000 }).toBe(false)
 }
 
 async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exact'): Promise<void> {
@@ -1015,6 +1053,239 @@ describe('extension browser suite', () => {
     })
   })
 
+  it('keeps the inline release control disabled while the overlay is hidden or transparent', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+
+      await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        host.style.setProperty('display', 'none', 'important')
+      })
+      await expect.poll(
+        () => closedShadowTextDisabled(current, 'Fill with Sesame'),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+
+      await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        host.style.removeProperty('display')
+        host.style.setProperty('opacity', '0', 'important')
+      })
+      await expect.poll(
+        () => closedShadowTextDisabled(current, 'Fill with Sesame'),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+
+      await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        host.style.removeProperty('opacity')
+      })
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('refuses the inline release control while a page popover is open', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+
+      await current.evaluate(() => {
+        const cover = document.createElement('div')
+        cover.id = 'sesame-test-cover'
+        cover.setAttribute('popover', 'manual')
+        cover.style.cssText = 'position:fixed;inset:0'
+        document.body.append(cover)
+        cover.showPopover()
+      })
+      await expect.poll(
+        () => closedShadowTextDisabled(current, 'Fill with Sesame'),
+        { timeout: 10000 },
+      ).toBe(true)
+      await clickClosedShadowText(current, 'Fill with Sesame')
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+
+      await current.evaluate(() => {
+        ;(document.getElementById('sesame-test-cover') as HTMLElement).hidePopover()
+      })
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('refuses the inline release control while a pointer-transparent cover is over it', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+
+      const clickPoint = await withClosedShadowNode(current, 'BUTTON', async (cdp, nodeId) => {
+        const { model } = await cdp.send('DOM.getBoxModel', { nodeId }) as { model: { content: number[] } }
+        const [left, top, , , right, bottom] = model.content
+        return { x: (left + right) / 2, y: (top + bottom) / 2 }
+      })
+      await current.evaluate(() => {
+        const cover = document.createElement('div')
+        cover.id = 'sesame-test-transparent-cover'
+        cover.style.cssText =
+          'position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:rgba(255,255,255,.9)'
+        document.documentElement.append(cover)
+      })
+      await current.mouse.click(clickPoint.x, clickPoint.y)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+      expect(await closedShadowTextDisabled(current, 'Fill with Sesame')).toBe(true)
+
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await current.evaluate(() => {
+        document.getElementById('sesame-test-transparent-cover')?.remove()
+      })
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+      expect(await current.evaluate(() => document.activeElement?.id)).toBe('username')
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('refuses the inline release control when a stylesheet pseudo-element covers it just before the click', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      const warmup = await context.newPage()
+      await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await expect.poll(
+        async () => warmup.evaluate(() => document.body.innerText),
+        { timeout: 5000 },
+      ).toMatch(/Connected/)
+      await warmup.close()
+      await current.evaluate(() => {
+        const style = document.createElement('style')
+        style.id = 'sesame-test-late-sheet'
+        document.head.append(style)
+      })
+      await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+
+      const clickPoint = await withClosedShadowNode(current, 'BUTTON', async (cdp, nodeId) => {
+        const { model } = await cdp.send('DOM.getBoxModel', { nodeId }) as { model: { content: number[] } }
+        const [left, top, , , right, bottom] = model.content
+        return { x: (left + right) / 2, y: (top + bottom) / 2 }
+      })
+      await current.evaluate(() => {
+        const sheet = (document.getElementById('sesame-test-late-sheet') as HTMLStyleElement).sheet!
+        sheet.insertRule(
+          'html::after{content:"";position:fixed;inset:0;z-index:2147483647;' +
+            'pointer-events:none;background:rgba(255,255,255,.95)}',
+          sheet.cssRules.length,
+        )
+      })
+      await current.mouse.click(clickPoint.x, clickPoint.y)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      expect(await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+      expect(await closedShadowTextDisabled(current, 'Fill with Sesame')).toBe(true)
+
+      await current.evaluate(() => {
+        document.getElementById('sesame-test-late-sheet')?.remove()
+      })
+    } finally {
+      await restoreWorkerMocks()
+    }
+  }, 30000)
+
+  it('refuses to run an extension page inside a frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const popup = await context.newPage()
+    try {
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+      await popup.evaluate((id) => {
+        const frame = document.createElement('iframe')
+        frame.id = 'sesame-test-frame'
+        frame.src = `chrome-extension://${id}/options.html`
+        document.body.append(frame)
+      }, extensionId)
+      const frame = popup.frameLocator('#sesame-test-frame')
+      await expect.poll(
+        async () => frame.locator('body').innerText(),
+        { timeout: 10000 },
+      ).toMatch(/does not run inside a frame/)
+      expect(await frame.locator('#app').count()).toBe(0)
+    } finally {
+      if (!popup.isClosed()) await popup.close()
+    }
+  }, 20000)
+
   it('closes the fill port for callers other than the popup', async () => {
     const guard = await worker.evaluate(
       () => new Promise<{ disconnected: boolean; messages: number }>((resolvePromise) => {
@@ -1455,7 +1726,8 @@ describe('extension browser suite', () => {
         async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
         { timeout: 10000 },
       ).toBe(true)
-      await clickClosedShadowText(current, 'Fill with Sesame')
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+      await mouseClickClosedShadowText(current, 'Fill with Sesame')
       await expect.poll(
         async () => current.evaluate(() => ({
           username: (document.getElementById('username') as HTMLInputElement).value,
@@ -1485,7 +1757,8 @@ describe('extension browser suite', () => {
         async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
         { timeout: 10000 },
       ).toBe(true)
-      await clickClosedShadowText(current, 'Fill code')
+      await waitForReleaseEnabled(current, 'Fill code')
+      await mouseClickClosedShadowText(current, 'Fill code')
       await expect.poll(
         async () => current.evaluate(() => (document.getElementById('code') as HTMLInputElement).value),
         { timeout: 15000 },
@@ -1553,7 +1826,8 @@ describe('extension browser suite', () => {
         async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
         { timeout: 10000 },
       ).toBe(true)
-      await clickClosedShadowText(current, 'Fill code')
+      await waitForReleaseEnabled(current, 'Fill code')
+      await mouseClickClosedShadowText(current, 'Fill code')
       await expect.poll(
         async () => current.evaluate(() => {
           const outer = document.getElementById('code-host')?.shadowRoot
@@ -1589,7 +1863,8 @@ describe('extension browser suite', () => {
         async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
         { timeout: 10000 },
       ).toBe(true)
-      await clickClosedShadowText(current, 'Fill with Sesame')
+      await waitForReleaseEnabled(current, 'Fill with Sesame')
+      await mouseClickClosedShadowText(current, 'Fill with Sesame')
       await expect.poll(
         async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
         { timeout: 15000 },
@@ -1654,6 +1929,7 @@ describe('extension browser suite', () => {
       { timeout: 5000 },
     ).toBe('characters:32')
 
+    await waitForReleaseEnabled(current, 'Create password with Sesame')
     await clickClosedShadowNode(current, 'BUTTON')
     await expect.poll(
       async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value.length),

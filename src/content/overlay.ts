@@ -21,10 +21,16 @@ import {
   type RegistrationPasswordOptions,
 } from './registration'
 import { copyTemporarily, type TemporaryCopyHandle } from './temporary-copy'
+import {
+  RELEASE_BLOCKED_MESSAGE,
+  RELEASE_UNSUPPORTED_MESSAGE,
+  createReleaseGate,
+} from './release-gate'
 import type { CardFieldKey, IdentityFieldKey } from '../protocol/native'
 
 // Static stylesheet set via textContent, never parsed as markup.
 const OVERLAY_CSS = `
+        :host{all:initial;opacity:1 !important}
         ${OVERLAY_TOKEN_CSS}
         .card{display:inline-flex;align-items:center;gap:8px;padding:6px 8px 6px 6px;
           font-family:var(--font-ui);background:var(--surface);color:var(--text-heading);
@@ -141,6 +147,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
   let hideTimer: ReturnType<typeof setTimeout> | undefined
   let connectionRefreshTimer: ReturnType<typeof setTimeout> | undefined
+  const releaseGate = createReleaseGate(renderState)
+  let releasing = false
 
   function ensureOverlay() {
     if (host) return
@@ -255,6 +263,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     generate.addEventListener('change', onChoiceChange)
     close.addEventListener('click', dismiss)
     document.documentElement.append(host)
+    releaseGate.observe(host)
   }
 
   function preventFieldBlur(event: MouseEvent) {
@@ -295,6 +304,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (host) {
       host.style.display = 'block'
     }
+    releaseGate.rearm()
     positionOverlay()
     renderState()
     if (!registrationMode) void refreshCapability()
@@ -304,6 +314,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (host) host.style.display = 'none'
     anchorField = null
     codeMode = false
+    releaseGate.rearm()
   }
 
   function dismiss() {
@@ -328,18 +339,23 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   function renderState() {
     if (!button) return
+    const blocked = !releaseGate.isOpen()
+    if (!releaseGate.supported && status && status.textContent === '') {
+      status.textContent = RELEASE_UNSUPPORTED_MESSAGE
+    }
     if (cardButton) {
       cardButton.hidden = !(cardMode && cardFieldsAvailable.length > 0)
-      cardButton.disabled = filling
+      cardButton.disabled = filling || blocked
       cardButton.textContent = filling ? 'Filling…' : 'Fill card'
     }
     if (codeButton) {
       codeButton.hidden = !codeMode
-      codeButton.disabled = filling
+      codeButton.disabled = filling || blocked
       codeButton.textContent = filling ? 'Filling…' : 'Fill code'
     }
     if (cardMode || codeMode) {
       button.hidden = true
+      button.disabled = filling || blocked
       if (identityButton) identityButton.hidden = true
       if (copyButton) copyButton.hidden = true
       if (choice) choice.hidden = true
@@ -352,15 +368,16 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     }
     if (identityButton) {
       identityButton.hidden = !(registrationMode && identityFieldsAvailable.length > 0)
-      identityButton.disabled = filling
+      identityButton.disabled = filling || blocked
       identityButton.textContent = filling ? 'Filling…' : 'Fill identity'
     }
+    if (copyButton) copyButton.disabled = blocked
     if (filling) {
       button.textContent = registrationMode ? 'Creating…' : 'Filling…'
       button.disabled = true
       return
     }
-    button.disabled = false
+    button.disabled = blocked
     if (registrationMode) {
       button.textContent = 'Create password with Sesame'
       return
@@ -388,7 +405,27 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     renderState()
   }
 
-  async function onFillClick() {
+  async function refuseRelease(event: MouseEvent): Promise<boolean> {
+    if (releasing) return true
+    if (releaseGate.allowsClick(event)) {
+      releasing = true
+      let visible = false
+      try {
+        visible = await releaseGate.confirmFresh()
+      } finally {
+        releasing = false
+      }
+      if (visible) return false
+    }
+    if (status) status.textContent = RELEASE_BLOCKED_MESSAGE
+    releaseGate.invalidate()
+    renderState()
+    return true
+  }
+
+  async function onFillClick(event: MouseEvent) {
+    if (filling || !anchorField) return
+    if (await refuseRelease(event)) return
     if (filling || !anchorField) return
     filling = true
     renderState()
@@ -457,23 +494,26 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     }
   }
 
-  async function onFillCardClick() {
-    await runFillRequest(options.onFillCardRequest, cardFillMessage)
+  async function onFillCardClick(event: MouseEvent) {
+    await runFillRequest(event, options.onFillCardRequest, cardFillMessage)
   }
 
-  async function onFillCodeClick() {
-    await runFillRequest(options.onFillOneTimeCodeRequest, oneTimeCodeMessage, true)
+  async function onFillCodeClick(event: MouseEvent) {
+    await runFillRequest(event, options.onFillOneTimeCodeRequest, oneTimeCodeMessage, true)
   }
 
-  async function onFillIdentityClick() {
-    await runFillRequest(options.onFillIdentityRequest, identityFillMessage)
+  async function onFillIdentityClick(event: MouseEvent) {
+    await runFillRequest(event, options.onFillIdentityRequest, identityFillMessage)
   }
 
   async function runFillRequest(
+    event: MouseEvent,
     request: () => unknown,
     message: (result: unknown) => string,
     hideOnSuccess = false,
   ) {
+    if (filling || !anchorField) return
+    if (await refuseRelease(event)) return
     if (filling || !anchorField) return
     filling = true
     renderState()
@@ -492,7 +532,9 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     }
   }
 
-  async function onCopyPassword() {
+  async function onCopyPassword(event: MouseEvent) {
+    if (!registrationPassword || !copyButton) return
+    if (await refuseRelease(event)) return
     if (!registrationPassword || !copyButton) return
     try {
       copyHandle?.cancel()
@@ -621,6 +663,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (connectionRefreshTimer !== undefined) clearTimeout(connectionRefreshTimer)
     copyHandle?.cancel()
     registrationPassword = ''
+    releaseGate.destroy()
     if ((globalThis as OverlayGlobal).sesameOverlayPresentStatus === statusPresenter) {
       ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = undefined
     }

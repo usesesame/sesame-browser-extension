@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
+import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 const WARNING =
   'This page looks like apple.example, a site you saved, but the address is different. Sesame did not fill anything. Check the address bar before you sign in.'
@@ -44,6 +45,11 @@ function focusFirstInput() {
   document.querySelector('input')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
 }
 
+async function armRelease(roots: ShadowRoot[]) {
+  visibilityObserver().report({ isVisible: true, isIntersecting: true })
+  await vi.waitFor(() => expect(loginButton(roots).disabled).toBe(false))
+}
+
 function baseOptions() {
   return {
     onFillRequest: vi.fn(),
@@ -60,6 +66,11 @@ describe('the inline control after a lookalike fill result', () => {
     vi.restoreAllMocks()
     overlayHost()?.remove()
     document.body.innerHTML = ''
+    stubVisibilityObserver()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('shows the warning in the status line without adding an action', async () => {
@@ -73,7 +84,8 @@ describe('the inline control after a lookalike fill result', () => {
     giveInputsLayout()
     const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
     focusFirstInput()
-    loginButton(roots).click()
+    await armRelease(roots)
+    trustedClick(loginButton(roots))
     await vi.waitFor(() => expect(statusText(roots)).toBe(WARNING))
     expect(onFillRequest).toHaveBeenCalledTimes(1)
     expect(visibleLabels(roots)).toContain('Fill with Sesame')
@@ -94,7 +106,8 @@ describe('the inline control after a lookalike fill result', () => {
     giveInputsLayout()
     const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
     focusFirstInput()
-    loginButton(roots).click()
+    await armRelease(roots)
+    trustedClick(loginButton(roots))
     await vi.waitFor(() => expect(statusText(roots)).toContain('<b>sign in</b>'))
     for (const root of roots) expect(root.querySelector('b')).toBeNull()
     detach()
@@ -107,7 +120,8 @@ describe('the inline control after a lookalike fill result', () => {
     giveInputsLayout()
     const detach = attachInlineButton({ ...baseOptions(), onFillRequest })
     focusFirstInput()
-    loginButton(roots).click()
+    await armRelease(roots)
+    trustedClick(loginButton(roots))
     await vi.waitFor(() => expect(statusText(roots)).toBe('No saved login matches this site. Check that Sesame is unlocked, then try again.'))
     expect(statusText(roots)).not.toMatch(/looks like/)
     detach()
