@@ -133,11 +133,17 @@ tests and integration builds do not replace either store's installation flow.
 The desktop owns the native-messaging protocol. This repository keeps closed
 schemas, fictional test vectors, source commits, and SHA-256 digests in
 `contracts/browser/`. Version 1 covers capabilities, activation, identity
-filling, and save requests. Version 2 covers card filling. Version 3 covers
-login filling. Version 4 covers one-time codes.
+filling, and save requests. Version 2 covers card filling. Version 3 and
+version 5 cover login filling, and the extension sends version 5. Version 4
+covers one-time codes. Version 6 covers the capability probe and lists the
+version each operation uses.
 
 Changing a wire shape needs a tagged contract and an explicit compatibility
 decision. Updating TypeScript types alone is not enough.
+
+The extension needs Sesame desktop 0.3.0 or later. A desktop older than 0.3.0
+does not speak version 6, so the capability probe fails with a protocol
+mismatch and the extension asks the user to update the desktop app.
 
 Each request uses the version owned by its operation. The general operations
 remain on version 1 while card requests use version 2; neither version is a
@@ -215,7 +221,9 @@ credential through an environment variable or test log.
 
 ## Not in this beta
 
-- Firefox (requires separate manifest and native-host allowlist format).
+- A supported Firefox release. An experimental Firefox package builds from
+  `manifests/firefox.json` and is checked against the pinned Gecko id, but no
+  test runs it in Firefox.
 - Automatic submission, passkey interception, browsing-history collection,
   analytics, or background page scanning.
 - Credentials are never written to `chrome.storage`, diagnostics, console
