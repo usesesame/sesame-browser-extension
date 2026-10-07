@@ -35,7 +35,7 @@
     },
     "fill-identity": {
       "suggested_key": {
-        "default": "Ctrl+Shift+I",
+        "default": "Alt+Shift+F",
         "mac": "Command+Shift+I"
       },
       "description": "Fill name, address, and contact fields with Sesame"

@@ -174,7 +174,7 @@
     {/if}
 
     {#if status}<p class="status" role="status">{status}</p>{/if}
-    <p class="shortcut">{POPUP_HINT} Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> for an identity.</p>
+    <p class="shortcut">{POPUP_HINT} Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> for an identity.</p>
   </div>
 </main>
 
