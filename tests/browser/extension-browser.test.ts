@@ -492,6 +492,78 @@ async function closedShadowTextDisabled(target: Page, text: string): Promise<boo
   }
 }
 
+
+async function withArmedLoginOverlay(run: (current: Page) => Promise<void>): Promise<void> {
+  const extensionId = new URL(worker.url()).host
+  const current = await openFixture('/login')
+  const fixtureUrl = current.url()
+  const tabId = await findTabId(fixtureUrl)
+  expect(tabId).toBeGreaterThan(0)
+  await overrideWorkerTab(tabId, fixtureUrl)
+  await mockNativeHostInWorker()
+  try {
+    const warmup = await context.newPage()
+    await warmup.goto(`chrome-extension://${extensionId}/popup.html`)
+    await expect.poll(
+      async () => warmup.evaluate(() => document.body.innerText),
+      { timeout: 5000 },
+    ).toMatch(/Connected/)
+    await warmup.close()
+    await current.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+    await expect.poll(
+      async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+      { timeout: 10000 },
+    ).toBe(true)
+    await waitForReleaseEnabled(current, 'Fill with Sesame')
+    await run(current)
+  } finally {
+    await restoreWorkerMocks()
+  }
+}
+
+async function overlayButtonCenter(target: Page): Promise<{ x: number; y: number }> {
+  return withClosedShadowNode(target, 'BUTTON', async (cdp, nodeId) => {
+    const { model } = await cdp.send('DOM.getBoxModel', { nodeId }) as { model: { content: number[] } }
+    const [left, top, , , right, bottom] = model.content
+    return { x: (left + right) / 2, y: (top + bottom) / 2 }
+  })
+}
+
+async function runOnNextPointerDown(target: Page, script: string): Promise<void> {
+  await target.evaluate((source) => {
+    window.addEventListener('pointerdown', () => { new Function(source)() }, { capture: true, once: true })
+  }, script)
+}
+
+async function adoptSheetOnNextPointerDown(target: Page, css: string): Promise<void> {
+  await runOnNextPointerDown(target, `
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(${JSON.stringify(css)})
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+  `)
+}
+
+async function dropAdoptedSheets(target: Page): Promise<void> {
+  await target.evaluate(() => { document.adoptedStyleSheets = [] })
+}
+
+async function expectNothingFilled(target: Page): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  expect(await target.evaluate(() => (document.getElementById('password') as HTMLInputElement).value)).toBe('')
+  expect(await countNativeFills()).toBe(0)
+}
+
+async function expectFillsAfterRecovery(target: Page): Promise<void> {
+  await target.evaluate(() => (document.getElementById('username') as HTMLInputElement).focus())
+  await waitForReleaseEnabled(target, 'Fill with Sesame')
+  await mouseClickClosedShadowText(target, 'Fill with Sesame')
+  await expect.poll(
+    async () => target.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
+    { timeout: 10000 },
+  ).toBe('fictional-inline-pass')
+  expect(await countNativeFills()).toBe(1)
+}
+
 async function waitForReleaseEnabled(target: Page, text: string): Promise<void> {
   await expect.poll(() => closedShadowTextDisabled(target, text), { timeout: 10000 }).toBe(false)
 }
@@ -501,16 +573,19 @@ async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exa
     const target = globalThis as typeof globalThis & {
       __sesameTestRestore?: () => void
       __sesameSaveRequests?: number
+      __sesameFillRequests?: number
       __sesameLastSave?: Record<string, unknown>
     }
     const runtime = chrome.runtime as unknown as { connectNative: unknown }
     const original = runtime.connectNative
     const previous = target.__sesameTestRestore
     target.__sesameSaveRequests = 0
+    target.__sesameFillRequests = 0
     delete target.__sesameLastSave
     target.__sesameTestRestore = () => {
       runtime.connectNative = original
       delete target.__sesameSaveRequests
+      delete target.__sesameFillRequests
       delete target.__sesameLastSave
       previous?.()
     }
@@ -530,6 +605,7 @@ async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exa
                 desktopAvailable: true,
               }))
             } else if (request?.type === 'fill') {
+              target.__sesameFillRequests = (target.__sesameFillRequests ?? 0) + 1
               const fields = request.fields ?? 'both'
               messageListeners.forEach((listener) => listener({
                 ...base,
@@ -599,6 +675,13 @@ async function countNativeSaves(): Promise<number> {
   return worker.evaluate(() => {
     const target = globalThis as typeof globalThis & { __sesameSaveRequests?: number }
     return target.__sesameSaveRequests ?? 0
+  })
+}
+
+async function countNativeFills(): Promise<number> {
+  return worker.evaluate(() => {
+    const target = globalThis as typeof globalThis & { __sesameFillRequests?: number }
+    return target.__sesameFillRequests ?? 0
   })
 }
 
@@ -1281,6 +1364,149 @@ describe('extension browser suite', () => {
       await restoreWorkerMocks()
     }
   }, 30000)
+
+  it('keeps the control reachable only through its own closed shadow root', async () => {
+    await withArmedLoginOverlay(async (current) => {
+      const probe = await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        const reachable = host.querySelector('button')
+        const shadow = host.shadowRoot
+        let writeThrew = false
+        try {
+          ;(shadow as unknown as { querySelector: (selector: string) => HTMLElement }).querySelector('button').style.opacity = '0'
+        } catch {
+          writeThrew = true
+        }
+        return { reachable: reachable !== null, shadow: shadow === null, writeThrew }
+      })
+      expect(probe).toEqual({ reachable: false, shadow: true, writeThrew: true })
+      expect(await closedShadowTextDisabled(current, 'Fill with Sesame')).toBe(false)
+    })
+  }, 30000)
+
+  it('keeps the control fully opaque when page script sets opacity on the root element', async () => {
+    await withArmedLoginOverlay(async (current) => {
+      const opacities = await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        const read: string[] = []
+        for (const priority of ['', 'important']) {
+          host.style.setProperty('opacity', '0.01', priority)
+          read.push(getComputedStyle(host).opacity)
+        }
+        return read
+      })
+      expect(opacities).toEqual(['1', '1'])
+    })
+  }, 30000)
+
+  it.each(['mask-image', '-webkit-mask-image', '-webkit-mask-box-image-source'])(
+    'refuses release when page script masks the root element to nothing with %s',
+    async (property) => {
+      await withArmedLoginOverlay(async (current) => {
+        await runOnNextPointerDown(current, `
+          const host = document.querySelector('[id^="sesame-overlay-"]')
+          host.style.setProperty(${JSON.stringify(property)}, 'linear-gradient(transparent, transparent)', 'important')
+        `)
+        await mouseClickClosedShadowText(current, 'Fill with Sesame')
+        await expectNothingFilled(current)
+        await current.evaluate((name) => {
+          document.querySelector<HTMLElement>('[id^="sesame-overlay-"]')?.style.removeProperty(name)
+        }, property)
+        await expectFillsAfterRecovery(current)
+      })
+    },
+    30000,
+  )
+
+  it('refuses release when a page stylesheet fades the html element that holds the control', async () => {
+    await withArmedLoginOverlay(async (current) => {
+      await adoptSheetOnNextPointerDown(current, 'html{opacity:.01 !important}')
+      await mouseClickClosedShadowText(current, 'Fill with Sesame')
+      await expectNothingFilled(current)
+      await dropAdoptedSheets(current)
+      await expectFillsAfterRecovery(current)
+    })
+  }, 30000)
+
+  it('refuses release when page script moves the control under a faded wrapper', async () => {
+    await withArmedLoginOverlay(async (current) => {
+      await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        const wrapper = document.createElement('div')
+        wrapper.id = 'sesame-test-wrapper'
+        wrapper.style.opacity = '0.01'
+        document.body.append(wrapper)
+        wrapper.append(host)
+      })
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      await mouseClickClosedShadowText(current, 'Fill with Sesame')
+      await expectNothingFilled(current)
+      await current.evaluate(() => {
+        const host = document.querySelector('[id^="sesame-overlay-"]') as HTMLElement
+        document.documentElement.append(host)
+        document.getElementById('sesame-test-wrapper')?.remove()
+      })
+      await expectFillsAfterRecovery(current)
+    })
+  }, 30000)
+
+  it('refuses release when a small pointer-transparent element sits over the button', async () => {
+    await withArmedLoginOverlay(async (current) => {
+      const point = await overlayButtonCenter(current)
+      await adoptSheetOnNextPointerDown(
+        current,
+        `html::after{content:"";position:fixed;left:${point.x - 20}px;top:${point.y - 12}px;width:40px;height:24px;` +
+          'z-index:2147483647;pointer-events:none;background:#fff}',
+      )
+      await current.mouse.click(point.x, point.y)
+      await expectNothingFilled(current)
+      await dropAdoptedSheets(current)
+      await expectFillsAfterRecovery(current)
+    })
+  }, 30000)
+
+  it('refuses release when a pointer-transparent popover covers the page after the press', async () => {
+    await withArmedLoginOverlay(async (current) => {
+      const point = await overlayButtonCenter(current)
+      await runOnNextPointerDown(current, `
+        const popover = document.getElementById('sesame-test-popover')
+        popover.style.display = ''
+        popover.showPopover()
+      `)
+      await current.evaluate(() => {
+        const popover = document.createElement('div')
+        popover.id = 'sesame-test-popover'
+        popover.setAttribute('popover', 'manual')
+        popover.style.cssText =
+          'pointer-events:none;display:none;position:fixed;top:0;left:-10px;width:101%;height:101%;opacity:.5'
+        document.body.append(popover)
+      })
+      await current.mouse.click(point.x, point.y)
+      await expectNothingFilled(current)
+      await current.evaluate(() => document.getElementById('sesame-test-popover')?.remove())
+      await expectFillsAfterRecovery(current)
+    })
+  }, 30000)
+
+  it('does not let a web page load an extension page in a frame', async () => {
+    const extensionId = new URL(worker.url()).host
+    const current = await openFixture('/login')
+    await current.evaluate((id) => {
+      for (const file of ['popup.html', 'options.html', 'onboarding.html']) {
+        const frame = document.createElement('iframe')
+        frame.className = 'sesame-test-extension-frame'
+        frame.style.opacity = '0'
+        frame.src = `chrome-extension://${id}/${file}`
+        document.body.append(frame)
+      }
+    }, extensionId)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const loaded = current.frames().filter((frame) => frame.url().startsWith('chrome-extension://'))
+    expect(loaded).toEqual([])
+    await current.evaluate(() => {
+      for (const frame of document.querySelectorAll('.sesame-test-extension-frame')) frame.remove()
+    })
+  }, 20000)
 
   it('refuses to run an extension page inside a frame', async () => {
     const extensionId = new URL(worker.url()).host
