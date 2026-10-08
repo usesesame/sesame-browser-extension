@@ -30,6 +30,13 @@ async function checkConnection(force = false) {
   return connectionCheck
 }
 
+async function fillCardWhenEnabled() {
+  const settings = await loadInlineSettings()
+  return settings.cardSuggestionsEnabled
+    ? coordinator.fillCardActivePage()
+    : { ok: false as const, code: 'card-suggestions-disabled' }
+}
+
 const ensureContentScriptRegistered = createInlineRegistrationSync(() =>
   syncInlineContentScript({ permissions: chrome.permissions, scripting: chrome.scripting }))
 
@@ -64,9 +71,14 @@ async function syncInlineAccess() {
 }
 
 chrome.permissions.onAdded.addListener(() => { void syncInlineAccess() })
-chrome.permissions.onRemoved.addListener(() => { void syncInlineAccess() })
+chrome.permissions.onRemoved.addListener(() => {
+  coordinator.cancelActive()
+  void syncInlineAccess()
+})
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && INLINE_SETTINGS_KEY in changes) void reconcileOpenTabs()
+  if (areaName !== 'local' || !(INLINE_SETTINGS_KEY in changes)) return
+  coordinator.cancelActive()
+  void reconcileOpenTabs()
 })
 chrome.runtime.onInstalled.addListener((details) => {
   void syncInlineAccess()
@@ -90,11 +102,15 @@ void ensureFillContextMenu(chrome.contextMenus)
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   saveSession.handleTabUpdated(tabId, changeInfo)
-  if (typeof changeInfo.url === 'string' || changeInfo.status === 'loading') lastFill.clear(tabId)
+  if (typeof changeInfo.url === 'string' || changeInfo.status === 'loading') {
+    lastFill.clear(tabId)
+    coordinator.cancelActive(tabId)
+  }
 })
 chrome.tabs.onRemoved.addListener((tabId) => {
   saveSession.handleTabRemoved(tabId)
   lastFill.clear(tabId)
+  coordinator.cancelActive(tabId)
 })
 
 function recordLastFillResult(result: FillContext): void {
@@ -120,14 +136,11 @@ chrome.runtime.onConnect.addListener((port) => {
     return
   }
   if (port.name === 'sesame:fill') {
-    const controller = new AbortController()
-    port.onDisconnect.addListener(() => controller.abort())
-
     let started = false
     port.onMessage.addListener((message) => {
       if (started || message?.type !== 'start') return
       started = true
-      coordinator.fillActivePage(controller.signal).then((result) => {
+      coordinator.fillActivePage().then((result) => {
         recordLastFillResult(result)
         try { port.postMessage(publicFillResult(result)) } catch { /* noop */ }
       }).catch(() => {
@@ -137,9 +150,6 @@ chrome.runtime.onConnect.addListener((port) => {
     return
   }
   if (port.name === 'sesame:change-password') {
-    const controller = new AbortController()
-    port.onDisconnect.addListener(() => controller.abort())
-
     let started = false
     port.onMessage.addListener((message) => {
       if (started || message?.type !== 'start') return
@@ -149,7 +159,7 @@ chrome.runtime.onConnect.addListener((port) => {
         try { port.postMessage({ state: 'unavailable', code: 'password-change-fill-failed' }) } catch { /* noop */ }
         return
       }
-      coordinator.changePasswordActivePage(newPassword, controller.signal).then((result) => {
+      coordinator.changePasswordActivePage(newPassword).then((result) => {
         if (result.ok) {
           saveSession.arm(result.tabId, result.origin, { username: result.username, password: newPassword })
           try { port.postMessage({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled }) } catch { /* noop */ }
@@ -163,14 +173,11 @@ chrome.runtime.onConnect.addListener((port) => {
     return
   }
   if (port.name === 'sesame:identity-fill') {
-    const controller = new AbortController()
-    port.onDisconnect.addListener(() => controller.abort())
-
     let started = false
     port.onMessage.addListener((message) => {
       if (started || message?.type !== 'start') return
       started = true
-      coordinator.fillIdentityActivePage(controller.signal).then((result) => {
+      coordinator.fillIdentityActivePage().then((result) => {
         try { port.postMessage(result) } catch { /* noop */ }
       }).catch(() => {
         try { port.postMessage({ ok: false, code: 'fill-failed' }) } catch { /* noop */ }
@@ -179,16 +186,11 @@ chrome.runtime.onConnect.addListener((port) => {
     return
   }
   if (port.name === 'sesame:card-fill') {
-    const controller = new AbortController()
-    port.onDisconnect.addListener(() => controller.abort())
     let started = false
     port.onMessage.addListener((message) => {
       if (started || message?.type !== 'start') return
       started = true
-      loadInlineSettings().then((settings) => settings.cardSuggestionsEnabled
-        ? coordinator.fillCardActivePage(controller.signal)
-        : { ok: false as const, code: 'card-suggestions-disabled' }
-      ).then((result) => { try { port.postMessage(result) } catch { /* noop */ } }).catch(() => {
+      fillCardWhenEnabled().then((result) => { try { port.postMessage(result) } catch { /* noop */ } }).catch(() => {
         try { port.postMessage({ ok: false, code: 'fill-failed' }) } catch { /* noop */ }
       })
     })
@@ -257,7 +259,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (message?.type === 'sesame:autofill-card') {
-    coordinator.fillCardActivePage().then(sendResponse).catch(() => sendResponse({
+    fillCardWhenEnabled().then(sendResponse).catch(() => sendResponse({
       ok: false,
       code: 'fill-failed',
     }))

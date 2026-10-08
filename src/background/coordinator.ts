@@ -48,6 +48,7 @@ export interface Coordinator {
   fillCardActivePage(signal?: AbortSignal): Promise<CardFillResult>
   inspectOneTimeCodeActivePage(): Promise<OneTimeCodePageCheckResult>
   fillOneTimeCodeActivePage(signal?: AbortSignal): Promise<OneTimeCodeFillResult>
+  cancelActive(tabId?: number): void
 }
 
 export interface IdentityPageCheckResult {
@@ -116,9 +117,19 @@ export interface PageCheckResult {
   hasPasswordField?: boolean
 }
 
+interface ActiveOperation {
+  controller: AbortController
+  tabId?: number
+}
+
+interface FillOperation {
+  signal: AbortSignal
+  bindTab(tabId: number): void
+}
+
 export function createCoordinator(browser: Browser): Coordinator {
   let current: FillContext = initialFillState()
-  const activeControllers = new Set<AbortController>()
+  const activeOperations = new Set<ActiveOperation>()
 
   function update(event: Parameters<typeof transition>[1]) {
     current = transition(current, event)
@@ -183,21 +194,21 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillActivePage(externalSignal): Promise<FillContext> {
-      return withFillGuard(activeControllers, externalSignal, {
+      return withFillGuard(activeOperations, externalSignal, {
         cancelled: () => update({ type: 'cancelled', code: 'cancelled' }),
         busy: () => update({ type: 'failed', code: 'fill-in-progress' }),
         restricted: (aborted) => update({ type: 'failed', code: aborted ? 'cancelled' : 'page-restricted' }),
-      }, (signal) => runFill(browser, signal, update))
+      }, (operation) => runFill(browser, operation, update))
     },
 
     async changePasswordActivePage(newPassword, externalSignal): Promise<ChangePasswordResult> {
-      return withFillGuard<ChangePasswordResult>(activeControllers, externalSignal, {
+      return withFillGuard<ChangePasswordResult>(activeOperations, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
-      }, async (signal) => {
+      }, async (operation) => {
         const change = passwordChangeSurface(newPassword)
-        const result = await runSurfaceFill(browser, signal, change.fill)
+        const result = await runSurfaceFill(browser, operation, change.fill)
         if (!result.ok) return result
         return {
           ok: true,
@@ -222,11 +233,11 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillIdentityActivePage(externalSignal): Promise<IdentityFillResult> {
-      return withFillGuard(activeControllers, externalSignal, {
+      return withFillGuard(activeOperations, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
-      }, (signal) => runIdentityFill(browser, signal))
+      }, (operation) => runIdentityFill(browser, operation))
     },
 
     async inspectCardActivePage(): Promise<CardPageCheckResult> {
@@ -242,11 +253,11 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillCardActivePage(externalSignal): Promise<CardFillResult> {
-      return withFillGuard(activeControllers, externalSignal, {
+      return withFillGuard(activeOperations, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
-      }, (signal) => runCardFill(browser, signal))
+      }, (operation) => runCardFill(browser, operation))
     },
 
     async inspectOneTimeCodeActivePage(): Promise<OneTimeCodePageCheckResult> {
@@ -263,16 +274,22 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async fillOneTimeCodeActivePage(externalSignal): Promise<OneTimeCodeFillResult> {
-      return withFillGuard<OneTimeCodeFillResult>(activeControllers, externalSignal, {
+      return withFillGuard<OneTimeCodeFillResult>(activeOperations, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
-      }, async (signal) => {
-        const result = await runSurfaceFill(browser, signal, oneTimeCodeSurface())
+      }, async (operation) => {
+        const result = await runSurfaceFill(browser, operation, oneTimeCodeSurface())
         return result.ok
           ? { ok: true, remainingSeconds: result.approved.remainingSeconds }
           : { ok: false, code: result.code }
       })
+    },
+
+    cancelActive(tabId) {
+      for (const operation of [...activeOperations]) {
+        if (tabId === undefined || operation.tabId === tabId) operation.controller.abort()
+      }
     },
   }
 }
@@ -280,28 +297,29 @@ export function createCoordinator(browser: Browser): Coordinator {
 // Owns the concurrency guard and the abort wiring for every fill entry point,
 // so a surface cannot ship without both, the way the card path once did.
 async function withFillGuard<T>(
-  activeControllers: Set<AbortController>,
+  activeOperations: Set<ActiveOperation>,
   externalSignal: AbortSignal | undefined,
   outcomes: {
     cancelled: () => T
     busy: () => T
     restricted: (aborted: boolean) => T
   },
-  run: (signal: AbortSignal) => Promise<T>
+  run: (operation: FillOperation) => Promise<T>
 ): Promise<T> {
   if (externalSignal?.aborted) return outcomes.cancelled()
-  if (activeControllers.size > 0) return outcomes.busy()
+  if (activeOperations.size > 0) return outcomes.busy()
 
   const controller = new AbortController()
-  activeControllers.add(controller)
+  const active: ActiveOperation = { controller }
+  activeOperations.add(active)
   externalSignal?.addEventListener('abort', () => controller.abort(), { once: true })
 
   try {
-    return await run(controller.signal)
+    return await run({ signal: controller.signal, bindTab: (tabId) => { active.tabId = tabId } })
   } catch {
     return outcomes.restricted(controller.signal.aborted)
   } finally {
-    activeControllers.delete(controller)
+    activeOperations.delete(active)
   }
 }
 
@@ -354,13 +372,15 @@ async function runSurfaceFill<
   Outcome extends { ok: boolean }
 >(
   browser: Browser,
-  signal: AbortSignal,
+  operation: FillOperation,
   surface: FillSurface<Ready, ApprovalInput, Approved, Outcome>
 ): Promise<{ ok: true; outcome: Extract<Outcome, { ok: true }>; approved: Approved } | { ok: false; code: string; lookalike?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   const resolved = surface.resolvePage(tab)
   if (!resolved.ok) return { ok: false, code: resolved.code }
 
+  const { signal } = operation
+  operation.bindTab(resolved.tabId)
   const ctx: SurfaceContext = { browser, tabId: resolved.tabId, origin: resolved.origin, token: crypto.randomUUID() }
   surface.events?.inspectionStarted?.()
 
@@ -684,10 +704,10 @@ function oneTimeCodeSurface(): FillSurface<
 
 async function runFill(
   browser: Browser,
-  signal: AbortSignal,
+  operation: FillOperation,
   update: (event: Parameters<typeof transition>[1]) => FillContext
 ): Promise<FillContext> {
-  const result = await runSurfaceFill(browser, signal, loginSurface(update))
+  const result = await runSurfaceFill(browser, operation, loginSurface(update))
   return result.ok
     ? update({
         type: 'fill-completed',
@@ -698,8 +718,8 @@ async function runFill(
     : update({ type: 'failed', code: result.code, lookalike: result.lookalike })
 }
 
-async function runIdentityFill(browser: Browser, signal: AbortSignal): Promise<IdentityFillResult> {
-  const result = await runSurfaceFill(browser, signal, identitySurface())
+async function runIdentityFill(browser: Browser, operation: FillOperation): Promise<IdentityFillResult> {
+  const result = await runSurfaceFill(browser, operation, identitySurface())
   return result.ok ? { ok: true, filledFields: result.outcome.filledFields } : result
 }
 
@@ -860,7 +880,7 @@ function collectCardFillFields(results: unknown[]): CardFieldKey[] {
   return [...fields]
 }
 
-async function runCardFill(browser: Browser, signal: AbortSignal): Promise<CardFillResult> {
-  const result = await runSurfaceFill(browser, signal, cardSurface())
+async function runCardFill(browser: Browser, operation: FillOperation): Promise<CardFillResult> {
+  const result = await runSurfaceFill(browser, operation, cardSurface())
   return result.ok ? { ok: true, filledFields: result.outcome.filledFields } : result
 }
