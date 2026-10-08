@@ -105,3 +105,56 @@ test('store releases require the desktop main contract before packaging', () => 
   assert.match(checker, /options\.candidate && publication\.requiresDesktopMerge === true/)
   assert.match(checker, /publication\.trackingRef \?\? 'main'/)
 })
+
+const contractDirectories = readdirSync(join(root, 'contracts', 'browser'))
+  .filter((name) => /^v\d+$/.test(name))
+  .sort((left, right) => Number(left.slice(1)) - Number(right.slice(1)))
+const highestContract = contractDirectories.at(-1)
+
+test('no vendored contract still waits on a desktop merge', () => {
+  const waiting = contractDirectories.filter((directory) => {
+    const source = JSON.parse(read('contracts', 'browser', directory, 'SOURCE.json'))
+    return source.publication?.requiresDesktopMerge !== undefined
+  })
+  assert.deepEqual(waiting, [], `these contracts still carry requiresDesktopMerge:\n  ${waiting.join('\n  ')}`)
+})
+
+test('every document that lists the browser contracts reaches the highest vendored version', () => {
+  const highest = Number(highestContract.slice(1))
+  for (const document of ['DESIGN.md', 'CONTRIBUTING.md', 'SECURITY.md']) {
+    const named = [...read(document).matchAll(/contracts\/browser\/v(\d+)\//g)].map(([, version]) => Number(version))
+    assert.ok(named.length > 0, `${document} does not name a vendored contract directory`)
+    assert.equal(Math.max(...named), highest, `${document} names contracts up to v${Math.max(...named)} but contracts/browser holds v${highest}`)
+  }
+  const readme = read('README.md')
+  for (let version = 1; version <= highest; version += 1) {
+    assert.match(readme, new RegExp(`[Vv]ersion ${version}\\b`), `README.md does not describe contract version ${version}`)
+  }
+})
+
+test('the documents agree with the README on the supported platforms', () => {
+  const readme = read('README.md')
+  const platforms = ['Windows', 'Linux']
+  for (const platform of platforms) {
+    assert.match(readme, new RegExp(platform), `README.md does not name ${platform}`)
+    assert.match(read('DESIGN.md'), new RegExp(platform), `DESIGN.md does not name ${platform}`)
+  }
+  assert.doesNotMatch(read('DESIGN.md'), /Windows integration|Chrome and Edge on Windows\.\s/, 'DESIGN.md describes a Windows only product')
+})
+
+test('the documents describe the Firefox package that the manifests build', () => {
+  assert.ok(existsSync(join(root, 'manifests', 'firefox.json')))
+  for (const document of ['README.md', 'SECURITY.md', 'DESIGN.md']) {
+    const body = read(document)
+    assert.match(body, /Firefox/, `${document} does not mention Firefox`)
+    assert.doesNotMatch(body, /Firefox is not supported/, `${document} says Firefox is not supported while a package builds`)
+    assert.doesNotMatch(body, /separate manifest/, `${document} says Firefox needs a separate manifest, which manifests/firefox.json already is`)
+  }
+  assert.match(read('SECURITY.md'), /experimental Firefox package/)
+})
+
+test('the documents state the desktop version the capability probe needs', () => {
+  for (const document of ['README.md', 'SECURITY.md', 'DESIGN.md']) {
+    assert.match(read(document), /desktop (app of version |)0\.3\.0 or later/, `${document} does not say the extension needs desktop 0.3.0 or later`)
+  }
+})
