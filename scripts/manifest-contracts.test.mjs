@@ -39,3 +39,41 @@ test('the shipping extension pins its identity and a minimal permission set', ()
     assert.equal(manifest.content_scripts, undefined, `${browser} manifest injects scripts on every page instead of on demand`)
   }
 })
+
+const BROWSER_OWNED_SHORTCUTS = [
+  'Ctrl+Shift+I',
+  'Ctrl+Shift+J',
+  'Ctrl+Shift+C',
+  'Ctrl+Shift+N',
+  'Ctrl+Shift+T',
+  'Ctrl+Shift+B',
+  'Ctrl+Shift+O',
+  'Ctrl+Shift+D',
+  'Ctrl+Shift+G',
+  'Ctrl+Shift+R',
+  'Ctrl+Shift+W',
+  'Ctrl+Shift+Delete',
+  'Alt+Shift+I',
+  'Alt+Shift+T',
+  'Alt+Shift+A',
+  'Alt+Shift+B',
+  'Alt+Shift+N',
+  'F12',
+]
+
+test('no suggested shortcut collides with a Chrome or Edge shortcut on Windows or Linux', () => {
+  for (const browser of ['chrome', 'edge', 'firefox']) {
+    const commands = JSON.parse(read('manifests', `${browser}.json`)).commands
+    const suggested = Object.entries(commands).map(([name, command]) => [name, command.suggested_key.default])
+    for (const [name, shortcut] of suggested) {
+      assert.ok(!BROWSER_OWNED_SHORTCUTS.includes(shortcut), `${browser} command ${name} suggests ${shortcut}, which the browser already uses`)
+    }
+    assert.equal(new Set(suggested.map(([, shortcut]) => shortcut)).size, suggested.length, `${browser} suggests one shortcut twice`)
+  }
+})
+
+test('every browser manifest suggests the same shortcuts', () => {
+  const shortcuts = (browser) => JSON.stringify(JSON.parse(read('manifests', `${browser}.json`)).commands)
+  assert.equal(shortcuts('edge'), shortcuts('chrome'))
+  assert.equal(shortcuts('firefox'), shortcuts('chrome'))
+})

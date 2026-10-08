@@ -1,10 +1,10 @@
 # Sesame browser helper design
 
-Status: pre-release Windows integration. Page filling works today between the Chromium extension and a running desktop app. Windows installers bundle the native-messaging host, and Sesame registers and repairs the current-user Chrome and Edge connection automatically at startup without administrator access or user-run scripts. The browser extension still requires ordinary user-confirmed browser installation, and it has not been independently audited or approved for store publication.
+Status: pre-release integration for Windows and Linux. Page filling works today between the Chromium extension and a running desktop app of version 0.3.0 or later. The Windows installers and the Linux deb and rpm packages bundle the native-messaging host, and Sesame registers and repairs the current-user Chrome and Edge connection automatically at startup without administrator access or user-run scripts. The Linux AppImage registers no host. The browser extension still requires ordinary user-confirmed browser installation, and it has not been independently audited or approved for store publication.
 
 ## Boundary
 
-The unlocked vault may be read only by the desktop application. The browser helper reaches it over Chromium native messaging and a private local Windows named pipe. There is no localhost HTTP server, network listener, cloud-vault request, web vault, or web-page message bridge.
+The unlocked vault may be read only by the desktop application. The browser helper reaches it over Chromium native messaging and a private local channel, which is a named pipe on Windows and a Unix socket on Linux. There is no localhost HTTP server, network listener, cloud-vault request, web vault, or web-page message bridge.
 
 The extension holds the `activeTab`, `contextMenus`, `nativeMessaging`, `scripting`, and `storage` permissions. Opening the popup grants a narrow, temporary look at the active page. That look reports capped field counts and a form classification only; it does not read field values, page text, form actions, paths, query strings, cookies, or storage. During one-time onboarding the user can grant optional access to all HTTPS pages, so the inline control is available without per-site setup. Extension storage keeps only the first-run preference and the exact origins where the user explicitly paused that control; it never contains credentials or visited-site history.
 
@@ -22,10 +22,10 @@ The native-messaging manifest is pinned to the fixed development extension ID. T
 2. The extension inspects the active tab for one plausible sign-in surface. It supports conservatively classified username-only, password-only, and combined login steps, and fails closed on multiple forms, registration fields, and password-change fields.
 3. The user clicks **Fill this page**. The helper then checks autocomplete hints, static form attributes, and labels on related submit controls to reject signup and password-change surfaces. It never reads current input values or sends those markers away. A page loading, or the popup opening, is never enough on its own to start a fill.
 4. The extension binds the request to the active tab, window, exact normalized origin, and a random token held in that document's isolated execution world.
-5. The native host relays `{version, type: "fill", requestId, origin, fields}` to the running desktop app over the local named pipe. `fields` is `username`, `password`, or `both`, based on the bound step. The request carries no page contents or current input values.
+5. The native host relays `{version, type: "fill", requestId, origin, fields}` to the running desktop app over the local channel. `fields` is `username`, `password`, or `both`, based on the bound step. The request carries no page contents or current input values.
 6. Sesame compares the requested origin with saved login URLs, preferring exact origins. A bare hostname and its single `www` form may match when scheme and effective port are identical, and the approval dialog identifies this convenience match and shows the saved origin. Parent domains, other subdomains, different schemes, and different ports are not treated as equivalent. A near miss that resembles one saved host answers with the `lookalike` reason and releases nothing; the warning names that host and changes nothing about which origin can fill.
 7. Before bringing its window forward, Sesame stores the bounded, secret-free approval metadata as a pending desktop request. The renderer receives an immediate event and also reconciles that pending request, so a listener race or renderer reload cannot leave a live approval invisible. The user selects a login when needed and explicitly approves the request. Approval expires after 30 seconds.
-8. Before releasing a credential, the desktop rechecks the pipe peer, vault session, request binding, selected entry, and the same strict origin relationship. A lock, vault change, disconnect, timeout, replay, or changed login fails closed.
+8. Before releasing a credential, the desktop rechecks the peer process, vault session, request binding, selected entry, and the same strict origin relationship. A lock, vault change, disconnect, timeout, replay, or changed login fails closed.
 9. The extension rechecks the active tab, window, origin, same-document token, and prepared step mode. It writes only the field values present in that step and dispatches ordinary `input` and `change` events.
 10. Sesame never submits the form, clicks a button, presses Enter, or sends a synthetic keyboard action. The user reviews the page and signs in.
 
@@ -46,11 +46,10 @@ Every native message is versioned, request-bound, length-limited, and decoded wi
 The desktop-owned canonical contracts are under
 `src-tauri/contracts/browser/`. The independently buildable extension uses the
 byte-identical, source-commit-stamped snapshots under
-`contracts/browser/v1/`, `contracts/browser/v2/`, `contracts/browser/v3/`,
-`contracts/browser/v4/`, and `contracts/browser/v5/`; it does not import the
+`contracts/browser/v1/` through `contracts/browser/v6/`; it does not import the
 desktop implementation or download a contract at build or runtime. General
 operations use protocol v1. Card filling uses the narrow protocol v2 contract.
-Login filling uses protocol v5. One-time codes use protocol v4.
+Login filling uses protocol v5. One-time codes use protocol v4. The capability probe uses protocol v6, which a desktop older than 0.3.0 does not speak. Against such a desktop the probe fails as a protocol mismatch and the extension asks the user to update the desktop app.
 
 - Capability request: `{version, type: "capabilities", requestId}`.
 - Capability response: `{version, type: "capabilities", requestId, installed, desktopAvailable}`.
@@ -88,9 +87,11 @@ Credential fields are length-limited and an empty password is rejected. A respon
 
 ## Local transport
 
-On Windows, the desktop broker creates a pipe bound to the current Windows account and logon session. Its protected access-control list permits only that account and LocalSystem, rejects remote clients, requests the first pipe instance, and uses bounded frames and timeouts. Both sides verify the expected executable path and logon session of the process at the other end before accepting credential traffic.
+On Windows, the desktop broker creates a named pipe bound to the current Windows account and logon session. Its protected access-control list permits only that account and LocalSystem, rejects remote clients, requests the first pipe instance, and uses bounded frames and timeouts. Both sides verify the expected executable path and logon session of the process at the other end before accepting credential traffic.
 
-These checks reduce accidental exposure and cross-process confusion. They do not make the pipe a security boundary against malware already running as the same Windows user. A compromised browser, extension process, desktop process, operating system, or same-user process with equivalent access is outside the supported threat model.
+On Linux, the desktop broker binds a Unix socket in a directory with mode 0700 and gives the socket mode 0600. Both sides check that the process at the other end runs as the same user and from the expected executable path before they accept credential traffic, and the desktop records the peer's start time so a replaced process is detected.
+
+These checks reduce accidental exposure and cross-process confusion. They do not make the channel a security boundary against malware already running as the same user. A compromised browser, extension process, desktop process, operating system, or same-user process with equivalent access is outside the supported threat model.
 
 ## Secret handling limits
 
@@ -100,9 +101,10 @@ While the approved fill is delivered, credentials necessarily exist briefly as R
 
 ## Development and release limits
 
-The supported helper targets Chrome and Edge on Windows. An experimental
-Firefox package is built and identity-checked, but Firefox store publication
-and native-host validation remain release gates. Ordinary site filling is
+The supported helper targets Chrome and Edge on Windows and on Linux. An
+experimental Firefox package is built and identity-checked against the pinned
+Gecko id, but no test runs it in Firefox, and Firefox store publication and
+native-host validation remain release gates. Ordinary site filling is
 restricted to HTTPS origins under the narrow bare-hostname/`www` equivalence
 described above; any loopback-only development exception is not a shipping
 guarantee. Signed-store distribution, installer upgrade and removal tests,
