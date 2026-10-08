@@ -526,3 +526,154 @@ describe('the inline release gate', () => {
     detach()
   })
 })
+
+describe('the inline release gate against page styling techniques', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    overlayHost()?.remove()
+    document.documentElement.removeAttribute('style')
+    document.body.innerHTML = ''
+    stubVisibilityObserver()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.documentElement.removeAttribute('style')
+  })
+
+  async function armedLogin() {
+    const opened = openLogin()
+    const button = buttonIn(opened.roots, 'Fill with Sesame')
+    visibilityObserver().report({ isVisible: true, isIntersecting: true })
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    return { ...opened, button }
+  }
+
+  const stylingAttacks: Array<[string, (host: HTMLElement) => void]> = [
+    ['hides the control host with visibility', (host) => host.style.setProperty('visibility', 'hidden', 'important')],
+    ['removes the control host with display', (host) => host.style.setProperty('display', 'none', 'important')],
+    ['clears the opacity of the html element', () => document.documentElement.style.setProperty('opacity', '0')],
+    ['hides the html element with visibility', () => document.documentElement.style.setProperty('visibility', 'hidden')],
+    ['filters the html element to nothing', () => document.documentElement.style.setProperty('filter', 'opacity(0)')],
+    ['scales the html element to nothing', () => document.documentElement.style.setProperty('transform', 'scale(0)')],
+    ['makes the html element ignore the pointer', () => document.documentElement.style.setProperty('pointer-events', 'none')],
+    ['moves the control host under a transparent wrapper', (host) => {
+      const wrapper = document.createElement('div')
+      wrapper.style.setProperty('opacity', '0')
+      document.body.append(wrapper)
+      wrapper.append(host)
+    }],
+    ['masks the control host with mask-image', (host) =>
+      host.style.setProperty('mask-image', 'linear-gradient(transparent, transparent)')],
+    ['masks the html element with mask-image', () =>
+      document.documentElement.style.setProperty('mask-image', 'linear-gradient(transparent, transparent)')],
+  ]
+
+  it.each(stylingAttacks)('refuses a trusted click after page script %s and the gate re-arms', async (_name, attack) => {
+    const { roots, onFillRequest, button, detach } = await armedLogin()
+
+    attack(overlayHost()!)
+    await settle(300)
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it.each(stylingAttacks)('disarms the control as soon as page script %s', async (_name, attack) => {
+    const { onFillRequest, button, detach } = await armedLogin()
+
+    attack(overlayHost()!)
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    detach()
+  })
+
+  it('mounts the control under the root element so styles on body cannot reach it', () => {
+    const { detach } = openLogin()
+    expect(overlayHost()!.parentElement).toBe(document.documentElement)
+    detach()
+  })
+
+  function openLayerAfterArming(matchingSelector: string, layer: Element) {
+    const originalMatches = Element.prototype.matches
+    let layerOpen = false
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+      return selector === matchingSelector ? layerOpen && this === layer : originalMatches.call(this, selector)
+    })
+    return () => { layerOpen = true }
+  }
+
+  it('refuses a trusted click when a popover opens before its toggle event arrives', async () => {
+    const popover = document.createElement('div')
+    popover.setAttribute('popover', 'manual')
+    const open = openLayerAfterArming(':popover-open', popover)
+    const { roots, onFillRequest, button, detach } = await armedLogin()
+    document.body.append(popover)
+    await settle(150)
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    open()
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it('refuses a trusted click when a popover inside an open page shadow root opens', async () => {
+    const holder = document.createElement('div')
+    const popover = document.createElement('div')
+    popover.setAttribute('popover', 'manual')
+    holder.attachShadow({ mode: 'open' }).append(popover)
+    const open = openLayerAfterArming(':popover-open', popover)
+    const { roots, onFillRequest, button, detach } = await armedLogin()
+    document.body.append(holder)
+    await settle(150)
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    open()
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it('refuses a trusted click when a modal dialog opens after confirmation', async () => {
+    const dialog = document.createElement('dialog')
+    dialog.setAttribute('open', '')
+    const open = openLayerAfterArming(':modal', dialog)
+    const { roots, onFillRequest, button, detach } = await armedLogin()
+    document.body.append(dialog)
+    await settle(150)
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+
+    open()
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    detach()
+  })
+
+  it('disarms the control when page script moves focus to another field', async () => {
+    const { onFillRequest, button, detach } = await armedLogin()
+
+    document.querySelectorAll('input')[1].dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(button.disabled).toBe(true)
+    trustedClick(button)
+    await settle(0)
+
+    expect(onFillRequest).not.toHaveBeenCalled()
+    detach()
+  })
+})

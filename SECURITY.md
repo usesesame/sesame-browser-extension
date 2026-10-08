@@ -1,7 +1,8 @@
 # Security policy
 
 This repository holds the pre-release Sesame browser extension for Chrome and
-Edge. It has not had an independent security audit or store approval.
+Edge on Windows and Linux. It has not had an independent security audit or store
+approval. It needs Sesame desktop 0.3.0 or later.
 
 The extension is the only Sesame surface that runs inside a page it does not
 control. When you report or fix anything here, treat every page as hostile.
@@ -73,7 +74,7 @@ In scope:
 - Native-messaging protocol handling: accepting an unsafe response shape,
   accepting a mismatched `requestId`, or accepting a protocol version outside
   the operation-specific contracts in `contracts/browser/v1/contract.json`
-  through `contracts/browser/v4/contract.json`.
+  through `contracts/browser/v6/contract.json`.
 - Permission escalation: obtaining host permissions the user did not grant, or
   keeping the inline control active on an origin the user paused.
 - The store manifests: an unexpected permission, an unexpected content-script
@@ -119,7 +120,8 @@ Stated plainly so a report does not spend effort on a known position:
 - Sesame has not had an independent security audit.
 - The extension never opens a vault on its own. Without a running desktop app
   and an explicit approval it can do nothing with a credential.
-- Firefox is not supported. It needs a separate manifest and a different
-  native-host allowlist format.
+- Firefox is not a supported release. An experimental Firefox package builds
+  from `manifests/firefox.json` and is checked against the pinned Gecko id, but
+  it is not published to a store and no test runs it in Firefox.
 - The extension does not submit forms, click through login steps, intercept
   passkeys, collect browsing history, or run analytics.
