@@ -10,10 +10,10 @@ const options = readFileSync(resolve(root, 'src', 'options', 'App.svelte'), 'utf
 describe('keyboard shortcut documentation', () => {
   it('names the identity shortcut beside the login shortcut', () => {
     expect(popup).toContain('Ctrl+Shift+L')
-    expect(popup).toContain('Ctrl+Shift+I')
+    expect(popup).toContain('Alt+Shift+F')
     for (const surface of [onboarding, options]) {
       expect(surface).toContain('<kbd>L</kbd>')
-      expect(surface).toContain('<kbd>I</kbd>')
+      expect(surface).toContain('<kbd>F</kbd>')
     }
   })
 })

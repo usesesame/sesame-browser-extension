@@ -12,6 +12,11 @@ const OBSERVER_DELAY_MS = 100
 const VISIBLE_HOLD_MS = 100
 const VISIBILITY_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'popover']
 const FRESH_READING_TIMEOUT_MS = 1000
+const MASK_PROPERTIES = [
+  'mask-image',
+  '-webkit-mask-image',
+  '-webkit-mask-box-image-source',
+]
 
 export const RELEASE_BLOCKED_MESSAGE =
   'Sesame cannot confirm this control is visible. Close anything covering the page and try again.'
@@ -30,6 +35,13 @@ export interface ReleaseGate {
   destroy(): void
 }
 
+function maskApplied(style: CSSStyleDeclaration): boolean {
+  return MASK_PROPERTIES.some((property) => {
+    const value = style.getPropertyValue(property)
+    return value !== '' && value !== 'none'
+  })
+}
+
 function styleUnsafeForRelease(style: CSSStyleDeclaration): boolean {
   if (style.display === 'none') return true
   if (style.visibility !== '' && style.visibility !== 'visible') return true
@@ -39,6 +51,7 @@ function styleUnsafeForRelease(style: CSSStyleDeclaration): boolean {
   }
   if (style.filter !== '' && style.filter !== 'none') return true
   if (style.transform !== '' && style.transform !== 'none') return true
+  if (maskApplied(style)) return true
   return style.pointerEvents === 'none'
 }
 
@@ -57,14 +70,21 @@ function mutationInsideHost(record: MutationRecord, host: Element): boolean {
   return root instanceof ShadowRoot && root.host === host
 }
 
-export function topLayerElementOpen(documentRef: Document = document): boolean {
-  if (documentRef.fullscreenElement) return true
-  for (const candidate of documentRef.querySelectorAll('[popover], dialog[open]')) {
+function layerOpenInTree(root: Document | ShadowRoot): boolean {
+  for (const candidate of root.querySelectorAll('[popover], dialog[open]')) {
     if (selectorState(candidate, ':popover-open') !== 'no') return true
     if (candidate.tagName !== 'DIALOG') continue
     if (selectorState(candidate, ':modal') !== 'no') return true
   }
+  for (const element of root.querySelectorAll('*')) {
+    if (element.shadowRoot && layerOpenInTree(element.shadowRoot)) return true
+  }
   return false
+}
+
+export function topLayerElementOpen(documentRef: Document = document): boolean {
+  if (documentRef.fullscreenElement) return true
+  return layerOpenInTree(documentRef)
 }
 
 export function createReleaseGate(onChange: () => void): ReleaseGate {

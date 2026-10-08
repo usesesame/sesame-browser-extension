@@ -84,7 +84,7 @@ const PRESENTATIONS: Record<string, ConnectionPresentation> = {
   'protocol-mismatch': {
     state: 'incompatible',
     title: 'Update needed',
-    message: 'The desktop app and this extension use different connection versions. Install the latest desktop app.',
+    message: 'This extension needs Sesame desktop 0.3.0 or later. Install the latest desktop app, then check again.',
     action: 'update',
     actionLabel: 'Update Sesame',
     canRetry: true,
