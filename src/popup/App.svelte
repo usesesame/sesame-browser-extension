@@ -145,12 +145,18 @@
   let generatedExpiryTimer: ReturnType<typeof setTimeout> | null = null
   let copyHandle: TemporaryCopyHandle | null = null
 
+  function releaseCopiedPassword() {
+    void copyHandle?.clear()
+  }
+
   onMount(() => {
     void refreshAll()
+    window.addEventListener('pagehide', releaseCopiedPassword)
     return () => {
+      window.removeEventListener('pagehide', releaseCopiedPassword)
       if (reconnectTimer) clearTimeout(reconnectTimer)
       if (generatedExpiryTimer) clearTimeout(generatedExpiryTimer)
-      copyHandle?.cancel()
+      releaseCopiedPassword()
       generatedPassword = ''
     }
   })
@@ -667,7 +673,13 @@
     if (!generatedPassword) return
     try {
       copyHandle?.cancel()
-      copyHandle = await copyTemporarily(generatedPassword, { onExpired: () => { copiedPassword = false } })
+      copyHandle = await copyTemporarily(generatedPassword, {
+        onExpired: () => { copiedPassword = false },
+        onClearFailed: () => {
+          copiedPassword = false
+          fillFeedback = 'Sesame could not clear the clipboard. Clear it yourself.'
+        },
+      })
       copiedPassword = true
       fillFeedback = 'Copied temporarily. Choose Save this login after the site accepts it.'
     } catch {

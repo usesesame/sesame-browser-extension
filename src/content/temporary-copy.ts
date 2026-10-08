@@ -16,6 +16,7 @@ export async function copyTemporarily(
     schedule?: typeof setTimeout
     cancelSchedule?: typeof clearTimeout
     onExpired?: () => void
+    onClearFailed?: () => void
   } = {},
 ): Promise<TemporaryCopyHandle> {
   if (!value) throw new TypeError('temporary copy requires a value')
@@ -33,15 +34,13 @@ export async function copyTemporarily(
     if (timer !== undefined) cancelSchedule(timer)
     timer = undefined
     try {
-      // Never erase clipboard content the user copied after the password.
-      if (clipboard.readText && await clipboard.readText() === expected) {
-        await clipboard.writeText('')
-      }
+      if (!clipboard.readText) throw new TypeError('clipboard cannot be read')
+      if (await clipboard.readText() === expected) await clipboard.writeText('')
     } catch {
-      /* ignored */
-    } finally {
-      options.onExpired?.()
+      options.onClearFailed?.()
+      return
     }
+    options.onExpired?.()
   }
   timer = schedule(() => { void clear() }, options.lifetimeMs ?? 30_000)
   return {
