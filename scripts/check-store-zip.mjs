@@ -9,9 +9,28 @@ import { compareArchiveEntries } from './store-zip-compare.mjs'
 const root = resolve(import.meta.dirname, '..')
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
-function option(args, name, fallback) {
-  const index = args.indexOf(name)
-  return index === -1 ? fallback : args[index + 1]
+const valueOptions = ['--zip', '--browser', '--revision', '--work-dir']
+const flagOptions = ['--keep']
+
+export function parseStoreZipOptions(args) {
+  const parsed = { zipPath: undefined, browser: 'chrome', revision: 'HEAD', workRoot: undefined, keep: false }
+  const declared = [...valueOptions, ...flagOptions]
+  for (let index = 0; index < args.length; index += 1) {
+    const name = args[index]
+    if (name === '--keep') {
+      parsed.keep = true
+      continue
+    }
+    if (!valueOptions.includes(name)) throw new Error(`unknown argument ${name}`)
+    const value = args[index + 1]
+    if (value === undefined || declared.includes(value)) throw new Error(`${name} needs a value`)
+    index += 1
+    if (name === '--zip') parsed.zipPath = value
+    if (name === '--browser') parsed.browser = value
+    if (name === '--revision') parsed.revision = value
+    if (name === '--work-dir') parsed.workRoot = value
+  }
+  return parsed
 }
 
 function rebuildAndCompare({ zipPath, browser, worktree }) {
@@ -31,17 +50,19 @@ function rebuildAndCompare({ zipPath, browser, worktree }) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2)
-  const zipPath = option(args, '--zip')
-  const browser = option(args, '--browser', 'chrome')
-  const revision = option(args, '--revision', 'HEAD')
-  const workRoot = option(args, '--work-dir')
-  const keep = args.includes('--keep')
+  const usage =
+    'Usage: node scripts/check-store-zip.mjs --zip <store zip> [--browser chrome|edge|firefox] [--revision <git ref>] [--work-dir <dir>] [--keep]'
+  let options
+  try {
+    options = parseStoreZipOptions(process.argv.slice(2))
+  } catch (error) {
+    console.error(`${error.message}\n${usage}`)
+    process.exit(2)
+  }
+  const { zipPath, browser, revision, workRoot, keep } = options
 
   if (!zipPath || !['chrome', 'edge', 'firefox'].includes(browser)) {
-    console.error(
-      'Usage: node scripts/check-store-zip.mjs --zip <store zip> [--browser chrome|edge|firefox] [--revision <git ref>] [--work-dir <dir>] [--keep]',
-    )
+    console.error(usage)
     process.exit(2)
   }
 

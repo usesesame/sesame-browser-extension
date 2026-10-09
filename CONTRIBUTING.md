@@ -104,9 +104,10 @@ this extension.
 5. The native host pins the Chromium extension identity and the Firefox Gecko
    id with no wildcards. Verify every packaged identity against that contract.
 6. After a listing is live, check the store's download against source with
-   `node scripts/check-store-zip.mjs --zip <downloaded zip> --browser chrome`.
-   The check rebuilds the package from the current revision and lists every
-   file that differs. The store re-signs its container, so the check compares
+   `node scripts/check-store-zip.mjs --zip <downloaded zip> --browser chrome --revision v<released version>`.
+   The check rebuilds the package from the tag of the release that the store
+   serves, since the store can serve an earlier release than `HEAD`, and lists
+   every file that differs. The store re-signs its container, so the check compares
    the files inside and the manifest.
 
 ## Reporting a security issue

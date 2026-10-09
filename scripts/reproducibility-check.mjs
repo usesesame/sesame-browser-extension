@@ -28,9 +28,10 @@ try {
 
   if (differences.length > 0) {
     console.error(`Two packagings of the same checkout differ: ${differences.join(', ')}`)
-    process.exit(1)
+    process.exitCode = 1
+  } else {
+    console.log(`Two packagings of ${names.length} files match by digest.`)
   }
-  console.log(`Two packagings of ${names.length} files match by digest.`)
 } finally {
   for (const output of outputs) rmSync(output, { recursive: true, force: true })
 }
