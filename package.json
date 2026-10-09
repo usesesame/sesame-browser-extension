@@ -26,8 +26,9 @@
     "release:check": "npm run version:check && npm run design:tokens:check && npm run lint && npm run check && npm run test:unit && npm run build:chrome && npm run build:edge && npm run build:firefox && npm run package:stores && npm run repro:check",
     "governance:contract": "node --test scripts/governance-contracts.test.mjs",
     "manifest:contract": "node --test scripts/manifest-contracts.test.mjs",
+    "audit:contract": "node --test scripts/audit-contracts.test.mjs",
     "repro:contract": "node --test scripts/reproducibility-contracts.test.mjs",
-    "ci": "npm run governance:contract && npm run manifest:contract && npm run repro:contract && npm run release:check && npm run test:compat && npm run test:browser"
+    "ci": "npm run governance:contract && npm run manifest:contract && npm run repro:contract && npm run audit:contract && npm run release:check && npm run test:compat && npm run test:browser"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
