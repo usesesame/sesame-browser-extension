@@ -7,8 +7,7 @@
   "publication": {
     "repository": "usesesame/sesame-desktop",
     "trackingRef": "main",
-    "note": "The desktop repository is public, so the raw transport needs no token. SESAME_CONTRACT_TOKEN is only required if it is ever made private again.",
-    "requiresDesktopMerge": true
+    "note": "The desktop repository is public, so the raw transport needs no token. SESAME_CONTRACT_TOKEN is only required if it is ever made private again."
   },
   "files": {
     "contract.json": "0a55dd7e7559f1c830d514c2e281533fa6fa5c9758c2e7185e4661a54e780126",

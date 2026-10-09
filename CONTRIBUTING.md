@@ -17,7 +17,7 @@ desktop app, and the native messaging host are not part of it.
 
 The desktop owns the protocol because it owns the host. This repository keeps
 tagged, digest-bound copies under `contracts/browser/v1/` through
-`contracts/browser/v4/`. Editing the TypeScript types without first landing a
+`contracts/browser/v6/`. Editing the TypeScript types without first landing a
 matching tagged contract is a bug rather than a protocol change.
 
 ## Your first change
@@ -103,6 +103,12 @@ this extension.
    installation flow.
 5. The native host pins the Chromium extension identity and the Firefox Gecko
    id with no wildcards. Verify every packaged identity against that contract.
+6. After a listing is live, check the store's download against source with
+   `node scripts/check-store-zip.mjs --zip <downloaded zip> --browser chrome --revision v<released version>`.
+   The check rebuilds the package from the tag of the release that the store
+   serves, since the store can serve an earlier release than `HEAD`, and lists
+   every file that differs. The store re-signs its container, so the check compares
+   the files inside and the manifest.
 
 ## Reporting a security issue
 

@@ -316,6 +316,12 @@ async function openReadyPopup(extensionId: string, tabId: number, url: string): 
   return popup
 }
 
+async function recheckPopup(popup: Page): Promise<void> {
+  const refresh = popup.getByRole('button', { name: /check desktop connection and page again/i })
+  await refresh.click()
+  await expect.poll(async () => refresh.isEnabled(), { timeout: 15000 }).toBe(true)
+}
+
 async function openInstalledPopup(extensionId: string, tabId: number, url: string): Promise<Page> {
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extensionId}/popup.html`)
@@ -441,6 +447,18 @@ async function closedShadowValue(target: Page, nodeName: string): Promise<string
       returnByValue: true,
     }) as { result: { value?: string } }
     return result.value ?? ''
+  })
+}
+
+async function closedShadowPickerOpen(target: Page, nodeName: string): Promise<boolean> {
+  return withClosedShadowNode(target, nodeName, async (cdp, nodeId) => {
+    const objectId = await resolveClosedShadowNode(cdp, nodeId)
+    const { result } = await cdp.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function () { return this.matches(":open") }',
+      returnByValue: true,
+    }) as { result: { value?: boolean } }
+    return result.value === true
   })
 }
 
@@ -954,7 +972,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -981,7 +999,7 @@ describe('extension browser suite', () => {
     await overrideWorkerTab(tabId, fixtureUrl)
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.evaluate(() => document.body.innerText),
         { timeout: 10000 },
@@ -1560,7 +1578,7 @@ describe('extension browser suite', () => {
       const permissions = chrome.permissions as { getAll: () => Promise<{ origins?: string[] }> }
       permissions.getAll = async () => ({ origins: ['https://*/*'] })
     })
-    await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+    await recheckPopup(popup)
     await expect.poll(
       async () => popup.evaluate(() => document.body.innerText),
       { timeout: 5000 },
@@ -1574,7 +1592,7 @@ describe('extension browser suite', () => {
       permissions.getAll = async () => ({ origins: [] })
       permissions.request = async () => false
     })
-    await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+    await recheckPopup(popup)
     await expect.poll(
       async () => popup.getByRole('button', { name: 'Enable', exact: true }).isVisible(),
       { timeout: 5000 },
@@ -1694,7 +1712,7 @@ describe('extension browser suite', () => {
           ? reply
           : { state: 'unavailable', code: 'page-check-failed' }
       }, testCase.reply)
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: testCase.action, exact: true }).isVisible(),
         { timeout: 5000 },
@@ -1781,7 +1799,7 @@ describe('extension browser suite', () => {
 
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1848,7 +1866,7 @@ describe('extension browser suite', () => {
 
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -1901,7 +1919,7 @@ describe('extension browser suite', () => {
           }
         }
       })
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2011,7 +2029,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill code', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2096,7 +2114,7 @@ describe('extension browser suite', () => {
         { timeout: 15000 },
       ).toBe('fictional-inline-pass')
       popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup!.evaluate(() => document.body.innerText),
         { timeout: 10000 },
@@ -2117,7 +2135,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker('wwwAlias')
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2142,7 +2160,15 @@ describe('extension browser suite', () => {
     ).toBe(true)
 
     await clickClosedShadowNode(current, 'SELECT')
+    await expect.poll(
+      async () => closedShadowPickerOpen(current, 'SELECT'),
+      { timeout: 5000 },
+    ).toBe(true)
     await current.keyboard.press('Escape')
+    await expect.poll(
+      async () => closedShadowPickerOpen(current, 'SELECT'),
+      { timeout: 5000 },
+    ).toBe(false)
     await expect.poll(
       async () => closedShadowFocused(current, 'SELECT'),
       { timeout: 5000 },
@@ -2189,7 +2215,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2222,7 +2248,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Change password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2270,7 +2296,7 @@ describe('extension browser suite', () => {
     await mockNativeHostInWorker()
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2304,7 +2330,7 @@ describe('extension browser suite', () => {
     await overrideWorkerTab(tabId, fixtureUrl)
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
-      await popup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(popup)
       await expect.poll(
         async () => popup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 10000 },
@@ -2405,7 +2431,7 @@ describe('extension browser suite', () => {
     const savePopup = await openInstalledPopup(extensionId, registrationTabId, registrationUrl)
     let generated = ''
     try {
-      await savePopup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(savePopup)
       await expect.poll(
         async () => savePopup.getByRole('button', { name: 'Create password', exact: true }).isVisible(),
         { timeout: 30000 },
@@ -2431,7 +2457,7 @@ describe('extension browser suite', () => {
     await overrideWorkerTab(loginTabId, loginUrl)
     const fillPopup = await openInstalledPopup(extensionId, loginTabId, loginUrl)
     try {
-      await fillPopup.getByRole('button', { name: /check desktop connection and page again/i }).click()
+      await recheckPopup(fillPopup)
       await expect.poll(
         async () => fillPopup.getByRole('button', { name: 'Fill login', exact: true }).isVisible(),
         { timeout: 30000 },
