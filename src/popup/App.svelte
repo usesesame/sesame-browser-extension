@@ -19,6 +19,7 @@
   } from '../permissions/inline-access'
   import Header from './components/Header.svelte'
   import StatusCard from './components/StatusCard.svelte'
+  import { SESAME_LINKS } from '../shared/links'
   import FillButton from './components/FillButton.svelte'
   import Diagnostics from './components/Diagnostics.svelte'
 
@@ -269,9 +270,7 @@
         : cardResponse?.code === 'insecure-page'
         ? 'Cards are never filled on HTTP pages.'
         : cardResponse?.code === 'untrusted-frame'
-          ? 'Cards are filled only on this page or in Stripe payment frames.'
-          : cardResponse?.code === 'no-fields'
-            ? 'No supported card fields were found on this page.' : ''
+          ? 'Cards are filled only on this page or in Stripe payment frames.' : ''
       const codeResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-one-time-code' }), 4_000)
       codeKind = codeResponse?.state === 'ready' ? normalizeOneTimeCodeKind(codeResponse.kind) : null
     } catch {
@@ -714,7 +713,7 @@
     if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Sesame fills your current password and creates a new one. Save it after the site accepts it.', badge: 'Change form', tone: 'success' as const }
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
     if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }
-    if (current.kind === 'login') return { title: current.hostname || 'This page', message: current.hasUsernameField ? 'Username and password are ready.' : 'A password field is ready.', badge: 'Ready', tone: 'success' as const }
+    if (current.kind === 'login') return { title: current.hostname || 'This page', message: current.hasUsernameField ? 'Username and password fields were found.' : 'A password field was found.', badge: 'Sign-in', tone: 'success' as const }
     if (current.kind === 'username') return { title: current.hostname || 'This page', message: 'A possible username field was found.', badge: 'Username', tone: 'neutral' as const }
     return { title: current.hostname || 'This page', message: 'No visible sign-in fields were found.', badge: 'No form', tone: 'neutral' as const }
   }
@@ -722,6 +721,7 @@
   $: phase = $popupState.phase
   $: pageCard = pagePresentation(page)
   $: pageFillable = page.kind === 'login' || page.kind === 'username'
+  $: statusOffersSupport = phase.name === 'unavailable' || phase.name === 'desktop-offline'
   $: desktopNeedsOpening = desktopState === 'desktop-offline' || desktopState === 'unavailable'
   $: retryNote = reconnectScheduled ? 'Trying the desktop connection again while this window is open.' : ''
 </script>
@@ -732,17 +732,14 @@
   {#if phase.name === 'initial' || phase.name === 'checking'}
     <StatusCard title="Finding the desktop app" message="Checking the private connection on this device." />
   {:else if phase.name === 'unavailable'}
-    <StatusCard title={phase.title} message={phase.message} note={retryNote} tone="warning" />
+    <StatusCard title={phase.title} message={phase.message} note={retryNote} helpUrl={SESAME_LINKS.support} tone="warning" />
   {:else if phase.name === 'desktop-offline'}
-    <StatusCard title={phase.title} message={phase.message} note={retryNote} tone="warning" />
+    <StatusCard title={phase.title} message={phase.message} note={retryNote} helpUrl={SESAME_LINKS.support} tone="warning" />
   {:else if phase.name === 'ready'}
-    <StatusCard title="Connected" message="" tone="success" />
+    <StatusCard title="Connected" message="Sesame asks for approval in the desktop app for every fill." tone="success" />
   {/if}
 
   <section class="page-context" class:success={pageCard.tone === 'success'} class:warning={pageCard.tone === 'warning'} aria-live="polite">
-    <span class="page-icon" aria-hidden="true">
-      <svg viewBox="0 0 512 512" width="17" height="17" focusable="false"><circle cx="256" cy="207" r="58" fill="currentColor" /><path d="M226 247h60l27 126a22 22 0 0 1-22 27h-70a22 22 0 0 1-22-27l27-126Z" fill="currentColor" /><path d="M118 138c-18 32-27 67-28 105" fill="none" stroke="var(--gold-soft-bg)" stroke-width="26" stroke-linecap="round" opacity=".9" /></svg>
-    </span>
     <div><strong>{pageCard.title}</strong><p>{pageCard.message}</p></div>
     <span class="page-badge">{pageCard.badge}</span>
   </section>
@@ -813,15 +810,18 @@
   {#if codeFeedback}<p class="fill-feedback" role="status">{codeFeedback}</p>{/if}
 
   <Diagnostics diagnostic={$popupState.diagnostic} pageDiagnostic={$popupState.pageDiagnostic} />
-  <footer>Version {chrome.runtime.getManifest().version}</footer>
+  <footer>
+    <span>Version {chrome.runtime.getManifest().version}</span>
+    <nav aria-label="Help">
+      {#if !statusOffersSupport}<a href={SESAME_LINKS.support} target="_blank" rel="noopener noreferrer">Support</a>{/if}
+      <a href={SESAME_LINKS.privacy} target="_blank" rel="noopener noreferrer">Privacy</a>
+    </nav>
+  </footer>
 </main>
 
 <style>
   main { padding: 14px; background: var(--bg); }
-  .page-context { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
-  .page-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: var(--radius-md); color: var(--gold-text); background: var(--gold-soft-bg); }
-  .page-context.success .page-icon { color: var(--accent); background: var(--tint); }
-  .page-context.warning .page-icon { color: var(--warn-text); background: var(--warn-bg); }
+  .page-context { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 10px 0; padding: 11px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-raised); }
   .page-context strong { display: block; overflow: hidden; font-family: var(--font-display); font-size: var(--type-3); font-weight: var(--weight-regular); text-overflow: ellipsis; white-space: nowrap; }
   .page-context p, .inline-access p, .fill-feedback { margin: 2px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.45; }
   .page-badge { max-width: 84px; padding: 4px 7px; border-radius: var(--radius-pill); color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-1); font-weight: var(--weight-bold); text-align: center; }
@@ -845,5 +845,9 @@
   .generated-password button:hover { background: var(--tint); }
   .generated-password button:active { transform: scale(.95); }
   .fill-feedback { min-height: 15px; margin: 7px 3px 0; }
-  footer { margin-top: 12px; color: var(--text-faint); font-size: var(--type-2); text-align: center; }
+  footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--text-faint); font-size: var(--type-2); }
+  footer nav { display: flex; gap: var(--space-3); }
+  footer a { color: var(--text-muted); text-underline-offset: 2px; }
+  footer a:hover { color: var(--text-heading); }
+  footer a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-sm); }
 </style>

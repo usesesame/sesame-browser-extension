@@ -1,4 +1,6 @@
-export const DESKTOP_RELEASES_URL = 'https://github.com/usesesame/sesame-desktop/releases/latest'
+import { SESAME_LINKS } from '../shared/links'
+
+export const DESKTOP_RELEASES_URL = SESAME_LINKS.desktopReleases
 
 export type ConnectionAction = 'install' | 'update' | 'open-desktop' | 'reload' | 'retry' | 'none'
 
@@ -99,7 +101,7 @@ const PRESENTATIONS: Record<string, ConnectionPresentation> = {
   },
   'desktop-unavailable': {
     state: 'desktop-closed',
-    title: 'Open Sesame',
+    title: 'Sesame is not running',
     message: 'The browser helper is installed, but the desktop app is not running.',
     action: 'open-desktop',
     actionLabel: 'Open Sesame',

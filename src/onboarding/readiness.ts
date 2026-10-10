@@ -1,10 +1,5 @@
 import { isRecord } from '../shared/values'
-import {
-  CHECKING_PRESENTATION,
-  READY_PRESENTATION,
-  presentConnection,
-  type ConnectionPresentation,
-} from '../protocol/connection-presentation'
+import { presentConnection, type ConnectionPresentation } from '../protocol/connection-presentation'
 
 export type PermissionState = 'granted' | 'not-granted'
 
@@ -17,7 +12,7 @@ export interface OnboardingView {
   headline: string
   lead: string
   ready: boolean
-  connection: ConnectionPresentation
+  connection: ConnectionPresentation | null
   showPermissionStep: boolean
   showConnectionAction: boolean
 }
@@ -39,7 +34,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
       headline: 'Connecting to Sesame',
       lead: 'Checking the private connection on this device.',
       ready: false,
-      connection: CHECKING_PRESENTATION,
+      connection: null,
       showPermissionStep: !permissionGranted,
       showConnectionAction: false,
     }
@@ -49,7 +44,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
       headline: 'Sesame is ready',
       lead: 'Focus a sign-in field on any HTTPS site and the Sesame fill control appears next to it.',
       ready: true,
-      connection: READY_PRESENTATION,
+      connection: null,
       showPermissionStep: false,
       showConnectionAction: false,
     }
@@ -59,7 +54,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
       headline: 'Sesame is connected',
       lead: 'One permission is left. Allow Sesame on HTTPS sites so the fill control can appear on sign-in and registration fields.',
       ready: false,
-      connection: READY_PRESENTATION,
+      connection: null,
       showPermissionStep: true,
       showConnectionAction: false,
     }
@@ -74,4 +69,31 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
     showPermissionStep: !permissionGranted,
     showConnectionAction: true,
   }
+}
+
+export type StepState = 'done' | 'current' | 'waiting'
+
+export interface SetupStep {
+  title: string
+  detail: string
+  state: StepState
+}
+
+export function setupSteps(permission: PermissionState, desktop: DesktopState): SetupStep[] {
+  const connected = desktop.status === 'ready'
+  const allowed = permission === 'granted'
+  return [
+    {
+      title: 'Connect the desktop app',
+      detail: connected
+        ? 'Sesame is open and connected.'
+        : desktop.status === 'checking' ? 'Looking for the desktop app.' : 'Install Sesame and open it once.',
+      state: connected ? 'done' : 'current',
+    },
+    {
+      title: 'Allow website access',
+      detail: allowed ? 'Sesame can appear on HTTPS sign-in fields.' : 'Lets the fill control appear next to sign-in fields.',
+      state: allowed ? 'done' : connected ? 'current' : 'waiting',
+    },
+  ]
 }
