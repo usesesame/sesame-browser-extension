@@ -36,8 +36,8 @@ a page popover, dialog, or fullscreen element. A cover shown for less than about
 a tenth of a second can still escape that check. Browsers without the check,
 such as Firefox, fill only from the popup. Extension pages refuse to run inside
 a frame. You can pause the control for the current origin, manage exceptions in
-Options, or revoke the permission. The popup and `Ctrl+Shift+L` remain
-available.
+Options, or revoke the permission. The popup and the fill shortcut remain
+available, which is `Alt+Shift+L` on Windows and Linux and `Command+Shift+L` on Mac.
 
 ## Build
 

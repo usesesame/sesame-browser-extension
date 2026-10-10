@@ -47,6 +47,7 @@ const BROWSER_OWNED_SHORTCUTS = [
   'Ctrl+Shift+N',
   'Ctrl+Shift+T',
   'Ctrl+Shift+B',
+  'Ctrl+Shift+L',
   'Ctrl+Shift+O',
   'Ctrl+Shift+D',
   'Ctrl+Shift+G',
@@ -76,4 +77,32 @@ test('every browser manifest suggests the same shortcuts', () => {
   const shortcuts = (browser) => JSON.stringify(JSON.parse(read('manifests', `${browser}.json`)).commands)
   assert.equal(shortcuts('edge'), shortcuts('chrome'))
   assert.equal(shortcuts('firefox'), shortcuts('chrome'))
+})
+
+test('the documentation names the suggested shortcut for every platform', () => {
+  const commands = JSON.parse(read('manifests', 'chrome.json')).commands
+  const documents = [read('README.md'), read('DESIGN.md'), read('src', 'popup', 'App.svelte'), read('src', 'options', 'App.svelte'), read('src', 'onboarding', 'App.svelte')]
+  for (const [name, command] of Object.entries(commands)) {
+    const { default: windowsAndLinux, mac } = command.suggested_key
+    assert.match(mac, /^Command\+/, `${name} suggests ${mac} on Mac, which is not a Command shortcut`)
+    assert.notEqual(mac, windowsAndLinux, `${name} suggests the same shortcut on every platform`)
+    const documented = documents.filter((document) => document.includes(windowsAndLinux))
+    assert.ok(documented.length > 0, `${name} suggests ${windowsAndLinux}, which no document names`)
+    for (const document of documented) {
+      assert.ok(document.includes(mac), `a document names ${windowsAndLinux} for ${name} without ${mac} for Mac`)
+    }
+  }
+})
+
+test('the Mac suggestions are unique and avoid common Command shortcuts', () => {
+  const MAC_BROWSER_OWNED_SHORTCUTS = ['Command+Shift+T', 'Command+Shift+N', 'Command+Shift+B', 'Command+Shift+D', 'Command+Shift+J', 'Command+Shift+O', 'Command+Shift+R', 'Command+Shift+Delete']
+  for (const browser of ['chrome', 'edge', 'firefox']) {
+    const commands = JSON.parse(read('manifests', `${browser}.json`)).commands
+    const suggested = Object.entries(commands).map(([name, command]) => [name, command.suggested_key.mac])
+    for (const [name, shortcut] of suggested) {
+      assert.ok(shortcut, `${browser} command ${name} has no Mac suggestion`)
+      assert.ok(!MAC_BROWSER_OWNED_SHORTCUTS.includes(shortcut), `${browser} command ${name} suggests ${shortcut}, which the browser already uses on Mac`)
+    }
+    assert.equal(new Set(suggested.map(([, shortcut]) => shortcut)).size, suggested.length, `${browser} suggests one Mac shortcut twice`)
+  }
 })
