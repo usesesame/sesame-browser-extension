@@ -2,6 +2,7 @@
   export let title: string
   export let message: string
   export let note: string = ''
+  export let helpUrl: string = ''
   export let tone: 'neutral' | 'success' | 'warning' | 'error' = 'neutral'
 
   const toneClass = {
@@ -16,9 +17,12 @@
   <h2>{title}</h2>
   {#if message}<p>{message}</p>{/if}
   {#if note}<p class="note">{note}</p>{/if}
+  {#if helpUrl}<p class="help"><a href={helpUrl} target="_blank" rel="noopener noreferrer">Need help? Get support</a></p>{/if}
 </section>
 
 <style>
+  .help { margin-top: 8px; }
+  .help a { color: inherit; font-weight: var(--weight-medium); text-underline-offset: 2px; }
   .card {
     border: 0;
     border-radius: var(--radius-md);

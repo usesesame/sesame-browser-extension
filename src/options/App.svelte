@@ -5,6 +5,13 @@
     removeAllInlinePermissions, removeLegacySitePermissions, setSitePaused,
     setCardSuggestionsEnabled,
   } from '../permissions/inline-access'
+  import { safeDiagnosticText } from '../protocol/diagnostics'
+  import { desktopStateFromResponse, type DesktopState } from '../onboarding/readiness'
+  import { presentConnection, READY_PRESENTATION, CHECKING_PRESENTATION } from '../protocol/connection-presentation'
+  import { SESAME_LINKS } from '../shared/links'
+  import { HELP_LINKS } from './help-links'
+  import Icon from '../shared/Icon.svelte'
+  import Switch from './Switch.svelte'
 
   let enabled = false
   let legacyAccess = false
@@ -12,8 +19,79 @@
   let working = false
   let status = ''
   let cardSuggestionsEnabled = true
+  let desktop: DesktopState = { status: 'checking' }
+  let checking = false
+  let opening = false
+  let diagnostic: Record<string, unknown> | undefined
+  let copied = false
 
-  onMount(refresh)
+  const version = chrome.runtime.getManifest().version
+  const setupGuideUrl = chrome.runtime.getURL('onboarding.html')
+  const shortcutsUrl = navigator.userAgent.includes('Edg/') ? 'edge://extensions/shortcuts' : 'chrome://extensions/shortcuts'
+
+  function openShortcuts() {
+    void chrome.tabs.create({ url: shortcutsUrl }).catch(() => {
+      status = 'Open your browser extension settings and choose Keyboard shortcuts.'
+    })
+  }
+
+  $: connection = desktop.status === 'ready'
+    ? READY_PRESENTATION
+    : desktop.status === 'checking' ? CHECKING_PRESENTATION : presentConnection(desktop.code)
+
+  onMount(() => {
+    void refresh()
+    void checkDesktop()
+    const recheck = () => {
+      if (desktop.status !== 'ready') void checkDesktop()
+    }
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
+  })
+
+  async function checkDesktop() {
+    if (checking) return
+    checking = true
+    try {
+      const response = await Promise.race([
+        chrome.runtime.sendMessage({ type: 'sesame:connect', force: true }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 9_000)),
+      ])
+      desktop = desktopStateFromResponse(response)
+      diagnostic = (response as { diagnostic?: Record<string, unknown> } | undefined)?.diagnostic
+    } catch {
+      desktop = { status: 'blocked', code: 'extension-response-timeout' }
+    } finally {
+      checking = false
+    }
+  }
+
+  async function copyDetails() {
+    if (!diagnostic) return
+    try {
+      await navigator.clipboard.writeText(safeDiagnosticText(diagnostic))
+      copied = true
+      setTimeout(() => { copied = false }, 1_500)
+    } catch {
+      status = 'Could not copy the details.'
+    }
+  }
+
+  async function openDesktop() {
+    if (opening) return
+    opening = true
+    status = ''
+    try {
+      const result = await chrome.runtime.sendMessage({ type: 'sesame:open-desktop' })
+      status = result?.state === 'opened'
+        ? 'Sesame is opening. Unlock it, then check again.'
+        : 'Sesame could not be opened. Start the desktop app once, then check again.'
+    } catch {
+      status = 'Sesame could not be opened. Start the desktop app once, then check again.'
+    } finally {
+      opening = false
+    }
+  }
 
   async function refresh() {
     try {
@@ -109,76 +187,153 @@
 </script>
 
 <main class="options">
-  <h1>Settings</h1>
-  <p class="intro">Enable once. Sesame then appears automatically on safe sign-in and registration fields across HTTPS websites.</p>
+  <h1>Sesame settings</h1>
 
-  <section class="setting">
-    <div>
-      <strong>Show Sesame on websites</strong>
-      <p>{enabled ? 'Active across HTTPS websites.' : legacyAccess ? 'Older site-by-site access is active. Upgrade to global access.' : 'Currently disabled.'}</p>
+  <section class="connection" class:ok={desktop.status === 'ready'} class:warn={desktop.status === 'blocked'} aria-live="polite">
+    <div class="state">
+      <Icon name={desktop.status === 'ready' ? 'check' : desktop.status === 'blocked' ? 'alert' : 'refresh'} size={22} />
+      <div class="copy">
+        <strong>{connection.title}</strong>
+        <p>{desktop.status === 'ready' ? 'Sesame fills only after you approve in the desktop app.' : connection.message}</p>
+      </div>
     </div>
-    <div class="setting-actions">
-      {#if enabled}
-        <button class="danger" type="button" disabled={working} on:click={toggleGlobal}>Turn off</button>
-      {:else if legacyAccess}
-        <button type="button" disabled={working} on:click={upgradeGlobal}>{working ? 'Upgrading…' : 'Upgrade'}</button>
-        <button class="danger" type="button" disabled={working} on:click={toggleGlobal}>Turn off</button>
-      {:else}
-        <button type="button" disabled={working} on:click={toggleGlobal}>{working ? 'Enabling…' : 'Enable'}</button>
-      {/if}
-    </div>
-  </section>
-
-  <p class="privacy">Sesame detects field structure but never reads existing values. Filling still requires desktop approval and never submits the form.</p>
-
-  <section class="setting">
-    <div><strong>Suggest cards on checkout forms</strong><p>{cardSuggestionsEnabled ? 'Available on HTTPS top-level forms. Each fill needs desktop confirmation.' : 'Disabled. Sesame will not offer saved cards in the browser.'}</p></div>
-    <button class:danger={cardSuggestionsEnabled} type="button" disabled={working} on:click={toggleCardSuggestions}>{cardSuggestionsEnabled ? 'Turn off' : 'Turn on'}</button>
-  </section>
-
-  <section class="paused">
-    <div class="section-heading">
-      <div><strong>Paused inline controls</strong><p>Only sites where you explicitly hid the inline control are stored here.</p></div>
-      {#if pausedOrigins.length > 1}<button type="button" on:click={resumeAll}>Resume all</button>{/if}
-    </div>
-    {#if pausedOrigins.length === 0}
-      <p class="empty">No paused sites.</p>
+    {#if desktop.status !== 'ready'}
+      <div class="actions">
+        {#if connection.action === 'install' || connection.action === 'update'}
+          <a class="btn primary" href={SESAME_LINKS.desktopReleases} target="_blank" rel="noopener noreferrer">{connection.actionLabel}</a>
+        {:else if connection.action === 'open-desktop'}
+          <button class="btn primary" type="button" disabled={opening} on:click={openDesktop}>{opening ? 'Opening…' : connection.actionLabel}</button>
+        {:else if connection.action === 'reload'}
+          <button class="btn primary" type="button" on:click={() => chrome.runtime.reload()}>{connection.actionLabel}</button>
+        {/if}
+        <button class="btn" type="button" disabled={checking} on:click={checkDesktop}>{checking ? 'Checking…' : 'Check again'}</button>
+        {#if diagnostic}<button class="btn" type="button" on:click={copyDetails}>{copied ? 'Copied' : 'Copy details for support'}</button>{/if}
+      </div>
     {:else}
-      <ul>
+      <div class="actions"><button class="btn" type="button" disabled={checking} on:click={checkDesktop}>{checking ? 'Checking…' : 'Check again'}</button></div>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Website access</h2>
+    <div class="row">
+      <div class="copy">
+        <strong>Show Sesame on websites</strong>
+        <p>{enabled ? 'Sesame appears on HTTPS sign-in and registration fields.' : legacyAccess ? 'Older site-by-site access is active. Upgrade to cover every HTTPS site.' : 'Sesame stays off on websites, but the popup and the keyboard shortcut still work.'}</p>
+      </div>
+      {#if legacyAccess}
+        <button class="btn" type="button" disabled={working} on:click={upgradeGlobal}>{working ? 'Upgrading…' : 'Upgrade'}</button>
+      {/if}
+      <Switch checked={enabled || legacyAccess} disabled={working} label="Show Sesame on websites" onToggle={toggleGlobal} />
+    </div>
+    <div class="row">
+      <div class="copy">
+        <strong>Suggest cards on checkout forms</strong>
+        <p>{cardSuggestionsEnabled ? 'Sesame offers cards on HTTPS checkout forms, and each fill needs desktop approval.' : 'Sesame will not offer saved cards in the browser.'}</p>
+      </div>
+      <Switch checked={cardSuggestionsEnabled} disabled={working} label="Suggest cards on checkout forms" onToggle={toggleCardSuggestions} />
+    </div>
+    <div class="row">
+      <div class="copy">
+        <strong>Paused sites</strong>
+        <p>{pausedOrigins.length === 0 ? 'No site is paused. A site appears here when you hide the inline control on it.' : 'The inline control is hidden on these sites.'}</p>
+      </div>
+      {#if pausedOrigins.length > 1}<button class="btn" type="button" on:click={resumeAll}>Resume all</button>{/if}
+    </div>
+    {#if pausedOrigins.length > 0}
+      <ul class="paused">
         {#each pausedOrigins as origin (origin)}
-          <li><span>{new URL(origin).hostname}</span><button type="button" on:click={() => resume(origin)}>Resume</button></li>
+          <li><span>{new URL(origin).hostname}</span><button class="btn small" type="button" on:click={() => resume(origin)}>Resume</button></li>
         {/each}
       </ul>
     {/if}
   </section>
 
-  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> for an identity. Browser shortcut conflicts can be changed from the browser's extension shortcut settings.</p></section>
-  {#if status}<p class="status" role="status">{status}</p>{/if}
+  <section>
+    <div class="section-head">
+      <h2>Keyboard</h2>
+      <button class="btn small" type="button" on:click={openShortcuts}>Change shortcuts</button>
+    </div>
+    <div class="row">
+      <div class="copy">
+        <strong>Fill a login</strong>
+        <p>It works on any page, with or without website access.</p>
+      </div>
+      <span class="keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd></span>
+    </div>
+    <div class="row">
+      <div class="copy">
+        <strong>Fill an identity</strong>
+        <p>It fills name, address and contact fields.</p>
+      </div>
+      <span class="keys"><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd></span>
+    </div>
+  </section>
+
+  {#if status}{#key status}<p class="status" role="status">{status}</p>{/key}{/if}
+
+  <section>
+    <h2>Help</h2>
+    <ul class="links">
+      <li><a href={setupGuideUrl} target="_blank" rel="noopener noreferrer">Setup guide</a><span class="hint">Go through the desktop app and website access again.</span></li>
+      {#each HELP_LINKS as link (link.href)}
+        <li><a href={link.href} target="_blank" rel="noopener noreferrer">{link.label}</a><span class="hint">{link.hint}</span></li>
+      {/each}
+    </ul>
+  </section>
+
+  <p class="version">Version {version}. Licensed under AGPL-3.0-or-later. Sesame never reads existing field values and never submits a form.</p>
 </main>
 
 <style>
-  .options { box-sizing: border-box; max-width: 680px; margin: 40px auto; padding: 32px; background: var(--surface); border-radius: var(--radius-xl); border: 0; box-shadow: var(--shadow-raised); }
+  .options { box-sizing: border-box; max-width: 680px; margin: 40px auto; padding: var(--space-6); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); }
   h1 { margin: 0; color: var(--text-heading); font-family: var(--font-display); font-variation-settings: var(--font-display-settings); font-size: var(--type-6); font-weight: var(--weight-regular); line-height: 1.2; }
-  .intro { max-width: 560px; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
-  .setting, .section-heading, li { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-  .setting { margin-top: 24px; padding: 16px; border: 0; border-radius: var(--radius-md); background: var(--surface-inset); }
-  .setting-actions { display: flex; align-items: center; gap: 8px; }
-  strong { font-size: var(--type-3); font-weight: var(--weight-bold); color: var(--text-heading); } p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); }
-  button { display: inline-flex; min-height: var(--control-h-md); align-items: center; justify-content: center; gap: var(--control-gap); border: 1px solid var(--button-secondary-border); border-radius: var(--control-radius); padding: 0 var(--control-px-md); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); font-family: var(--font-ui); font-weight: var(--control-weight); cursor: pointer; transition: var(--control-transition); }
-  button:hover { background: var(--button-secondary-hover-bg); }
-  button:active { transform: var(--control-press); }
-  button.danger { border-color: transparent; color: var(--danger); background: transparent; box-shadow: none; }
-  button.danger:hover { background: var(--danger-tint); }
-  button:disabled { cursor: wait; opacity: var(--control-disabled); }
-  button:disabled:active { transform: none; }
-  .privacy, .shortcut { margin-top: 16px; padding: 13px; border-radius: var(--radius-md); background: var(--tint); line-height: 1.5; }
-  .paused { margin-top: 28px; }
-  .section-heading > button { font-size: var(--type-2); }
-  ul { margin: 12px 0 0; padding: 0; list-style: none; }
-  li { padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: var(--type-2); }
-  li button { min-height: var(--control-h-sm); padding: 0 var(--control-px-sm); font-size: var(--type-2); }
-  .empty { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-inset); }
-  .shortcut { background: var(--surface-inset); }
-  kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }
-  .status { margin-top: 18px; color: var(--accent); font-weight: var(--weight-bold); }
+  .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); margin: var(--space-6) 0 var(--space-2); }
+  .section-head h2 { margin: 0; }
+  h2 { margin: var(--space-6) 0 var(--space-2); color: var(--text-heading); font-size: var(--type-4); font-weight: var(--weight-bold); }
+  strong { color: var(--text-heading); font-size: var(--type-3); font-weight: var(--weight-medium); }
+  p { margin: 2px 0 0; color: var(--text-muted); line-height: 1.5; }
+
+  .connection { display: grid; gap: var(--space-4); margin-top: var(--space-5); padding: var(--space-4) var(--space-5); border-radius: var(--radius-lg); background: var(--surface-inset); }
+  .connection.ok { background: var(--ok-bg); }
+  .connection.warn { background: var(--warn-bg); }
+  .state { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; color: var(--text-faint); }
+  .state :global(svg) { flex: none; margin-top: 1px; }
+  .connection.ok .state { color: var(--ok-text); }
+  .connection.warn .state { color: var(--warn-text); }
+  .connection.ok strong, .connection.warn strong { color: inherit; }
+  .connection.ok p, .connection.warn p { color: inherit; }
+  .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-left: calc(22px + var(--space-3)); }
+
+  .row { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) 0; border-top: 1px solid var(--border-soft); }
+  .copy { flex: 1; min-width: 0; }
+  .keys { flex: none; color: var(--text-2); white-space: nowrap; }
+
+  .paused { margin: 0; padding: 0; list-style: none; }
+  .paused li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--border-soft); color: var(--text); font-size: var(--type-3); }
+
+  .btn { display: inline-flex; min-height: var(--control-h-md); align-items: center; justify-content: center; border: 1px solid var(--button-secondary-border); border-radius: var(--control-radius); padding: 0 var(--control-px-md); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); font: var(--control-weight) var(--type-2) var(--font-ui); text-decoration: none; white-space: nowrap; cursor: pointer; transition: var(--control-transition); }
+  .btn:hover { background: var(--button-secondary-hover-bg); }
+  .btn:active { transform: var(--control-press); }
+  .btn:disabled { cursor: wait; opacity: var(--control-disabled); }
+  .btn.primary { border-color: transparent; color: var(--on-accent); background: var(--accent); box-shadow: var(--button-shadow); }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.small { min-height: var(--control-h-sm); padding: 0 var(--control-px-sm); }
+
+  .status { margin: var(--space-4) 0 0; color: var(--accent); font-weight: var(--weight-bold); animation: rise .24s ease, leave .4s ease 6s forwards; }
+  @keyframes leave { to { opacity: 0; visibility: hidden; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
+
+  .links { margin: 0; padding: 0; list-style: none; }
+  .links li { display: grid; gap: var(--space-1); padding: var(--space-3) 0; border-top: 1px solid var(--border-soft); }
+  .links a { justify-self: start; color: var(--accent-link); font-size: var(--type-3); font-weight: var(--weight-medium); }
+  .links .hint { color: var(--text-muted); }
+
+  .version { margin-top: var(--space-6); color: var(--text-faint); font-size: var(--type-2); }
+  kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface-inset); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }
+
+  @media (max-width: 600px) {
+    .options { margin: 0; padding: var(--space-5) var(--space-4); border-radius: 0; box-shadow: none; }
+    .row { flex-wrap: wrap; }
+  }
 </style>

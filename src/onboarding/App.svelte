@@ -2,7 +2,9 @@
   import { onMount } from 'svelte'
   import { dismissOnboarding, GLOBAL_HTTPS_PATTERN } from '../permissions/inline-access'
   import { DESKTOP_RELEASES_URL } from '../protocol/connection-presentation'
-  import { desktopStateFromResponse, onboardingView, type DesktopState, type PermissionState } from './readiness'
+  import { SESAME_LINKS } from '../shared/links'
+  import { desktopStateFromResponse, onboardingView, setupSteps, type DesktopState, type PermissionState } from './readiness'
+  import Icon from '../shared/Icon.svelte'
 
   const CONNECTION_TIMEOUT_MS = 9_000
   const POPUP_HINT = 'The popup and the keyboard shortcut keep working without website access.'
@@ -15,6 +17,7 @@
   let status = ''
 
   $: view = onboardingView(permission, desktop)
+  $: steps = setupSteps(permission, desktop)
 
   onMount(() => {
     void initialize()
@@ -126,16 +129,40 @@
     <h1>{view.headline}</h1>
     <p class="lead">{view.lead}</p>
 
+    <ol class="steps">
+      {#each steps as step, index (step.title)}
+        <li class={step.state}>
+          <span class="marker">{#if step.state === 'done'}<Icon name="check" size={14} />{:else}{index + 1}{/if}</span>
+          <div>
+            <strong>{step.title}</strong>
+            <p>{step.detail}</p>
+            {#if index === 1 && view.showPermissionStep}
+              <button class="primary allow" type="button" disabled={working} on:click={enableEverywhere}>
+                {working ? 'Waiting for the browser…' : 'Enable on websites'}
+              </button>
+            {/if}
+          </div>
+        </li>
+      {/each}
+    </ol>
+
     {#if view.ready}
-      <div class="success" role="status">Sesame is enabled on HTTPS websites.</div>
+      <h2>Try it</h2>
+      <ol class="tips">
+        <li>Open a site you have a saved login for and click its username field.</li>
+        <li>Choose the Sesame control next to the field.</li>
+        <li>Approve the request in the desktop app. Sesame fills the fields and you press Sign in yourself.</li>
+      </ol>
       <button class="primary" type="button" on:click={finish}>Close this tab</button>
     {:else}
-      <section class="connection" class:ok={view.connection.state === 'ready'} aria-live="polite">
-        <strong>{view.connection.title}</strong>
-        {#if view.connection.message}<p>{view.connection.message}</p>{/if}
-      </section>
+      {#if view.connection}
+        <section class="connection" aria-live="polite">
+          <strong>{view.connection.title}</strong>
+          {#if view.connection.message}<p>{view.connection.message}</p>{/if}
+        </section>
+      {/if}
 
-      {#if view.showConnectionAction}
+      {#if view.connection && view.showConnectionAction}
         <div class="actions">
           {#if view.connection.action === 'install' || view.connection.action === 'update'}
             <a class={view.showPermissionStep ? 'secondary' : 'primary'} href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">{view.connection.actionLabel}</a>
@@ -157,24 +184,13 @@
       <li>Sesame never submits or advances a form.</li>
     </ul>
 
-    {#if view.showPermissionStep}
-      <section class="permission">
-        <div>
-          <strong>Show Sesame on login fields</strong>
-          <p>Allow Sesame on HTTPS sites. The fill control appears when you focus a sign-in or registration field.</p>
-        </div>
-        <button class="primary" type="button" disabled={working} on:click={enableEverywhere}>
-          {working ? 'Waiting for the browser…' : 'Enable on websites'}
-        </button>
-      </section>
-    {/if}
-
     {#if !view.ready}
       <button class="secondary not-now" type="button" on:click={finish}>Not now</button>
     {/if}
 
     {#if status}<p class="status" role="status">{status}</p>{/if}
-    <p class="shortcut">{POPUP_HINT} Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> for an identity.</p>
+    <p class="shortcut">{#if !view.ready}{POPUP_HINT + ' '}{/if}Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> for an identity.</p>
+    <p class="help">Stuck? <a href={SESAME_LINKS.support} target="_blank" rel="noopener noreferrer">Get support</a> or read the <a href={SESAME_LINKS.privacy} target="_blank" rel="noopener noreferrer">privacy policy</a>. Settings are in the Sesame popup.</p>
   </div>
 </main>
 
@@ -204,12 +220,20 @@
   .lead { margin: 14px 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
   ul { margin: 22px 0 28px; padding-left: 20px; color: var(--text); font-size: var(--type-3); line-height: 1.75; }
   li::marker { color: var(--text-faint); }
+  .steps { display: grid; gap: var(--space-3); margin: 22px 0 0; padding: 0; list-style: none; }
+  .steps li { display: flex; align-items: flex-start; gap: var(--space-3); transition: opacity .2s ease; }
+  .steps li.waiting .marker, .steps li.waiting strong, .steps li.waiting p { opacity: .6; }
+  .steps strong { color: var(--text-heading); font-size: var(--type-3); font-weight: var(--weight-medium); }
+  .steps p { margin: 1px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.45; }
+  .marker { display: grid; flex: none; width: 24px; height: 24px; place-items: center; border-radius: 50%; border: 1px solid var(--border-strong); color: var(--text-2); font-size: var(--type-1); font-weight: var(--weight-bold); transition: background-color .2s ease, color .2s ease; }
+  .steps li.current .marker { border-color: var(--accent); color: var(--accent); }
+  .steps li.done .marker { border-color: transparent; color: var(--on-accent); background: var(--accent); }
+  h2 { margin: 22px 0 0; color: var(--text-heading); font-size: var(--type-4); font-weight: var(--weight-bold); }
+  .tips { margin: 8px 0 24px; padding-left: 20px; color: var(--text); font-size: var(--type-3); line-height: 1.6; }
+  .tips li { padding-left: 4px; }
   .connection { margin: 18px 0; padding: 13px 16px; border-radius: var(--radius-md); background: var(--warn-bg); }
-  .connection.ok { background: var(--ok-bg); }
   .connection strong { display: block; color: var(--warn-text); font-size: var(--type-3); font-weight: var(--weight-bold); }
-  .connection.ok strong { color: var(--ok-text); }
   .connection p { margin: 4px 0 0; color: var(--warn-text); font-size: var(--type-2); line-height: 1.5; }
-  .connection.ok p { color: var(--ok-text); }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
   button, a.primary, a.secondary {
     display: inline-flex;
@@ -235,13 +259,12 @@
   .secondary, a.secondary { border-color: var(--button-secondary-border); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); }
   .secondary:hover, a.secondary:hover { background: var(--button-secondary-hover-bg); }
   button:disabled { cursor: wait; opacity: var(--control-disabled); }
-  .permission { display: grid; gap: 10px; margin: 0 0 22px; padding: 13px 16px; border-radius: var(--radius-md); background: var(--surface-inset); }
-  .permission strong { font-size: var(--type-3); font-weight: var(--weight-bold); }
-  .permission p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .allow { margin-top: var(--space-3); }
   .not-now { margin-top: 4px; }
-  .success { margin-bottom: 18px; padding: 13px 16px; border-radius: var(--radius-md); color: var(--ok-text); background: var(--ok-bg); font-weight: var(--weight-medium); }
   .status, .shortcut { color: var(--text-muted); font-size: var(--type-2); }
   .status { margin-top: 12px; }
   .shortcut { margin-top: 26px; }
+  .help { margin: 12px 0 0; color: var(--text-muted); font-size: var(--type-2); }
+  .help a { color: var(--accent); font-weight: var(--weight-medium); }
   kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface-inset); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }
 </style>
