@@ -152,7 +152,7 @@
     {/if}
   </section>
 
-  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> for a login or <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> for an identity. Browser shortcut conflicts can be changed from the browser's extension shortcut settings.</p></section>
+  <section class="shortcut"><strong>Keyboard fill</strong><p>Press <kbd>Alt+Shift+L</kbd> for a login or <kbd>Alt+Shift+F</kbd> for an identity on Windows and Linux, or <kbd>Command+Shift+L</kbd> for a login or <kbd>Command+Shift+I</kbd> for an identity on Mac. Browser shortcut conflicts can be changed from the browser's extension shortcut settings.</p></section>
   {#if status}<p class="status" role="status">{status}</p>{/if}
 </main>
 

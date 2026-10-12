@@ -327,7 +327,7 @@
       if (activeTabId !== null && activeOrigin && !inlineSitePaused) {
         await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content-overlay.js'] })
       }
-      inlineFeedback = 'Enabled everywhere. Focus a sign-in field, or press Ctrl+Shift+L for a login or Alt+Shift+F for an identity.'
+      inlineFeedback = 'Enabled everywhere. Focus a sign-in field, or press Alt+Shift+L for a login or Alt+Shift+F for an identity on Windows and Linux, or Command+Shift+L for a login or Command+Shift+I for an identity on Mac.'
     } catch {
       inlineFeedback = 'Could not enable website access. Reload the extension and try again.'
     } finally {
@@ -755,7 +755,7 @@
     </section>
   {:else}
     <section class="inline-access active-everywhere">
-      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Ctrl+Shift+L for a login or Alt+Shift+F for an identity.'}</p></div>
+      <div><strong>{inlineSitePaused ? 'Inline control paused here' : 'Available on login fields'}</strong><p>{inlineSitePaused ? 'Keyboard and popup filling still work here.' : 'Focus a field, or press Alt+Shift+L for a login or Alt+Shift+F for an identity on Windows and Linux, or Command+Shift+L for a login or Command+Shift+I for an identity on Mac.'}</p></div>
       {#if activeOrigin}
         <button type="button" class:enabled={!inlineSitePaused} disabled={inlineWorking} on:click={toggleSitePause}>{inlineSitePaused ? 'Resume' : 'Pause here'}</button>
       {/if}
