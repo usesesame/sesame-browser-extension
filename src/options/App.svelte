@@ -257,16 +257,14 @@
     <div class="row">
       <div class="copy">
         <strong>Fill a login</strong>
-        <p>It works on any page, with or without website access.</p>
+        <p>It works on any page, with or without website access. Press <kbd>Alt+Shift+L</kbd> on Windows and Linux or <kbd>Command+Shift+L</kbd> on Mac.</p>
       </div>
-      <span class="keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd></span>
     </div>
     <div class="row">
       <div class="copy">
         <strong>Fill an identity</strong>
-        <p>It fills name, address and contact fields.</p>
+        <p>It fills name, address and contact fields. Press <kbd>Alt+Shift+F</kbd> on Windows and Linux or <kbd>Command+Shift+I</kbd> on Mac.</p>
       </div>
-      <span class="keys"><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd></span>
     </div>
   </section>
 
@@ -307,7 +305,6 @@
 
   .row { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) 0; border-top: 1px solid var(--border-soft); }
   .copy { flex: 1; min-width: 0; }
-  .keys { flex: none; color: var(--text-2); white-space: nowrap; }
 
   .paused { margin: 0; padding: 0; list-style: none; }
   .paused li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--border-soft); color: var(--text); font-size: var(--type-3); }
