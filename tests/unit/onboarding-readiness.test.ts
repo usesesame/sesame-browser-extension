@@ -6,7 +6,7 @@ describe('onboarding readiness', () => {
     const view = onboardingView('granted', { status: 'blocked', code: 'host-not-found' })
     expect(view.ready).toBe(false)
     expect(view.headline).not.toMatch(/is ready/i)
-    expect(view.connection.action).toBe('install')
+    expect(view.connection?.action).toBe('install')
     expect(view.showConnectionAction).toBe(true)
     expect(view.showPermissionStep).toBe(false)
   })
@@ -22,20 +22,27 @@ describe('onboarding readiness', () => {
     const view = onboardingView('not-granted', { status: 'ready' })
     expect(view.showPermissionStep).toBe(true)
     expect(view.showConnectionAction).toBe(false)
-    expect(view.connection.state).toBe('ready')
+  })
+
+  it('shows a connection notice only when the desktop is not connected', () => {
+    expect(onboardingView('not-granted', { status: 'ready' }).connection).toBeNull()
+    expect(onboardingView('granted', { status: 'ready' }).connection).toBeNull()
+    expect(onboardingView('not-granted', { status: 'checking' }).connection).toBeNull()
+    expect(onboardingView('not-granted', { status: 'blocked', code: 'host-not-found' }).connection?.title)
+      .toBe('Sesame desktop app not found')
   })
 
   it('asks to open the desktop when the helper cannot reach it', () => {
     const view = onboardingView('granted', { status: 'blocked', code: 'desktop-unavailable' })
     expect(view.ready).toBe(false)
-    expect(view.connection.action).toBe('open-desktop')
-    expect(view.connection.actionLabel).toBe('Open Sesame')
+    expect(view.connection?.action).toBe('open-desktop')
+    expect(view.connection?.actionLabel).toBe('Open Sesame')
   })
 
   it('treats a failed check as not ready with a retry', () => {
     const view = onboardingView('granted', { status: 'blocked', code: 'timeout' })
     expect(view.ready).toBe(false)
-    expect(view.connection.action).toBe('retry')
+    expect(view.connection?.action).toBe('retry')
     expect(view.showConnectionAction).toBe(true)
   })
 

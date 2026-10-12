@@ -1556,6 +1556,11 @@ describe('extension browser suite', () => {
     const body = await popup.evaluate(() => document.body.innerText)
     expect(body).not.toMatch(/desktop app is not running/)
     await expect.poll(
+      async () => popup.getByRole('link', { name: /support/i }).count(),
+      { timeout: 5000 },
+    ).toBe(1)
+    expect(await popup.getByRole('link', { name: 'Need help? Get support' }).count()).toBe(1)
+    await expect.poll(
       async () => popup.getByRole('button', { name: 'Get Sesame' }).isVisible(),
       { timeout: 5000 },
     ).toBe(true)
@@ -1565,6 +1570,30 @@ describe('extension browser suite', () => {
     ).toBe(true)
     await popup.close()
   }, 15000)
+
+  it('keeps the footer support link when the desktop is connected', async () => {
+    const extensionId = new URL(worker.url()).host
+    const popup = await context.newPage()
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+    await popup.evaluate(() => {
+      const runtime = chrome.runtime as {
+        sendMessage: (message: { type?: string }) => Promise<unknown>
+      }
+      runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+        ? { state: 'ready', capabilities: { desktopAvailable: true }, diagnostic: { code: 'connected' } }
+        : { state: 'unavailable', code: 'page-check-failed' }
+    })
+    await recheckPopup(popup)
+    await expect.poll(
+      async () => popup.locator('section.card[role="status"] h2').innerText(),
+      { timeout: 5000 },
+    ).toBe('Connected')
+    expect(await popup.locator('section.card[role="status"] p').innerText())
+      .toBe('Sesame asks for approval in the desktop app for every fill.')
+    expect(await popup.getByRole('link', { name: /support/i }).count()).toBe(1)
+    expect(await popup.getByRole('link', { name: 'Support', exact: true }).count()).toBe(1)
+    await popup.close()
+  }, 20000)
 
   it('shows optional website access without implying the desktop is ready', async () => {
     const extensionId = new URL(worker.url()).host
@@ -1632,6 +1661,38 @@ describe('extension browser suite', () => {
     ).toBe(true)
     await onboarding.close()
   }, 15000)
+
+  it('states each setup fact once when the desktop is connected', async () => {
+    const extensionId = new URL(worker.url()).host
+    for (const granted of [false, true]) {
+      const onboarding = await context.newPage()
+      await onboarding.addInitScript((permissionGranted) => {
+        const runtime = chrome.runtime as {
+          sendMessage: (message: { type?: string }) => Promise<unknown>
+        }
+        runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+          ? { state: 'ready', capabilities: { desktopAvailable: true }, diagnostic: { code: 'connected' } }
+          : undefined
+        const permissions = chrome.permissions as unknown as { contains: () => Promise<boolean> }
+        permissions.contains = async () => permissionGranted
+      }, granted)
+      await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
+      await expect.poll(
+        async () => onboarding.locator('h1').innerText(),
+        { timeout: 10000 },
+      ).toBe(granted ? 'Sesame is ready' : 'Sesame is connected')
+      const body = await onboarding.evaluate(() => document.body.innerText)
+      expect(body.match(/open and connected/g)?.length).toBe(1)
+      expect(body).not.toMatch(/Sesame is enabled on HTTPS websites/)
+      expect(await onboarding.locator('section[aria-live="polite"]').count()).toBe(0)
+      expect(await onboarding.locator('ol.steps li.done').count()).toBe(granted ? 2 : 1)
+      expect(/keep working without website access\. Press/.test(body)).toBe(!granted)
+      expect(body).not.toMatch(/Show Sesame on login fields/)
+      expect(await onboarding.getByRole('button', { name: 'Enable on websites' }).count()).toBe(granted ? 0 : 1)
+      expect(await onboarding.getByRole('heading', { name: 'Try it' }).count()).toBe(granted ? 1 : 0)
+      await onboarding.close()
+    }
+  }, 30000)
 
   it('rechecks the desktop connection from onboarding and keeps the not-ready state', async () => {
     const extensionId = new URL(worker.url()).host
@@ -1747,8 +1808,10 @@ describe('extension browser suite', () => {
     ).toBeGreaterThan(0)
     expect(await popup.locator('main').innerText()).toMatch(/Sesame desktop app not found/)
     await popup.locator('details.diagnostics summary').click()
-    const height = await popup.locator('details.diagnostics button').evaluate((element) => element.getBoundingClientRect().height)
-    expect(height).toBeGreaterThanOrEqual(24)
+    await expect.poll(
+      async () => popup.locator('details.diagnostics button').evaluate((element) => element.getBoundingClientRect().height),
+      { timeout: 3000 },
+    ).toBeGreaterThanOrEqual(24)
     await popup.close()
   }, 20000)
 
