@@ -101,6 +101,69 @@ describe('identity coordinator', () => {
     for (const details of writes) expect(details.target).toEqual({ tabId: 5, frameIds: [6] })
   })
 
+  it('keeps a pending approval running when a different tab is cancelled', async () => {
+    const browser = browserForIdentityPage()
+    const coordinator = createCoordinator(browser)
+    let approve: (value: unknown) => void = () => {}
+    native.requestIdentityFill.mockImplementation(
+      (_browser: Browser, _origin: string, _fields: readonly string[], options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          approve = resolve
+          options.signal?.addEventListener('abort', () => resolve({ ok: false, code: 'cancelled' }), { once: true })
+        }),
+    )
+
+    const pending = coordinator.fillIdentityActivePage()
+    await vi.waitFor(() => expect(native.requestIdentityFill).toHaveBeenCalled())
+    coordinator.cancelActive(99)
+    approve({ ok: true, identity: { fullName: 'Jamie Example', email: 'jamie@example.test' } })
+
+    await expect(pending).resolves.toEqual({ ok: true, filledFields: ['fullName', 'email'] })
+  })
+
+  it('cancels a pending approval bound to the tab and writes nothing', async () => {
+    const browser = browserForIdentityPage()
+    const coordinator = createCoordinator(browser)
+    native.requestIdentityFill.mockImplementation(
+      (_browser: Browser, _origin: string, _fields: readonly string[], options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          options.signal?.addEventListener('abort', () => resolve({ ok: false, code: 'cancelled' }), { once: true })
+        }),
+    )
+
+    const pending = coordinator.fillIdentityActivePage()
+    await vi.waitFor(() => expect(native.requestIdentityFill).toHaveBeenCalled())
+    coordinator.cancelActive(5)
+
+    await expect(pending).resolves.toEqual({ ok: false, code: 'cancelled' })
+    const writes = (browser.scripting.executeScript as ReturnType<typeof vi.fn>).mock.calls
+      .map(([details]) => details as ScriptInjectionDetails<unknown>)
+      .filter((details) => !('files' in details) && details.args?.[4] === 'fill')
+    expect(writes).toHaveLength(0)
+    native.requestIdentityFill.mockResolvedValue({
+      ok: true,
+      identity: { fullName: 'Jamie Example', email: 'jamie@example.test' },
+    })
+    await expect(coordinator.fillIdentityActivePage()).resolves.toMatchObject({ ok: true })
+  })
+
+  it('cancels every pending approval when no tab is given', async () => {
+    const browser = browserForIdentityPage()
+    const coordinator = createCoordinator(browser)
+    native.requestIdentityFill.mockImplementation(
+      (_browser: Browser, _origin: string, _fields: readonly string[], options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          options.signal?.addEventListener('abort', () => resolve({ ok: false, code: 'cancelled' }), { once: true })
+        }),
+    )
+
+    const pending = coordinator.fillIdentityActivePage()
+    await vi.waitFor(() => expect(native.requestIdentityFill).toHaveBeenCalled())
+    coordinator.cancelActive()
+
+    await expect(pending).resolves.toEqual({ ok: false, code: 'cancelled' })
+  })
+
   it('does not fill identity fields in a cross-origin child frame', async () => {
     const browser = browserForIdentityPage([
       { frameId: 0, result: { ok: false, code: 'no-fields' } },

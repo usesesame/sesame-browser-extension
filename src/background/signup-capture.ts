@@ -119,7 +119,7 @@ export function createSaveSessionController(options: { ttlMs?: number } = {}): S
           password: payload.password,
           kind: payload.kind,
         }, { timeoutMs: saveOptions?.requestTimeoutMs })
-        if (result.ok) disarm(tabId)
+        if (result.ok && armed.get(tabId) === entry) disarm(tabId)
         return result.ok ? { ok: true } : { ok: false, code: result.code }
       } catch {
         return { ok: false, code: 'save-failed' }
@@ -139,7 +139,7 @@ export function createSaveSessionController(options: { ttlMs?: number } = {}): S
           password: entry.capture.password,
           kind: 'update',
         }, { timeoutMs: saveOptions?.requestTimeoutMs })
-        if (result.ok) disarm(tabId)
+        if (result.ok && armed.get(tabId) === entry) disarm(tabId)
         return result.ok ? { ok: true } : { ok: false, code: result.code }
       } catch {
         return { ok: false, code: 'save-failed' }

@@ -542,6 +542,10 @@ export function attachInlineButton(options: OverlayOptions): () => void {
         onExpired: () => {
           if (copyButton) copyButton.textContent = 'Copy password'
         },
+        onClearFailed: () => {
+          if (copyButton) copyButton.textContent = 'Copy password'
+          if (status) status.textContent = 'Sesame could not clear the clipboard. Clear it yourself.'
+        },
       })
       copyButton.textContent = 'Copied'
       if (status) status.textContent = 'Copied temporarily. Save the login in Sesame after sign-up.'
@@ -661,7 +665,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (hideTimer !== undefined) clearTimeout(hideTimer)
     if (expiryTimer !== undefined) clearTimeout(expiryTimer)
     if (connectionRefreshTimer !== undefined) clearTimeout(connectionRefreshTimer)
-    copyHandle?.cancel()
+    void copyHandle?.clear()
     registrationPassword = ''
     releaseGate.destroy()
     if ((globalThis as OverlayGlobal).sesameOverlayPresentStatus === statusPresenter) {

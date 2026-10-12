@@ -214,4 +214,43 @@ describe('held password-change capture', () => {
     expect(controller.isArmed(3)).toBe(true)
     expect(controller.hasHeldCapture(3)).toBe(false)
   })
+
+  it('keeps a capture armed again while a held save is in flight', async () => {
+    const controller = createSaveSessionController()
+    let finish: (value: { ok: true }) => void = () => {}
+    native.requestSave.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    controller.arm(3, 'https://example.test', { ...held })
+
+    const saving = controller.saveHeld({} as Browser, 3)
+    controller.arm(3, 'https://example.test', { username: 'second@example.test', password: 'fictional-pass-2' })
+    finish({ ok: true })
+
+    await expect(saving).resolves.toEqual({ ok: true })
+    expect(controller.isArmed(3)).toBe(true)
+    expect(controller.hasHeldCapture(3)).toBe(true)
+  })
+
+  it('keeps a capture armed again while a captured save is in flight', async () => {
+    const controller = createSaveSessionController()
+    let finish: (value: { ok: true }) => void = () => {}
+    native.requestSave.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    controller.arm(3, 'https://example.test')
+
+    const saving = controller.save({} as Browser, 3, payload)
+    controller.arm(3, 'https://example.test', { ...held })
+    finish({ ok: true })
+
+    await expect(saving).resolves.toEqual({ ok: true })
+    expect(controller.isArmed(3)).toBe(true)
+    expect(controller.hasHeldCapture(3)).toBe(true)
+  })
+
+  it('disarms the capture that was saved when nothing replaced it', async () => {
+    const controller = createSaveSessionController()
+    controller.arm(3, 'https://example.test', { ...held })
+
+    await expect(controller.saveHeld({} as Browser, 3)).resolves.toEqual({ ok: true })
+
+    expect(controller.isArmed(3)).toBe(false)
+  })
 })
