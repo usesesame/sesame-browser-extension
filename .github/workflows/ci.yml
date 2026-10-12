@@ -22,6 +22,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
       - name: Install the browser test runtime
         run: npx playwright-core install --with-deps chromium
       - name: Locate the browser test runtime
