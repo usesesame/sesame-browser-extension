@@ -50,3 +50,9 @@ export function verifyStoreManifest(browser, manifest, version, identity) {
   }
   return derived
 }
+
+export function verifyUploadManifest(browser, manifest) {
+  if ('key' in manifest) {
+    throw new Error(`${browser} package: the store refuses a packing key, so it must not be in the uploaded manifest.`)
+  }
+}

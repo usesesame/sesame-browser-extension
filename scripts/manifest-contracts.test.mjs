@@ -106,3 +106,17 @@ test('the Mac suggestions are unique and avoid common Command shortcuts', () => 
     assert.equal(new Set(suggested.map(([, shortcut]) => shortcut)).size, suggested.length, `${browser} suggests one Mac shortcut twice`)
   }
 })
+
+test('a Chromium store upload carries no packing key and a keyed manifest is refused', async () => {
+  const { verifyUploadManifest } = await import('./store-manifest.mjs')
+  assert.doesNotThrow(() => verifyUploadManifest('chrome', { manifest_version: 3 }))
+  assert.throws(() => verifyUploadManifest('chrome', { manifest_version: 3, key: 'fictional' }), /store refuses a packing key/)
+  assert.throws(() => verifyUploadManifest('edge', { key: 'fictional' }), /store refuses a packing key/)
+})
+
+test('the packaging script strips the key from each Chromium zip after checking it derives the pinned id', () => {
+  const script = read('scripts', 'package-stores.mjs')
+  assert.match(script, /verifyStoreManifest\(browser, builtManifest, version, identity\)/)
+  assert.match(script, /delete uploadManifest\.key/)
+  assert.match(script, /verifyUploadManifest\(browser, uploadManifest\)/)
+})
