@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, posix, relative, resolve } from 'node:path'
 import { createZip, readZip } from './deterministic-zip.mjs'
-import { verifyStoreManifest } from './store-manifest.mjs'
+import { verifyStoreManifest, verifyUploadManifest } from './store-manifest.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const output = resolve(root, process.argv[2] ?? 'store-packages')
@@ -56,12 +56,14 @@ for (const browser of browsers) {
 
   const manifestEntry = entries.find(({ path }) => path === 'manifest.json')
   if (!manifestEntry) throw new Error(`${browser} package: manifest.json is missing.`)
-  const extensionId = verifyStoreManifest(
-    browser,
-    JSON.parse(manifestEntry.data.toString('utf8')),
-    version,
-    identity,
-  )
+  const builtManifest = JSON.parse(manifestEntry.data.toString('utf8'))
+  const extensionId = verifyStoreManifest(browser, builtManifest, version, identity)
+  if (browser !== 'firefox') {
+    const uploadManifest = { ...builtManifest }
+    delete uploadManifest.key
+    manifestEntry.data = Buffer.from(JSON.stringify(uploadManifest))
+    verifyUploadManifest(browser, uploadManifest)
+  }
 
   const archive = createZip(entries)
   const restored = readZip(archive)
@@ -78,6 +80,7 @@ for (const browser of browsers) {
     browser,
     filename,
     extensionId,
+    storeAssignsId: browser !== 'firefox',
     files: entries.length,
     bytes: archive.length,
     sha256: sha256(archive),
@@ -105,6 +108,7 @@ const record = {
   nativeHostName: identity.host_name,
   packages,
   sbom: { filename: sbomFilename, components: components.length, lockfileSha256: sha256(read('package-lock.json')) },
+  extensionIdNote: 'The Chromium stores refuse a key in the uploaded manifest and give the listing their own extension id. extensionId is the id the packing key derives for unpacked and development builds. The host must also allow the id the store assigns.',
   reproducible: 'Entry order, timestamps, and file modes are fixed. The same commit and Node version rebuild the same digests.',
 }
 writeFileSync(join(output, 'store-release.json'), `${JSON.stringify(record, null, 2)}\n`)
