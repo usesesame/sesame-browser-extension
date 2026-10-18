@@ -120,3 +120,14 @@ test('the packaging script strips the key from each Chromium zip after checking 
   assert.match(script, /delete uploadManifest\.key/)
   assert.match(script, /verifyUploadManifest\(browser, uploadManifest\)/)
 })
+
+test('a Chromium package is refused when the native host contract does not allow the store id', async () => {
+  const { verifyStoreManifest } = await import('./store-manifest.mjs')
+  const identity = JSON.parse(read('contracts', 'native-host.json'))
+  const manifest = JSON.parse(read('manifests', 'chrome.json'))
+  const version = JSON.parse(read('package.json')).version
+  manifest.version = version
+  assert.equal(verifyStoreManifest('chrome', manifest, version, identity), identity.official_extension_id)
+  const withoutStore = { ...identity, allowed_origins: identity.allowed_origins.filter((origin) => !origin.includes(identity.store_extension_id)) }
+  assert.throws(() => verifyStoreManifest('chrome', manifest, version, withoutStore), /does not allow the store id/)
+})

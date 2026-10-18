@@ -48,6 +48,9 @@ export function verifyStoreManifest(browser, manifest, version, identity) {
   if (!identity.allowed_origins.includes(`chrome-extension://${derived}/`)) {
     fail(`the pinned native-host contract does not allow chrome-extension://${derived}/.`)
   }
+  if (!identity.allowed_origins.includes(`chrome-extension://${identity.store_extension_id}/`)) {
+    fail(`the pinned native-host contract does not allow the store id ${identity.store_extension_id}.`)
+  }
   return derived
 }
 
