@@ -2,12 +2,14 @@
   "schema_version": 1,
   "host_name": "app.usesesame.browser",
   "official_extension_id": "idbkfhhjnniibleeanchljhakfhecnlg",
+  "store_extension_id": "aodkkjabifjcbppgccgjidcmaiamddla",
   "allowed_origins": [
-    "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg/"
+    "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg/",
+    "chrome-extension://aodkkjabifjcbppgccgjidcmaiamddla/"
   ],
   "desktop_source": {
     "repository_path": "src-tauri/src/adapters/platform/browser_host/mod.rs",
-    "commit": "c800688222ab33230e9d5d4347adea9820ae330e"
+    "commit": "0686a4fc9bd093af79d806c9e8770f68488b8909"
   },
   "firefox_extension_id": "sesame@usesesame.app",
   "allowed_extensions": [

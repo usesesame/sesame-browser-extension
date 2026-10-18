@@ -21,8 +21,13 @@ describe('native host contract', () => {
     expect(contract.official_extension_id).toBe(extensionIdForKey(chromeManifest.key))
   })
 
-  it('allows exactly the origin belonging to that extension', () => {
-    expect(contract.allowed_origins).toEqual([`chrome-extension://${contract.official_extension_id}/`])
+  it('allows exactly the origins of the pinned and the store extension', () => {
+    expect(contract.store_extension_id).toMatch(/^[a-p]{32}$/)
+    expect(contract.store_extension_id).not.toBe(contract.official_extension_id)
+    expect(contract.allowed_origins).toEqual([
+      `chrome-extension://${contract.official_extension_id}/`,
+      `chrome-extension://${contract.store_extension_id}/`,
+    ])
   })
 
   it('names the same host the protocol module connects to', () => {
