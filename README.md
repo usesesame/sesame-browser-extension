@@ -1,7 +1,7 @@
 # Sesame browser extension
 
-Sesame supports Chrome and Edge on Windows and on Linux from the deb and rpm
-desktop packages. The same source also builds an experimental Firefox package
+Sesame supports Chrome and Edge on Windows and on Linux from the deb, rpm and
+AppImage desktop packages. The same source also builds an experimental Firefox package
 for compatibility work. Firefox is not a supported store release.
 
 This repository contains the extension's manifests, tests, release scripts,
@@ -190,8 +190,9 @@ On Linux the deb and rpm packages install `sesame-browser-host` beside
 `~/.config/{google-chrome,chromium,microsoft-edge}/NativeMessagingHosts/` and
 `~/.mozilla/native-messaging-hosts/` are the registration, and the desktop app
 rewrites them at startup. Removing the package removes the manifests. The
-AppImage build does not register a host because the binary has no stable path
-outside the mounted image.
+AppImage build copies the host to `~/.local/share/sesame/browser-host` and
+registers that copy, because the mounted image has no stable path. The app and
+the copied host then verify each other by the contents of their executables.
 
 The host manifest pins the allowed extension origin. It must not allow arbitrary
 extension IDs or debug hosts. The native host never opens the vault
