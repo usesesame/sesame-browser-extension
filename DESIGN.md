@@ -1,6 +1,6 @@
 # Sesame browser helper design
 
-Status: pre-release integration for Windows and Linux. Page filling works today between the Chromium extension and a running desktop app of version 0.3.0 or later. The Windows installers and the Linux deb and rpm packages bundle the native-messaging host, and Sesame registers and repairs the current-user Chrome and Edge connection automatically at startup without administrator access or user-run scripts. The Linux AppImage registers no host. The browser extension still requires ordinary user-confirmed browser installation, and it has not been independently audited or approved for store publication.
+Status: pre-release integration for Windows and Linux. Page filling works today between the Chromium extension and a running desktop app of version 0.3.0 or later. The Windows installers and the Linux deb and rpm packages bundle the native-messaging host, and Sesame registers and repairs the current-user Chrome and Edge connection automatically at startup without administrator access or user-run scripts. The Linux AppImage copies its host to a private folder under the user's data directory and registers that copy, and the app and the copied host verify each other by the contents of their executables. The browser extension still requires ordinary user-confirmed browser installation, and it has not been independently audited or approved for store publication.
 
 ## Boundary
 
