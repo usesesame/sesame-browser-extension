@@ -311,12 +311,14 @@ async function restoreNativeHost(): Promise<void> {
 async function openFixture(path: string): Promise<Page> {
   const page = await context.newPage()
   await page.goto(`${origin}${path}`)
-  await page.bringToFront()
   await expect.poll(
-    () => worker.evaluate(async (expected) => {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      return tab?.url === expected
-    }, page.url()),
+    async () => {
+      await page.bringToFront()
+      return worker.evaluate(async (expected) => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        return tab?.url === expected
+      }, page.url())
+    },
     { timeout: 10000 },
   ).toBe(true)
   return page
