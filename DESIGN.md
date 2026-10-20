@@ -1,6 +1,6 @@
 # Sesame browser helper design
 
-Status: pre-release integration for Windows and Linux. Page filling works today between the Chromium extension and a running desktop app of version 0.3.0 or later. The Windows installers and the Linux deb and rpm packages bundle the native-messaging host, and Sesame registers and repairs the current-user Chrome and Edge connection automatically at startup without administrator access or user-run scripts. The Linux AppImage copies its host to a private folder under the user's data directory and registers that copy, and the app and the copied host verify each other by the contents of their executables. The browser extension still requires ordinary user-confirmed browser installation, and it has not been independently audited or approved for store publication.
+Status: pre-release integration for Windows and Linux. Page filling works today between the Chromium extension and a running desktop app of version 0.3.0 or later. The Windows installers and the Linux deb and rpm packages bundle the native-messaging host, and Sesame registers and repairs the current-user Chrome and Edge connection automatically at startup without administrator access or user-run scripts. The Linux AppImage copies its host to a private folder under the user's data directory and registers that copy, and the app checks the copied host by the contents of its executable. The browser extension still requires ordinary user-confirmed browser installation, and it has not been independently audited or approved for store publication.
 
 ## Boundary
 
@@ -89,7 +89,7 @@ Credential fields are length-limited and an empty password is rejected. A respon
 
 On Windows, the desktop broker creates a named pipe bound to the current Windows account and logon session. Its protected access-control list permits only that account and LocalSystem, rejects remote clients, requests the first pipe instance, and uses bounded frames and timeouts. Both sides verify the expected executable path and logon session of the process at the other end before accepting credential traffic.
 
-On Linux, the desktop broker binds a Unix socket in a directory with mode 0700 and gives the socket mode 0600. Both sides check that the process at the other end runs as the same user and from the expected executable path before they accept credential traffic, and the desktop records the peer's start time so a replaced process is detected.
+On Linux, the desktop broker binds a Unix socket in a directory with mode 0700 and gives the socket mode 0600. Both sides check that the process at the other end runs as the same user. The desktop also checks that the helper runs from the expected executable, by path for the deb and rpm and by contents for the AppImage, and records its start time so a replaced process is detected. The helper cannot check the desktop's executable, because the desktop hides it from other processes to protect the unlocked vault, so it trusts whichever process of the same user owns the private socket.
 
 These checks reduce accidental exposure and cross-process confusion. They do not make the channel a security boundary against malware already running as the same user. A compromised browser, extension process, desktop process, operating system, or same-user process with equivalent access is outside the supported threat model.
 
