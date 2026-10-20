@@ -191,8 +191,8 @@ On Linux the deb and rpm packages install `sesame-browser-host` beside
 `~/.mozilla/native-messaging-hosts/` are the registration, and the desktop app
 rewrites them at startup. Removing the package removes the manifests. The
 AppImage build copies the host to `~/.local/share/sesame/browser-host` and
-registers that copy, because the mounted image has no stable path. The app and
-the copied host then verify each other by the contents of their executables.
+registers that copy, because the mounted image has no stable path. The app
+checks the copied host by the contents of its executable.
 
 The host manifest pins the allowed extension origin. It must not allow arbitrary
 extension IDs or debug hosts. The native host never opens the vault
