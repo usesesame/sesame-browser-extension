@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sesame",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA29RvdjiY26Hz1Z0euPXPgT7Di/uM1pUDG6I3s3V/TbvJSzAmAGHDIj1Y49C0rwsfJ5d78M0zEb7shE/N49HzOTONjruyphVgtig8bjxJqcpTWRUZrGfSXL/Eg+WxlKufn8sq04x8WjRUO50NBtd0Sl+tYHVQnInmNZZPcoci4a/Ll0TMMEggcFY0iuAOiDZnP5Zc/xCnBfK/wRCtYp6HQLtjySmOs0UdteDvoXyTo3sgSUz2dOqufKPr0Jgb/y8LPATRbDwyeUQES0sPyXOduNMGISiK9EnZwZH3qb7DgkLBjGwwR86nbH7wDoSzkcvjqzb1PbQhvNABclqr7JdXTQIDAQAB",
   "description": "Fills one verified sign-in form after explicit approval in the Sesame desktop app.",
   "icons": {
