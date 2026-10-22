@@ -19,8 +19,9 @@ describe('support links', () => {
     }
   })
 
-  it('keep one desktop download address', () => {
+  it('keep one desktop download address on the website download page', () => {
     expect(DESKTOP_RELEASES_URL).toBe(SESAME_LINKS.desktopReleases)
+    expect(DESKTOP_RELEASES_URL).toBe('https://usesesame.app/releases')
   })
 
   it('appear in settings and open in a new tab without an opener', () => {

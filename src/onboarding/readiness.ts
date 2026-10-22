@@ -20,6 +20,7 @@ export interface OnboardingView {
 export function desktopStateFromResponse(response: unknown): DesktopState {
   const value = isRecord(response) ? response : {}
   if (value.state === 'ready') return { status: 'ready' }
+  if (value.state === 'desktop-offline') return { status: 'blocked', code: 'desktop-unavailable' }
   const diagnostic = isRecord(value.diagnostic) ? value.diagnostic : {}
   const code = typeof diagnostic.code === 'string'
     ? diagnostic.code
@@ -31,8 +32,8 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
   const permissionGranted = permission === 'granted'
   if (desktop.status === 'checking') {
     return {
-      headline: 'Connecting to Sesame',
-      lead: 'Checking the private connection on this device.',
+      headline: 'Setting up Sesame',
+      lead: 'This takes a few seconds.',
       ready: false,
       connection: null,
       showPermissionStep: !permissionGranted,
@@ -42,7 +43,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
   if (desktop.status === 'ready' && permissionGranted) {
     return {
       headline: 'Sesame is ready',
-      lead: 'Focus a sign-in field on any HTTPS site and the Sesame fill control appears next to it.',
+      lead: 'Click a sign-in field on any HTTPS site and choose the Sesame control. You approve each fill in the desktop app and press Sign in yourself.',
       ready: true,
       connection: null,
       showPermissionStep: false,
@@ -52,7 +53,7 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
   if (desktop.status === 'ready') {
     return {
       headline: 'Sesame is connected',
-      lead: 'One permission is left. Allow Sesame on HTTPS sites so the fill control can appear on sign-in and registration fields.',
+      lead: 'One step is left.',
       ready: false,
       connection: null,
       showPermissionStep: true,
@@ -60,10 +61,10 @@ export function onboardingView(permission: PermissionState, desktop: DesktopStat
     }
   }
   return {
-    headline: 'Finish setting up Sesame',
+    headline: 'Set up Sesame',
     lead: permissionGranted
-      ? 'Website access is on. Connect the desktop app to make filling available.'
-      : 'Connect the desktop app first, then allow website access.',
+      ? 'Website access is on. Connect the desktop app to start filling.'
+      : 'Two steps and Sesame can fill your logins.',
     ready: false,
     connection: presentConnection(desktop.code),
     showPermissionStep: !permissionGranted,
@@ -85,15 +86,22 @@ export function setupSteps(permission: PermissionState, desktop: DesktopState): 
   return [
     {
       title: 'Connect the desktop app',
-      detail: connected
-        ? 'Sesame is open and connected.'
-        : desktop.status === 'checking' ? 'Looking for the desktop app.' : 'Install Sesame and open it once.',
+      detail: connected ? '' : desktopStepDetail(desktop),
       state: connected ? 'done' : 'current',
     },
     {
       title: 'Allow website access',
-      detail: allowed ? 'Sesame can appear on HTTPS sign-in fields.' : 'Lets the fill control appear next to sign-in fields.',
+      detail: allowed || !connected
+        ? ''
+        : 'Lets the fill control appear next to sign-in fields. Without it, the popup and the keyboard shortcuts still work.',
       state: allowed ? 'done' : connected ? 'current' : 'waiting',
     },
   ]
+}
+
+function desktopStepDetail(desktop: DesktopState): string {
+  if (desktop.status === 'checking') return 'Looking for the desktop app.'
+  if (desktop.status === 'ready') return ''
+  const connection = presentConnection(desktop.code)
+  return connection.action === 'install' ? 'Download and install Sesame, then open it once.' : connection.message
 }

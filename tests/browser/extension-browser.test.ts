@@ -1641,20 +1641,14 @@ describe('extension browser suite', () => {
     await expect.poll(
       async () => onboarding.evaluate(() => document.body.innerText),
       { timeout: 10000 },
-    ).toMatch(/Sesame desktop app not found/)
+    ).toMatch(/Download and install Sesame, then open it once/)
     const body = await onboarding.evaluate(() => document.body.innerText)
     expect(body).not.toMatch(/Sesame is ready/)
-    await expect.poll(
-      async () => onboarding.locator('section[aria-live="polite"]').isVisible(),
-      { timeout: 5000 },
-    ).toBe(true)
     const install = onboarding.getByRole('link', { name: 'Get Sesame' })
     await expect.poll(async () => install.isVisible(), { timeout: 5000 }).toBe(true)
-    expect(await install.getAttribute('href')).toBe('https://github.com/usesesame/sesame-desktop/releases/latest')
-    await expect.poll(
-      async () => onboarding.getByRole('button', { name: 'Enable on websites' }).isVisible(),
-      { timeout: 5000 },
-    ).toBe(true)
+    expect(await install.getAttribute('href')).toBe('https://usesesame.app/releases')
+    expect(await onboarding.getByRole('button', { name: 'Enable on websites' }).count()).toBe(0)
+    expect(await onboarding.getByRole('button', { name: 'Not now' }).count()).toBe(1)
     await expect.poll(
       async () => onboarding.getByRole('button', { name: 'Check again' }).isEnabled(),
       { timeout: 5000 },
@@ -1682,14 +1676,14 @@ describe('extension browser suite', () => {
         { timeout: 10000 },
       ).toBe(granted ? 'Sesame is ready' : 'Sesame is connected')
       const body = await onboarding.evaluate(() => document.body.innerText)
-      expect(body.match(/open and connected/g)?.length).toBe(1)
+      expect(body).not.toMatch(/open and connected/)
       expect(body).not.toMatch(/Sesame is enabled on HTTPS websites/)
-      expect(await onboarding.locator('section[aria-live="polite"]').count()).toBe(0)
       expect(await onboarding.locator('ol.steps li.done').count()).toBe(granted ? 2 : 1)
-      expect(/keep working without website access\. Press/.test(body)).toBe(!granted)
+      expect(/Press Alt\+Shift\+L/.test(body)).toBe(granted)
+      expect(await onboarding.getByRole('button', { name: 'Not now' }).count()).toBe(granted ? 0 : 1)
       expect(body).not.toMatch(/Show Sesame on login fields/)
       expect(await onboarding.getByRole('button', { name: 'Enable on websites' }).count()).toBe(granted ? 0 : 1)
-      expect(await onboarding.getByRole('heading', { name: 'Try it' }).count()).toBe(granted ? 1 : 0)
+      expect(await onboarding.getByRole('button', { name: 'Close this tab' }).count()).toBe(granted ? 1 : 0)
       await onboarding.close()
     }
   }, 30000)
@@ -1701,7 +1695,7 @@ describe('extension browser suite', () => {
     await expect.poll(
       async () => onboarding.evaluate(() => document.body.innerText),
       { timeout: 10000 },
-    ).toMatch(/Sesame desktop app not found/)
+    ).toMatch(/Download and install Sesame, then open it once/)
     await onboarding.getByRole('button', { name: 'Check again' }).click()
     await expect.poll(
       async () => onboarding.evaluate(() => document.body.innerText),
@@ -1714,23 +1708,52 @@ describe('extension browser suite', () => {
   it('stays not ready when website access is rejected in onboarding', async () => {
     const extensionId = new URL(worker.url()).host
     const onboarding = await context.newPage()
-    await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
-    await expect.poll(
-      async () => onboarding.evaluate(() => document.body.innerText),
-      { timeout: 10000 },
-    ).toMatch(/Sesame desktop app not found/)
-    await onboarding.evaluate(() => {
-      const permissions = chrome.permissions as {
-        request: (details: { origins: string[] }) => Promise<boolean>
+    await onboarding.addInitScript(() => {
+      const runtime = chrome.runtime as {
+        sendMessage: (message: { type?: string }) => Promise<unknown>
       }
+      runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+        ? { state: 'ready', capabilities: { desktopAvailable: true }, diagnostic: { code: 'connected' } }
+        : undefined
+      const permissions = chrome.permissions as unknown as {
+        contains: () => Promise<boolean>
+        request: () => Promise<boolean>
+      }
+      permissions.contains = async () => false
       permissions.request = async () => false
     })
+    await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => onboarding.locator('h1').innerText(),
+      { timeout: 10000 },
+    ).toBe('Sesame is connected')
     await onboarding.getByRole('button', { name: 'Enable on websites' }).press('Enter')
     await expect.poll(
       async () => onboarding.evaluate(() => document.body.innerText),
       { timeout: 5000 },
     ).toMatch(/Website access was not granted/)
     expect(await onboarding.evaluate(() => document.body.innerText)).not.toMatch(/Sesame is ready/)
+    await onboarding.close()
+  }, 15000)
+
+  it('offers to open the desktop and still links the download when the desktop app is closed', async () => {
+    const extensionId = new URL(worker.url()).host
+    const onboarding = await context.newPage()
+    await onboarding.addInitScript(() => {
+      const runtime = chrome.runtime as {
+        sendMessage: (message: { type?: string }) => Promise<unknown>
+      }
+      runtime.sendMessage = async (message) => message?.type === 'sesame:connect'
+        ? { state: 'desktop-offline', diagnostic: { code: 'connected' } }
+        : undefined
+    })
+    await onboarding.goto(`chrome-extension://${extensionId}/onboarding.html`)
+    await expect.poll(
+      async () => onboarding.getByRole('button', { name: 'Open Sesame' }).isVisible(),
+      { timeout: 10000 },
+    ).toBe(true)
+    const download = onboarding.getByRole('link', { name: 'Download Sesame' })
+    expect(await download.getAttribute('href')).toBe('https://usesesame.app/releases')
     await onboarding.close()
   }, 15000)
 
@@ -1741,14 +1764,14 @@ describe('extension browser suite', () => {
     await expect.poll(
       async () => first.evaluate(() => document.body.innerText),
       { timeout: 10000 },
-    ).toMatch(/Sesame desktop app not found/)
+    ).toMatch(/Download and install Sesame, then open it once/)
     await first.close()
     const second = await context.newPage()
     await second.goto(`chrome-extension://${extensionId}/onboarding.html`)
     await expect.poll(
       async () => second.evaluate(() => document.body.innerText),
       { timeout: 10000 },
-    ).toMatch(/Sesame desktop app not found/)
+    ).toMatch(/Download and install Sesame, then open it once/)
     expect(await second.evaluate(() => document.body.innerText)).not.toMatch(/Sesame is ready/)
     await second.close()
   }, 20000)
