@@ -7,7 +7,6 @@
   import Icon from '../shared/Icon.svelte'
 
   const CONNECTION_TIMEOUT_MS = 9_000
-  const POPUP_HINT = 'The popup and the keyboard shortcut keep working without website access.'
 
   let permission: PermissionState = 'not-granted'
   let desktop: DesktopState = { status: 'checking' }
@@ -126,8 +125,10 @@
       <span>Sesame</span>
     </div>
 
-    <h1>{view.headline}</h1>
-    <p class="lead">{view.lead}</p>
+    <section aria-live="polite">
+      <h1>{view.headline}</h1>
+      <p class="lead">{view.lead}</p>
+    </section>
 
     <ol class="steps">
       {#each steps as step, index (step.title)}
@@ -135,11 +136,30 @@
           <span class="marker">{#if step.state === 'done'}<Icon name="check" size={14} />{:else}{index + 1}{/if}</span>
           <div>
             <strong>{step.title}</strong>
-            <p>{step.detail}</p>
-            {#if index === 1 && view.showPermissionStep}
-              <button class="primary allow" type="button" disabled={working} on:click={enableEverywhere}>
-                {working ? 'Waiting for the browser…' : 'Enable on websites'}
-              </button>
+            {#if step.detail}<p>{step.detail}</p>{/if}
+            {#if step.state === 'current' && index === 0 && view.connection && view.showConnectionAction}
+              <div class="actions">
+                {#if view.connection.action === 'install' || view.connection.action === 'update'}
+                  <a class="primary" href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">{view.connection.actionLabel}</a>
+                {:else if view.connection.action === 'open-desktop'}
+                  <button class="primary" type="button" disabled={opening} on:click={openDesktop}>
+                    {opening ? 'Opening…' : view.connection.actionLabel}
+                  </button>
+                {/if}
+                <button class="secondary" type="button" disabled={checking} on:click={retry}>
+                  {checking ? 'Checking…' : 'Check again'}
+                </button>
+                {#if view.connection.action !== 'install' && view.connection.action !== 'update'}
+                  <a class="quiet" href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">Download Sesame</a>
+                {/if}
+              </div>
+            {:else if step.state === 'current' && index === 1}
+              <div class="actions">
+                <button class="primary" type="button" disabled={working} on:click={enableEverywhere}>
+                  {working ? 'Waiting for the browser…' : 'Enable on websites'}
+                </button>
+                <button class="quiet" type="button" on:click={finish}>Not now</button>
+              </div>
             {/if}
           </div>
         </li>
@@ -147,50 +167,17 @@
     </ol>
 
     {#if view.ready}
-      <h2>Try it</h2>
-      <ol class="tips">
-        <li>Open a site you have a saved login for and click its username field.</li>
-        <li>Choose the Sesame control next to the field.</li>
-        <li>Approve the request in the desktop app. Sesame fills the fields and you press Sign in yourself.</li>
-      </ol>
-      <button class="primary" type="button" on:click={finish}>Close this tab</button>
-    {:else}
-      {#if view.connection}
-        <section class="connection" aria-live="polite">
-          <strong>{view.connection.title}</strong>
-          {#if view.connection.message}<p>{view.connection.message}</p>{/if}
-        </section>
-      {/if}
-
-      {#if view.connection && view.showConnectionAction}
-        <div class="actions">
-          {#if view.connection.action === 'install' || view.connection.action === 'update'}
-            <a class={view.showPermissionStep ? 'secondary' : 'primary'} href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">{view.connection.actionLabel}</a>
-          {:else if view.connection.action === 'open-desktop'}
-            <button class={view.showPermissionStep ? 'secondary' : 'primary'} type="button" disabled={opening} on:click={openDesktop}>
-              {opening ? 'Opening…' : view.connection.actionLabel}
-            </button>
-          {/if}
-          <button class="secondary" type="button" disabled={checking} on:click={retry}>
-            {checking ? 'Checking…' : 'Check again'}
-          </button>
-        </div>
-      {/if}
-    {/if}
-
-    <ul>
-      <li>Sesame reads a new password only when you choose Save in the popup after filling the form.</li>
-      <li>Every login fill still requires your approval in the desktop app.</li>
-      <li>Sesame never submits or advances a form.</li>
-    </ul>
-
-    {#if !view.ready}
-      <button class="secondary not-now" type="button" on:click={finish}>Not now</button>
+      <p class="note">Sesame reads a new password only when you choose Save in the popup after filling the form.</p>
+      <div class="actions">
+        <button class="primary" type="button" on:click={finish}>Close this tab</button>
+      </div>
+      <p class="shortcut">Press <kbd>Alt+Shift+L</kbd> for a login or <kbd>Alt+Shift+F</kbd> for an identity on Windows and Linux, or <kbd>Command+Shift+L</kbd> for a login or <kbd>Command+Shift+I</kbd> for an identity on Mac.</p>
+    {:else if view.showConnectionAction}
+      <button class="quiet" type="button" on:click={finish}>Not now</button>
     {/if}
 
     {#if status}<p class="status" role="status">{status}</p>{/if}
-    <p class="shortcut">{#if !view.ready}{POPUP_HINT + ' '}{/if}Press <kbd>Alt+Shift+L</kbd> for a login or <kbd>Alt+Shift+F</kbd> for an identity on Windows and Linux, or <kbd>Command+Shift+L</kbd> for a login or <kbd>Command+Shift+I</kbd> for an identity on Mac.</p>
-    <p class="help">Stuck? <a href={SESAME_LINKS.support} target="_blank" rel="noopener noreferrer">Get support</a> or read the <a href={SESAME_LINKS.privacy} target="_blank" rel="noopener noreferrer">privacy policy</a>. Settings are in the Sesame popup.</p>
+    <p class="help">Need help? <a href={SESAME_LINKS.support} target="_blank" rel="noopener noreferrer">Get support</a> or read the <a href={SESAME_LINKS.privacy} target="_blank" rel="noopener noreferrer">privacy policy</a>.</p>
   </div>
 </main>
 
@@ -218,9 +205,7 @@
   .logo { width: 30px; height: 30px; }
   h1 { margin: 0; color: var(--text-heading); font-family: var(--font-display); font-variation-settings: var(--font-display-settings); font-size: var(--type-6); font-weight: var(--weight-regular); line-height: 1.18; }
   .lead { margin: 14px 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
-  ul { margin: 22px 0 28px; padding-left: 20px; color: var(--text); font-size: var(--type-3); line-height: 1.75; }
-  li::marker { color: var(--text-faint); }
-  .steps { display: grid; gap: var(--space-3); margin: 22px 0 0; padding: 0; list-style: none; }
+  .steps { display: grid; gap: var(--space-4); margin: 28px 0 0; padding: 0; list-style: none; }
   .steps li { display: flex; align-items: flex-start; gap: var(--space-3); transition: opacity .2s ease; }
   .steps li.waiting .marker, .steps li.waiting strong, .steps li.waiting p { opacity: .6; }
   .steps strong { color: var(--text-heading); font-size: var(--type-3); font-weight: var(--weight-medium); }
@@ -228,14 +213,8 @@
   .marker { display: grid; flex: none; width: 24px; height: 24px; place-items: center; border-radius: 50%; border: 1px solid var(--border-strong); color: var(--text-2); font-size: var(--type-1); font-weight: var(--weight-bold); transition: background-color .2s ease, color .2s ease; }
   .steps li.current .marker { border-color: var(--accent); color: var(--accent); }
   .steps li.done .marker { border-color: transparent; color: var(--on-accent); background: var(--accent); }
-  h2 { margin: 22px 0 0; color: var(--text-heading); font-size: var(--type-4); font-weight: var(--weight-bold); }
-  .tips { margin: 8px 0 24px; padding-left: 20px; color: var(--text); font-size: var(--type-3); line-height: 1.6; }
-  .tips li { padding-left: 4px; }
-  .connection { margin: 18px 0; padding: 13px 16px; border-radius: var(--radius-md); background: var(--warn-bg); }
-  .connection strong { display: block; color: var(--warn-text); font-size: var(--type-3); font-weight: var(--weight-bold); }
-  .connection p { margin: 4px 0 0; color: var(--warn-text); font-size: var(--type-2); line-height: 1.5; }
-  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
-  button, a.primary, a.secondary {
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+  button, a.primary {
     display: inline-flex;
     min-height: var(--control-h-lg);
     align-items: center;
@@ -250,21 +229,24 @@
     cursor: pointer;
     transition: var(--control-transition);
   }
-  button:active, a.primary:active, a.secondary:active { transform: var(--control-press); }
+  button:active, a.primary:active { transform: var(--control-press); }
   button:disabled:active { transform: none; }
-  a.primary, a.secondary { text-decoration: none; }
+  a.primary { text-decoration: none; }
   .primary { color: var(--on-accent); background: var(--accent); box-shadow: var(--button-shadow); }
   .primary:hover { background: var(--accent-hover); }
   .primary:active { background: var(--accent-active); box-shadow: var(--button-shadow-pressed); }
-  .secondary, a.secondary { border-color: var(--button-secondary-border); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); }
-  .secondary:hover, a.secondary:hover { background: var(--button-secondary-hover-bg); }
+  .secondary { border-color: var(--button-secondary-border); color: var(--text-heading); background: var(--button-secondary-bg); box-shadow: var(--button-secondary-shadow); }
+  .secondary:hover { background: var(--button-secondary-hover-bg); }
   button:disabled { cursor: wait; opacity: var(--control-disabled); }
-  .allow { margin-top: var(--space-3); }
-  .not-now { margin-top: 4px; }
-  .status, .shortcut { color: var(--text-muted); font-size: var(--type-2); }
+  .note, .status, .shortcut { color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .note { margin: 24px 0 0; }
+  .quiet { margin-top: var(--space-5); border-color: transparent; padding: 0; min-height: 0; color: var(--text-muted); background: none; text-decoration: underline; }
+  .actions .quiet { margin-top: 0; }
+  .quiet:hover { color: var(--text-heading); }
+  a.quiet { font-size: var(--type-2); font-weight: var(--control-weight); }
   .status { margin-top: 12px; }
-  .shortcut { margin-top: 26px; }
-  .help { margin: 12px 0 0; color: var(--text-muted); font-size: var(--type-2); }
+  .shortcut { margin-top: 16px; }
+  .help { margin: var(--space-5) 0 0; color: var(--text-muted); font-size: var(--type-2); }
   .help a { color: var(--accent); font-weight: var(--weight-medium); }
   kbd { border-radius: var(--radius-sm); padding: 2px 6px; background: var(--surface-inset); color: var(--text-2); font: var(--weight-medium) var(--type-1) var(--font-code); }
 </style>

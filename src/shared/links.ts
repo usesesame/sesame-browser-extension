@@ -3,7 +3,7 @@ export const SESAME_LINKS = {
   support: 'https://usesesame.app/support',
   privacy: 'https://usesesame.app/privacy',
   security: 'https://usesesame.app/security',
-  desktopReleases: 'https://github.com/usesesame/sesame-desktop/releases/latest',
+  desktopReleases: 'https://usesesame.app/releases',
   source: 'https://github.com/usesesame/sesame-browser-extension',
   issues: 'https://github.com/usesesame/sesame-browser-extension/issues',
 } as const
