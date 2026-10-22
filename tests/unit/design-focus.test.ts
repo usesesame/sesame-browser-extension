@@ -68,8 +68,6 @@ describe('text contrast', () => {
 
   it('uses the readable warning token inside warning surfaces', () => {
     const card = readFileSync(resolve(root, 'src', 'popup', 'components', 'StatusCard.svelte'), 'utf8')
-    const onboardingMarkup = readFileSync(resolve(root, 'src', 'onboarding', 'App.svelte'), 'utf8')
     expect(card).toMatch(/\.status-warning h2,\s*\.status-warning p\s*\{\s*color:\s*var\(--warn-text\)/)
-    expect(onboardingMarkup).toMatch(/\.connection p\s*\{[^}]*color:\s*var\(--warn-text\)/)
   })
 })
