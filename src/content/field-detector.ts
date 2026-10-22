@@ -1,5 +1,6 @@
 // Reports only origin and bounded booleans; never reads input values or page text.
 import { isVisibleInput } from '../shared/dom'
+import { looksLikeOneTimeCode } from './code-hints'
 import { collectInputs, labelsForInput } from './input-scan'
 export interface LoginSurface {
   ok: true
@@ -51,7 +52,7 @@ export function isUsernameField(input: HTMLInputElement): boolean {
     labelText(input),
   ].join(' ').toLowerCase()
 
-  if (NOT_USERNAME_HINT.test(hints)) return false
+  if (NOT_USERNAME_HINT.test(hints) || looksLikeOneTimeCode(hints)) return false
   if (autocomplete.includes('username') || autocomplete.includes('email')) return true
   if (type === 'email') return true
   return (type === 'text' || type === 'tel') && USERNAME_HINT.test(hints)

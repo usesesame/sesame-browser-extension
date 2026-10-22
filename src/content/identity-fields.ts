@@ -1,4 +1,5 @@
 import type { IdentityFieldKey } from '../protocol/native'
+import { declaresOneTimeCode, looksLikeOneTimeCode } from './code-hints'
 import { tokens } from './field-writer'
 
 const AUTOCOMPLETE_TO_FIELD: Readonly<Record<string, IdentityFieldKey>> = Object.freeze({
@@ -40,7 +41,9 @@ export function identityFieldForInput(input: HTMLInputElement): IdentityFieldKey
   if (!IDENTITY_INPUT_TYPES.has(input.type.toLowerCase())) return undefined
   const explicit = identityFieldForAutocomplete(input.autocomplete)
   if (explicit) return explicit
+  if (declaresOneTimeCode(input.autocomplete)) return undefined
   const hint = inputHint(input).replace(/[\s_-]+/g, ' ')
+  if (looksLikeOneTimeCode(hint)) return undefined
   if (EMAIL.test(hint)) return 'email'
   if (PHONE.test(hint)) return 'phone'
   if (POSTAL_CODE.test(hint)) return 'postalCode'

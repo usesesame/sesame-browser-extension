@@ -2,6 +2,7 @@
 import { normalizeFillOrigin } from '../protocol/native'
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
+import { cardFieldsForInput } from './card-fields'
 import { labelText } from './field-detector'
 import { setValue } from './field-writer'
 import { collectInputs } from './input-scan'
@@ -172,6 +173,7 @@ function isOneTimeCodeField(input: HTMLInputElement): boolean {
   const autocomplete = input.autocomplete.toLowerCase().split(/\s+/)
   if (autocomplete.includes('one-time-code')) return true
   if (autocomplete.some((token) => token.startsWith('cc-'))) return false
+  if (cardFieldsForInput(input).length > 0) return false
   if (!isNumericish(input)) return false
   return ONE_TIME_HINT.test(oneTimeCodeHints(input))
 }
