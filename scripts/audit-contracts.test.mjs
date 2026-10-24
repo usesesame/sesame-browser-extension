@@ -16,9 +16,16 @@ test('the check job audits dependencies after installing them', () => {
   assert.ok(step, 'the check job no longer audits npm dependencies after npm ci')
   assert.equal(
     step[1].trim(),
-    'npm audit --audit-level=high',
-    'the audit step no longer fails on high severity advisories',
+    'node scripts/audit-dependencies.mjs',
+    'the audit step no longer fails on high severity advisories through the reviewed exceptions',
   )
+})
+
+test('npm installs run no package scripts and fetch no git dependencies', () => {
+  const policy = read('.npmrc').split(/\r?\n/)
+  for (const line of ['ignore-scripts=true', 'allow-git=none']) {
+    assert.ok(policy.includes(line), `.npmrc no longer pins ${line}`)
+  }
 })
 
 test('a new package release waits seven days before npm or Dependabot takes it', () => {
