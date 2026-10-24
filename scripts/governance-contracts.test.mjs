@@ -95,10 +95,40 @@ test('the security policy tells a reporter where to send a vulnerability', () =>
   assert.match(body, /extension/i, 'the policy is not scoped to this product')
 })
 
+const jobBlock = (body, job) => {
+  const start = body.indexOf(`\n  ${job}:\n`)
+  assert.ok(start >= 0, `the ${job} job is missing from the workflow`)
+  const rest = body.slice(start + 1)
+  const afterFirst = rest.indexOf('\n') + 1
+  const next = rest.slice(afterFirst).match(/^ {2}[a-z0-9_-]+:$/m)
+  return next ? rest.slice(0, afterFirst + next.index) : rest
+}
+
+test('the store packages are built apart from the test browser and attested after every check', () => {
+  const workflow = read('.github', 'workflows', 'release.yml')
+  assert.doesNotMatch(workflow, /^\s+cache:/m, 'a release restores no package cache that another run could have written')
+
+  const packaging = jobBlock(workflow, 'package')
+  assert.match(packaging, /run: npm run release:check$/m, 'the package job builds the store packages')
+  assert.doesNotMatch(packaging, /playwright|test:browser|npm run ci\b/, 'the job that builds the store packages must not install or run the test browser')
+  assert.doesNotMatch(packaging, /id-token|attestations:/, 'the package job must not be able to sign')
+
+  const browser = jobBlock(workflow, 'browser')
+  assert.match(browser, /run: npm run test:browser$/m, 'the browser suite still runs before a release')
+  assert.doesNotMatch(browser, /environment:|id-token|upload-artifact/, 'the browser job holds no environment, no signing identity and uploads nothing')
+
+  const attest = jobBlock(workflow, 'attest')
+  assert.match(attest, /needs: \[package, browser\]/, 'packages are attested only after both jobs pass')
+  assert.match(attest, /EXPECTED_RECORD_SHA256: \$\{\{ needs\.package\.outputs\.record-sha256 \}\}/, 'the attest job checks the record the package job wrote')
+  assert.ok(attest.indexOf('Re-hash every package') < attest.indexOf('uses: actions/attest@'), 'the packages are re-hashed before they are attested')
+  assert.match(attest, /subject-path: store-packages\/\*\.zip$/m, 'every store zip is attested')
+  assert.doesNotMatch(attest, /npm (ci|install)|actions\/checkout@/, 'the attest job runs no repository or registry code')
+})
+
 test('store releases require the desktop main contract before packaging', () => {
   const workflow = read('.github', 'workflows', 'release.yml')
   const compatibility = workflow.indexOf('run: npm run compat:host')
-  const release = workflow.indexOf('run: npm run ci')
+  const release = workflow.indexOf('run: npm run release:check')
   assert.ok(compatibility >= 0 && release > compatibility)
   assert.doesNotMatch(workflow, /--candidate/)
   const checker = read('scripts', 'host-compatibility.mjs')
