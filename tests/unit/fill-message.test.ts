@@ -84,6 +84,9 @@ describe('inline fill messages', () => {
     expect(cardFillMessage({ ok: false, code: 'untrusted-frame' }).length).toBeGreaterThan(0)
     expect(identityFillMessage({ ok: false, code: 'no-fields' }).length).toBeGreaterThan(0)
     expect(identityFillMessage({ ok: false, code: 'field-write-failed' }).length).toBeGreaterThan(0)
+    expect(identityFillMessage({ ok: false, code: 'vault-locked' })).toBe('Unlock Sesame, then choose Fill identity again.')
+    expect(identityFillMessage({ ok: false, code: 'no-match' })).toBe('No saved identity is available. Add one in Sesame.')
+    expect(identityFillMessage({ ok: false, code: 'approval-declined' })).toBe('The request was declined, so nothing was filled.')
   })
 
   it('reports the filled one-time code and its remaining window', () => {

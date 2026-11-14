@@ -912,6 +912,11 @@ export function identityFillMessage(result: unknown): string {
   if (code === 'no-fields') return 'No identity fields to fill on this form.'
   if (code === 'stale-document') return 'The page changed while filling. Try again.'
   if (code === 'field-write-failed') return 'This site blocked the field update. Nothing was submitted.'
+  if (code === 'vault-locked') return 'Unlock Sesame, then choose Fill identity again.'
+  if (code === 'no-match') return 'No saved identity is available. Add one in Sesame.'
+  if (code === 'approval-declined' || code === 'cancelled') return 'The request was declined, so nothing was filled.'
+  if (code === 'approval-timeout') return 'The approval expired. Choose Fill identity to try again.'
+  if (code === 'desktop-unavailable' || code === 'host-disconnected') return 'Open Sesame, then try again.'
   return 'Sesame could not fill this form.'
 }
 
