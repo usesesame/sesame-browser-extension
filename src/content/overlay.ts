@@ -1,6 +1,7 @@
 // Closed shadow root; never reads field values or submits.
 import { OVERLAY_TOKEN_CSS } from './overlay-tokens'
-import { inspectIdentitySurfaceScoped } from './identity-detector'
+import { identityFieldsForAnchor } from './identity-detector'
+import { declaresIdentityField, identityFieldForInput } from './identity-fields'
 import { cardFieldsForInput } from './card-fields'
 import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
@@ -98,6 +99,43 @@ export function registrationChoiceOptions(value: string): RegistrationPasswordOp
   return characters ? { mode: 'characters', length: Number(characters[1]) } : {}
 }
 
+type OverlayKind = 'login' | 'username' | 'registration' | 'identity' | 'card' | 'code'
+
+interface OverlayPlan {
+  kind: OverlayKind
+  cardFields: CardFieldKey[]
+  identityFields: IdentityFieldKey[]
+}
+
+function overlayPlan(field: HTMLInputElement): OverlayPlan | null {
+  const passwordSurface = inspectPasswordSurface()
+  const signInField = isLoginField(field)
+  const signInKind =
+    signInField && (passwordSurface === 'login' || passwordSurface === 'registration')
+      ? passwordSurface
+      : signInField && passwordSurface === 'none' && isSafeUsernameOnlyAnchor(field)
+        ? 'username'
+        : null
+  const cardFields = cardAnchorFields(field, signInField)
+  const codeKind = oneTimeCodeKindForField(field)
+  if (signInKind === 'login' || signInKind === 'registration') {
+    const identityFields = signInKind === 'registration' ? identityFieldsForAnchor(field) : []
+    return { kind: signInKind, cardFields, identityFields }
+  }
+  const identityFields =
+    passwordSurface === 'none' && cardFields.length === 0 && !codeKind && identityFieldForInput(field)
+      ? identityFieldsForAnchor(field)
+      : []
+  const identityMode =
+    identityFields.length > 1 ||
+    (identityFields.length === 1 && signInKind !== 'username' && declaresIdentityField(field))
+  if (identityMode) return { kind: 'identity', cardFields, identityFields }
+  if (signInKind === 'username') return { kind: 'username', cardFields, identityFields }
+  if (cardFields.length > 0) return { kind: 'card', cardFields, identityFields }
+  if (codeKind) return { kind: 'code', cardFields, identityFields }
+  return null
+}
+
 let sharedHostId: string | undefined
 
 type OverlayGlobal = typeof globalThis & {
@@ -130,6 +168,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let anchorField: HTMLInputElement | null = null
   let dismissedField: HTMLInputElement | null = null
   let registrationMode = false
+  let identityMode = false
+  let shownKind: OverlayKind | null = null
   let identityFieldsAvailable: IdentityFieldKey[] = []
   let statusPresenter: ((text: string) => void) | undefined
   let choice: HTMLSelectElement | null = null
@@ -277,28 +317,20 @@ export function attachInlineButton(options: OverlayOptions): () => void {
 
   function showOverlay(field: HTMLInputElement) {
     if (field === dismissedField) return
-    const signInField = isLoginField(field)
-    const passwordKind = signInField ? inspectPasswordSurface() : 'none'
-    const signInKind =
-      passwordKind === 'login' || passwordKind === 'registration'
-        ? passwordKind
-        : signInField && passwordKind === 'none' && isSafeUsernameOnlyAnchor(field)
-          ? 'username'
-          : null
-    const cardFields = cardAnchorFields(field, signInField)
-    const codeKind = oneTimeCodeKindForField(field)
-    const kind = signInKind ?? (cardFields.length > 0 ? 'card' : null) ?? (codeKind ? 'code' : null)
-    if (!kind) {
+    const plan = overlayPlan(field)
+    if (!plan) {
       hideOverlay()
       return
     }
     ensureOverlay()
     anchorField = field
-    cardMode = kind === 'card'
-    codeMode = kind === 'code'
-    cardFieldsAvailable = cardFields
-    registrationMode = kind === 'registration'
-    identityFieldsAvailable = registrationMode ? inspectIdentitySurfaceScoped(ownerOf(field)) : []
+    shownKind = plan.kind
+    cardMode = plan.kind === 'card'
+    codeMode = plan.kind === 'code'
+    identityMode = plan.kind === 'identity'
+    cardFieldsAvailable = plan.cardFields
+    registrationMode = plan.kind === 'registration'
+    identityFieldsAvailable = plan.identityFields
     if (status) status.textContent = ''
     if (copyButton && !registrationPassword) copyButton.hidden = true
     if (host) {
@@ -307,12 +339,14 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     releaseGate.rearm()
     positionOverlay()
     renderState()
-    if (!registrationMode) void refreshCapability()
+    if (!registrationMode && !identityMode) void refreshCapability()
   }
 
   function hideOverlay() {
     if (host) host.style.display = 'none'
     anchorField = null
+    shownKind = null
+    identityMode = false
     codeMode = false
     releaseGate.rearm()
   }
@@ -356,9 +390,25 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (cardMode || codeMode) {
       button.hidden = true
       button.disabled = filling || blocked
-      if (identityButton) identityButton.hidden = true
+      if (identityButton) {
+        identityButton.className = 'identity'
+        identityButton.hidden = true
+      }
       if (copyButton) copyButton.hidden = true
       if (choice) choice.hidden = true
+      return
+    }
+    if (identityMode) {
+      button.hidden = true
+      button.disabled = filling || blocked
+      if (choice) choice.hidden = true
+      if (copyButton) copyButton.hidden = true
+      if (identityButton) {
+        identityButton.className = 'fill'
+        identityButton.hidden = false
+        identityButton.disabled = filling || blocked
+        identityButton.textContent = filling ? 'Filling…' : 'Fill identity'
+      }
       return
     }
     button.hidden = false
@@ -367,7 +417,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       choice.disabled = filling
     }
     if (identityButton) {
-      identityButton.hidden = !(registrationMode && identityFieldsAvailable.length > 0)
+      identityButton.className = 'identity'
+      identityButton.hidden = identityFieldsAvailable.length === 0
       identityButton.disabled = filling || blocked
       identityButton.textContent = filling ? 'Filling…' : 'Fill identity'
     }
@@ -503,7 +554,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   }
 
   async function onFillIdentityClick(event: MouseEvent) {
-    await runFillRequest(event, options.onFillIdentityRequest, identityFillMessage)
+    await runFillRequest(event, options.onFillIdentityRequest, identityFillMessage, identityMode)
   }
 
   async function runFillRequest(
@@ -565,9 +616,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (anchorField) {
       const safeAnchor = findSafeAnchor(anchorField)
       if (safeAnchor) {
-        const nextRegistrationMode = inspectPasswordSurface() === 'registration'
-        const nextCodeMode = oneTimeCodeKindForField(safeAnchor) !== null
-        if (nextRegistrationMode !== registrationMode || nextCodeMode !== codeMode) showOverlay(safeAnchor)
+        if ((overlayPlan(safeAnchor)?.kind ?? null) !== shownKind) showOverlay(safeAnchor)
         else positionOverlay()
         return
       }
@@ -679,6 +728,9 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     cardButton = null
     cardMode = false
     cardFieldsAvailable = []
+    identityMode = false
+    identityFieldsAvailable = []
+    shownKind = null
     codeButton = null
     codeMode = false
     copyButton = null
@@ -703,13 +755,19 @@ function focusedInput(): HTMLInputElement | null {
 function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
   if (collectInputs(document).truncated) return null
   if (!isVisibleInput(field)) return null
+  const passwordSurface = inspectPasswordSurface()
   if (!isLoginField(field)) {
     if (cardFieldsForInput(field).length > 0) return field
-    return oneTimeCodeKindForField(field) ? field : null
+    if (oneTimeCodeKindForField(field)) return field
+    if (passwordSurface !== 'none' || !identityFieldForInput(field)) return null
+    return overlayPlan(field)?.kind === 'identity' ? field : null
   }
-  const kind = inspectPasswordSurface()
-  if (kind === 'none') return isSafeUsernameOnlyAnchor(field) ? field : null
-  if (kind !== 'login' && kind !== 'registration') return null
+  if (passwordSurface === 'none') {
+    if (isSafeUsernameOnlyAnchor(field)) return field
+    if (!identityFieldForInput(field)) return null
+    return overlayPlan(field)?.kind === 'identity' ? field : null
+  }
+  if (passwordSurface !== 'login' && passwordSurface !== 'registration') return null
   const passwords = visiblePasswordFields()
   if (passwords.length === 0) return null
   const passwordOwner = ownerOf(passwords[0])

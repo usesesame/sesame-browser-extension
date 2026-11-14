@@ -59,6 +59,17 @@ const passwordStepPage = `<!doctype html><html><body>
 </form>
 </body></html>`
 
+const shippingPage = `<!doctype html><html><body>
+<form id="newsletter"><label>Newsletter <input id="newsletter-email" type="email" name="subscribe"></label></form>
+<form id="shipping">
+<label>First name <input id="given" name="first_name"></label>
+<label>Last name <input id="family" name="last_name"></label>
+<label>Email <input id="email" type="email" name="email"></label>
+<label>Confirm email <input id="email-again" type="email" name="email_confirm"></label>
+<label>Country <select id="country" name="country"><option value="">Choose</option><option value="DE">Germany</option><option value="GB">United Kingdom</option></select></label>
+</form>
+</body></html>`
+
 const identityPage = `<!doctype html><html><body>
 <form id="checkout">
 <h1>Contact details</h1>
@@ -146,6 +157,7 @@ function pageBody(path: string): string {
       : path === '/username' ? usernameStepPage
         : path === '/password' ? passwordStepPage
           : path === '/identity' ? identityPage
+          : path === '/shipping' ? shippingPage
             : path === '/card' ? cardPage
               : path === '/registration' ? registrationPage
                 : path === '/password-change' ? passwordChangePage
@@ -1057,6 +1069,31 @@ describe('extension browser suite', () => {
     })
   })
 
+  it('fills split names, a country menu and a confirmation email in the focused form only', async () => {
+    const current = await openFixture('/shipping')
+    await current.focus('#email')
+    const prepared = await callBridge(current, 'sesameFillIdentitySurface', primaryOrigin, documentToken, null, 'prepare')
+    expect(prepared).toEqual({ ok: true, filledFields: ['fullName', 'email', 'country'] })
+    const filled = await callBridge(current, 'sesameFillIdentitySurface', primaryOrigin, documentToken, {
+      fullName: 'Jamie Q Example',
+      email: 'jamie@example.test',
+      country: 'United Kingdom',
+    }, 'fill')
+    expect(filled).toEqual({ ok: true, filledFields: ['fullName', 'email', 'country'] })
+    const values = await current.evaluate(() => Object.fromEntries(
+      ['given', 'family', 'email', 'email-again', 'country', 'newsletter-email']
+        .map((id) => [id, (document.getElementById(id) as HTMLInputElement | HTMLSelectElement).value]),
+    ))
+    expect(values).toEqual({
+      given: 'Jamie',
+      family: 'Q Example',
+      email: 'jamie@example.test',
+      'email-again': 'jamie@example.test',
+      country: 'GB',
+      'newsletter-email': '',
+    })
+  })
+
   it('refuses card fill on an insecure page', async () => {
     const current = await openFixture()
     const prepared = await callBridge(
@@ -1152,6 +1189,16 @@ describe('extension browser suite', () => {
       const settings = (stored['inlineSettingsV1'] as Record<string, unknown> | undefined) ?? {}
       await chrome.storage.local.set({ inlineSettingsV1: { ...settings, pausedOrigins: [] } })
     })
+  })
+
+  it('offers the inline identity fill on a shipping form without a password', async () => {
+    const current = await openFixture('/shipping')
+    await current.evaluate(() => (document.getElementById('given') as HTMLInputElement).focus())
+    await expect.poll(
+      async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+      { timeout: 10000 },
+    ).toBe(true)
+    await waitForReleaseEnabled(current, 'Fill identity')
   })
 
   it('keeps the inline release control disabled while the overlay is hidden or transparent', async () => {

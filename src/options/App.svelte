@@ -263,7 +263,7 @@
     <div class="row">
       <div class="copy">
         <strong>Fill an identity</strong>
-        <p>It fills name, address and contact fields. Press <kbd>Alt+Shift+F</kbd> on Windows and Linux or <kbd>Command+Shift+I</kbd> on Mac.</p>
+        <p>It fills name, email, phone and address fields in the form you are using, including first and last name fields and country menus. Press <kbd>Alt+Shift+F</kbd> on Windows and Linux or <kbd>Command+Shift+I</kbd> on Mac.</p>
       </div>
     </div>
   </section>

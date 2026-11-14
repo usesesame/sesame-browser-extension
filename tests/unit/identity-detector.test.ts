@@ -72,9 +72,28 @@ describe('identity hint fallback', () => {
     expect(identityFieldForInput(first('<input name="card_name" />'))).toBeUndefined()
   })
 
-  it('leaves split first and last name fields to a single full-name field', () => {
-    expect(identityFieldForInput(first('<input name="first_name" />'))).toBeUndefined()
-    expect(identityFieldForInput(first('<input name="last_name" />'))).toBeUndefined()
+  it('reads split first and last name fields as the full name', () => {
+    expect(identityFieldForInput(first('<input name="first_name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input name="last_name" />'))).toBe('fullName')
+  })
+
+  it('reads given and family name autocomplete tokens and hints', () => {
+    expect(identityFieldForInput(first('<input autocomplete="given-name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input autocomplete="family-name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input placeholder="First name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input name="given_name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input id="forename" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input name="fname" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input placeholder="Last name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input name="surname" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input name="family_name" />'))).toBe('fullName')
+    expect(identityFieldForInput(first('<input name="lname" />'))).toBe('fullName')
+  })
+
+  it('leaves middle and additional names alone', () => {
+    expect(identityFieldForInput(first('<input autocomplete="additional-name" name="name" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="middle_name" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input placeholder="Additional name" />'))).toBeUndefined()
   })
 
   it('does not read a wallet, contract, or network address as a street address', () => {
@@ -111,6 +130,8 @@ describe('identity hint fallback', () => {
     expect(identityFieldForInput(first('<input name="event_name" />'))).toBeUndefined()
     expect(identityFieldForInput(first('<input name="project_name" />'))).toBeUndefined()
     expect(identityFieldForInput(first('<input name="team_name" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input name="card_holder_name" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input placeholder="Name on card" />'))).toBeUndefined()
   })
 
   it('reads only text-like inputs', () => {
@@ -155,5 +176,17 @@ describe('identity writing agrees with detection', () => {
     expect(inputs[0].value).toBe('Jamie Example')
     expect(inputs[1].value).toBe('jamie@example.test')
     expect(identity).toEqual({ fullName: '', email: '' })
+  })
+})
+
+describe('identity input types', () => {
+  it('treats an email input as an email field whatever its name', () => {
+    expect(identityFieldForInput(first('<input type="email" name="newsletter" />'))).toBe('email')
+  })
+
+  it('treats a plain tel input as a phone field but not a card number or zip code', () => {
+    expect(identityFieldForInput(first('<input type="tel" name="contact" />'))).toBe('phone')
+    expect(identityFieldForInput(first('<input type="tel" name="zip" />'))).toBe('postalCode')
+    expect(identityFieldForInput(first('<input type="tel" autocomplete="cc-number" name="cardnumber" />'))).toBeUndefined()
   })
 })

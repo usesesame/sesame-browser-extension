@@ -28,7 +28,11 @@ The extension asks for the minimum permissions by default:
 
 The inline field button is **optional**. Onboarding or the popup asks once for
 `https://*/*` through `optional_host_permissions`. After approval, the control
-appears on focused, unambiguous sign-in and registration fields. It uses a
+appears on focused, unambiguous sign-in and registration fields, and on name,
+email, phone and address fields in forms without a password, where it offers
+your saved identity. An identity fill stays inside the form you are working in,
+splits your saved name into first and last name fields, picks matching country
+and region menu options and fills a confirm email field too. It uses a
 closed shadow root and fills only after a click on a control the browser reports
 as visible, using the IntersectionObserver v2 visibility check. It checks again
 after each click and stays disabled while it is covered, transparent, or behind

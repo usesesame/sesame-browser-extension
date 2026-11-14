@@ -10,6 +10,12 @@ export interface InputScanResult {
   truncated: boolean
 }
 
+export type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+
+export interface FormControlScanResult extends InputScanResult {
+  controls: FormControl[]
+}
+
 export type ScanRoot = Document | ShadowRoot | Element
 
 export const DEFAULT_MAX_SCAN_DEPTH = 8
@@ -45,6 +51,22 @@ export function collectInputs(root: ScanRoot, options: InputScanOptions = {}): I
   }
 
   return { inputs, shadowRoots, truncated: false }
+}
+
+export function collectFormControls(root: ScanRoot, options: InputScanOptions = {}): FormControlScanResult {
+  const scan = collectInputs(root, options)
+  const controls: FormControl[] = []
+  const roots: ParentNode[] = [root, ...scan.shadowRoots]
+  for (const current of roots) {
+    for (const element of current.querySelectorAll('input, select, textarea')) {
+      if (element instanceof HTMLInputElement
+        || element instanceof HTMLSelectElement
+        || element instanceof HTMLTextAreaElement) {
+        controls.push(element)
+      }
+    }
+  }
+  return { ...scan, controls }
 }
 
 export function collectInputsOfType(
