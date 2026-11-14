@@ -37,18 +37,18 @@
     "@types/chrome": "^0.3.5",
     "@types/node": "^26.6.5",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "eslint": "^10.12.0",
-    "eslint-plugin-svelte": "^3.23.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-svelte": "^3.23.1",
     "globals": "^17.13.0",
     "happy-dom": "^21.0.4",
     "playwright-core": "^1.63.0",
-    "svelte": "^5.57.1",
-    "svelte-check": "^4.7.6",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
     "svelte-eslint-parser": "^1.9.0",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-eslint": "^8.71.1",
     "vite": "^8.3.4",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "nanoid": "3.3.18",
