@@ -61,6 +61,14 @@ const passwordStepPage = `<!doctype html><html><body>
 
 const shippingPage = `<!doctype html><html><body>
 <form id="newsletter"><label>Newsletter <input id="newsletter-email" type="email" name="subscribe"></label></form>
+<form id="profile">
+<label>Full name <input id="profile-name" name="full_name"></label>
+<label>Street <input id="profile-address" name="address"></label>
+<label>City <input id="profile-city" name="city"></label>
+<label>Postal code <input id="profile-postal" name="postal_code"></label>
+<label>Phone <input id="profile-phone" name="phone"></label>
+<label>Email <input id="profile-email" type="email" name="email"></label>
+</form>
 <form id="shipping">
 <label>First name <input id="given" name="first_name"></label>
 <label>Last name <input id="family" name="last_name"></label>
@@ -383,6 +391,26 @@ async function clickClosedShadowText(target: Page, text: string): Promise<void> 
   }
 }
 
+async function focusClosedShadowText(target: Page, text: string): Promise<void> {
+  const cdp = await target.context().newCDPSession(target)
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }) as { root: CdpNode }
+    const textNode = findTextNode(root, text)
+    if (!textNode?.parentId) throw new Error(`closed shadow text not found: ${text}`)
+    const { object } = await cdp.send('DOM.resolveNode', { nodeId: textNode.parentId }) as {
+      object: { objectId?: string }
+    }
+    if (!object.objectId) throw new Error(`closed shadow node did not resolve: ${text}`)
+    await cdp.send('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: 'function () { this.focus() }',
+      returnByValue: true,
+    })
+  } finally {
+    await cdp.detach()
+  }
+}
+
 async function mouseClickClosedShadowText(target: Page, text: string): Promise<void> {
   const cdp = await target.context().newCDPSession(target)
   try {
@@ -632,6 +660,23 @@ async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exa
                 type: 'totp',
                 code: '287082',
                 remainingSeconds: 18,
+              }))
+            } else if (request?.type === 'identity') {
+              const values: Record<string, string> = {
+                fullName: 'Jamie Example',
+                email: 'jamie@example.test',
+                phone: '+31 20 555 0100',
+                country: 'United Kingdom',
+                addressLine1: '1 Example Street',
+              }
+              const identity = Object.fromEntries(
+                String(request.fields ?? '').split(',').filter(Boolean)
+                  .map((field) => [field, values[field] ?? 'Example']),
+              )
+              messageListeners.forEach((listener) => listener({
+                ...base,
+                type: 'identity',
+                identity,
               }))
             } else if (request?.type === 'save') {
               target.__sesameSaveRequests = (target.__sesameSaveRequests ?? 0) + 1
@@ -1199,6 +1244,45 @@ describe('extension browser suite', () => {
       { timeout: 10000 },
     ).toBe(true)
     await waitForReleaseEnabled(current, 'Fill identity')
+  })
+
+  it('fills the shipping form that opened the inline identity offer', async () => {
+    const current = await openFixture('/shipping')
+    const fixtureUrl = current.url()
+    const tabId = await findTabId(fixtureUrl)
+    expect(tabId).toBeGreaterThan(0)
+    await overrideWorkerTab(tabId, fixtureUrl)
+    await mockNativeHostInWorker()
+    try {
+      await current.focus('#given')
+      await expect.poll(
+        async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
+        { timeout: 10000 },
+      ).toBe(true)
+      await waitForReleaseEnabled(current, 'Fill identity')
+      await focusClosedShadowText(current, 'Fill identity')
+      await current.keyboard.press('Enter')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('given') as HTMLInputElement).value),
+        { timeout: 10000 },
+      ).toBe('Jamie')
+      const values = await current.evaluate(() => ({
+        family: (document.getElementById('family') as HTMLInputElement).value,
+        email: (document.getElementById('email') as HTMLInputElement).value,
+        confirm: (document.getElementById('email-again') as HTMLInputElement).value,
+        country: (document.getElementById('country') as HTMLSelectElement).value,
+        newsletter: (document.getElementById('newsletter-email') as HTMLInputElement).value,
+      }))
+      expect(values).toEqual({
+        family: 'Example',
+        email: 'jamie@example.test',
+        confirm: 'jamie@example.test',
+        country: 'GB',
+        newsletter: '',
+      })
+    } finally {
+      await restoreWorkerMocks()
+    }
   })
 
   it('keeps the inline release control disabled while the overlay is hidden or transparent', async () => {

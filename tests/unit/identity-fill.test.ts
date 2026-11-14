@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { identityFieldsForAnchor, inspectIdentitySurface } from '../../src/content/identity-detector'
+import { recordIdentityFillAnchor } from '../../src/content/identity-fields'
 import { fillIdentitySurface } from '../../src/content/identity-writer'
 
 const origin = window.location.origin
@@ -272,6 +273,53 @@ describe('confirm email', () => {
     expect(email.value).toBe('ada@example.com')
     expect(confirm.value).toBe('ada@example.com')
   })
+
+  it('fills the first email and later confirmation fields but not another address', () => {
+    render(`
+      <form>
+        <input type="email" name="email" />
+        <input type="email" name="backup_email" />
+        <input type="email" name="repeat_email" />
+      </form>`)
+    const [email, backup, repeat] = elements<HTMLInputElement>('input')
+
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({
+      ok: true,
+      filledFields: ['email'],
+    })
+    expect(fillIdentitySurface(origin, token, { email: 'ada@example.com' })).toEqual({
+      ok: true,
+      filledFields: ['email'],
+    })
+    expect(email.value).toBe('ada@example.com')
+    expect(backup.value).toBe('')
+    expect(repeat.value).toBe('ada@example.com')
+  })
+
+  it('fills the first email when a friend email field comes first', () => {
+    render(`
+      <form>
+        <input type="email" name="friend_email" />
+        <input type="email" name="email" />
+      </form>`)
+    const [friend, email] = elements<HTMLInputElement>('input')
+
+    expect(inspectIdentitySurface()).toEqual({
+      ok: true,
+      surface: { ok: true, origin },
+      fields: ['email'],
+    })
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({
+      ok: true,
+      filledFields: ['email'],
+    })
+    expect(fillIdentitySurface(origin, token, { email: 'ada@example.com' })).toEqual({
+      ok: true,
+      filledFields: ['email'],
+    })
+    expect(friend.value).toBe('')
+    expect(email.value).toBe('ada@example.com')
+  })
 })
 
 describe('email fields outside a form', () => {
@@ -378,6 +426,74 @@ describe('surface selection', () => {
     render(forms)
     const checkoutEmail = element<HTMLInputElement>('#checkout input[type="email"]')
     expect(identityFieldsForAnchor(checkoutEmail)).toEqual(['fullName', 'email', 'city'])
+  })
+
+  it('follows a focused password field into its own form', () => {
+    render(`
+      <form id="other">
+        <input name="city" /><input name="address" />
+        <input name="postal_code" /><input name="country" />
+      </form>
+      <form id="signup">
+        <input name="full_name" /><input type="email" name="email" />
+        <input type="password" name="new_password" />
+      </form>`)
+    const password = element<HTMLInputElement>('#signup input[type="password"]')
+    password.focus()
+    recordIdentityFillAnchor(password)
+
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({
+      ok: true,
+      filledFields: ['fullName', 'email'],
+    })
+    password.blur()
+    expect(fillIdentitySurface(origin, token, {
+      fullName: 'Ada Lovelace',
+      email: 'ada@example.com',
+    })).toEqual({ ok: true, filledFields: ['fullName', 'email'] })
+    expect(element<HTMLInputElement>('#signup input[name="full_name"]').value).toBe('Ada Lovelace')
+    expect(element<HTMLInputElement>('#signup input[type="email"]').value).toBe('ada@example.com')
+    expect(element<HTMLInputElement>('#other input[name="city"]').value).toBe('')
+  })
+
+  it('stays inside the container around a formless anchor', () => {
+    render(`
+      <section id="contact"><input name="full_name" /><input type="email" name="email" /></section>
+      <section id="shipping"><input name="city" /><input name="address" /></section>`)
+    const email = element<HTMLInputElement>('#contact input[type="email"]')
+    email.focus()
+
+    expect(identityFieldsForAnchor(email)).toEqual(['fullName', 'email'])
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({
+      ok: true,
+      filledFields: ['fullName', 'email'],
+    })
+    expect(fillIdentitySurface(origin, token, {
+      fullName: 'Ada Lovelace',
+      email: 'ada@example.com',
+      city: 'London',
+      addressLine1: '1 Example Street',
+    })).toEqual({ ok: true, filledFields: ['fullName', 'email'] })
+    expect(email.value).toBe('ada@example.com')
+    expect(element<HTMLInputElement>('#shipping input[name="city"]').value).toBe('')
+    expect(element<HTMLInputElement>('#shipping input[name="address"]').value).toBe('')
+  })
+
+  it('chooses the largest formless container when nothing is focused', () => {
+    render(`
+      <section id="small"><input type="email" name="email" /></section>
+      <section id="large"><input name="full_name" /><input name="city" /></section>`)
+    blurActiveElement()
+
+    expect(inspectIdentitySurface()).toEqual({
+      ok: true,
+      surface: { ok: true, origin },
+      fields: ['fullName', 'city'],
+    })
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({
+      ok: true,
+      filledFields: ['fullName', 'city'],
+    })
   })
 })
 

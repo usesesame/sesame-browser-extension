@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { identityFieldForInput } from '../../src/content/identity-fields'
 import { inspectIdentitySurface } from '../../src/content/identity-detector'
+import { collectFormControls } from '../../src/content/input-scan'
 import { fillIdentitySurface } from '../../src/content/identity-writer'
 
 function layout(element: Element) {
@@ -126,6 +127,26 @@ describe('identity hint fallback', () => {
     expect(identityFieldForInput(first('<input name="country" />'))).toBe('country')
   })
 
+  it('leaves a telephone country code, dial code, prefix or extension alone', () => {
+    expect(identityFieldForInput(first('<input type="tel" name="phone_country_code" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="tel" name="dial_code" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="tel" name="calling_code" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="tel" name="phone_prefix" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="tel" name="phone_extension" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="tel" name="contact_phone" />'))).toBe('phone')
+  })
+
+  it('leaves another person email field alone', () => {
+    expect(identityFieldForInput(first('<input type="email" name="friend_email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="email" name="recipient_email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="email" name="gift_email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="email" name="referral_email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="email" name="invite_email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="email" name="colleague_email" />'))).toBeUndefined()
+    expect(identityFieldForInput(first(`<input type="email" aria-label="Someone else's address" />`))).toBeUndefined()
+    expect(identityFieldForInput(first('<input type="email" name="contact_email" />'))).toBe('email')
+  })
+
   it('leaves a non-person name field alone', () => {
     expect(identityFieldForInput(first('<input name="event_name" />'))).toBeUndefined()
     expect(identityFieldForInput(first('<input name="project_name" />'))).toBeUndefined()
@@ -188,5 +209,28 @@ describe('identity input types', () => {
     expect(identityFieldForInput(first('<input type="tel" name="contact" />'))).toBe('phone')
     expect(identityFieldForInput(first('<input type="tel" name="zip" />'))).toBe('postalCode')
     expect(identityFieldForInput(first('<input type="tel" autocomplete="cc-number" name="cardnumber" />'))).toBeUndefined()
+  })
+})
+
+describe('form control collection', () => {
+  it('scans inputs, selects and textareas in document order through open shadow roots', () => {
+    document.body.innerHTML = '<input id="first" /><select id="second"></select><textarea id="third"></textarea><div id="host"></div>'
+    const host = document.getElementById('host')!
+    const root = host.attachShadow({ mode: 'open' })
+    const inner = document.createElement('input')
+    inner.id = 'fourth'
+    root.append(inner)
+
+    const scan = collectFormControls(document)
+    expect(scan.controls.map((control) => control.id)).toEqual(['first', 'second', 'third', 'fourth'])
+    expect(scan.inputs.map((input) => input.id)).toEqual(['first', 'fourth'])
+  })
+
+  it('stops collecting form controls at the node cap', () => {
+    document.body.innerHTML = '<input id="first" /><select id="second"></select><textarea id="third"></textarea>'
+
+    const scan = collectFormControls(document.body, { maxNodes: 2 })
+    expect(scan.truncated).toBe(true)
+    expect(scan.controls.map((control) => control.id)).toEqual(['first', 'second'])
   })
 })

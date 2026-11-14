@@ -1,7 +1,14 @@
 // Closed shadow root; never reads field values or submits.
 import { OVERLAY_TOKEN_CSS } from './overlay-tokens'
-import { identityFieldsForAnchor } from './identity-detector'
-import { declaresIdentityField, identityFieldForInput } from './identity-fields'
+import {
+  clearIdentityFillAnchor,
+  declaresIdentityField,
+  identityFieldForInput,
+  identityFieldKeysForTargets,
+  identityTargetsInSurface,
+  recordIdentityFillAnchor,
+} from './identity-fields'
+import type { IdentitySurfaceScan } from './identity-fields'
 import { cardFieldsForInput } from './card-fields'
 import { oneTimeCodeKindForField } from './one-time-code'
 import { isRecord } from '../shared/values'
@@ -12,13 +19,15 @@ import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
 import {
   DEFAULT_MAX_SCAN_DEPTH,
   collectInputs,
-  collectInputsOfType,
   eventTargetInput,
 } from './input-scan'
 import {
   fillRegistrationSurface,
   inspectPasswordSurface,
+  classifyPasswordFields,
   makeRegistrationPassword,
+  visiblePasswordFields,
+  type PasswordSurfaceKind,
   type RegistrationPasswordOptions,
 } from './registration'
 import { copyTemporarily, type TemporaryCopyHandle } from './temporary-copy'
@@ -99,41 +108,90 @@ export function registrationChoiceOptions(value: string): RegistrationPasswordOp
   return characters ? { mode: 'characters', length: Number(characters[1]) } : {}
 }
 
-type OverlayKind = 'login' | 'username' | 'registration' | 'identity' | 'card' | 'code'
+export type OverlayKind = 'login' | 'username' | 'registration' | 'identity' | 'card' | 'code'
 
-interface OverlayPlan {
+export interface OverlayPlan {
   kind: OverlayKind
   cardFields: CardFieldKey[]
   identityFields: IdentityFieldKey[]
 }
 
+export interface SafeAnchor {
+  field: HTMLInputElement
+  plan: OverlayPlan
+}
+
 function overlayPlan(field: HTMLInputElement): OverlayPlan | null {
-  const passwordSurface = inspectPasswordSurface()
   const signInField = isLoginField(field)
+  const identityField = identityFieldForInput(field) !== undefined
+  const cardFields = cardAnchorFields(field, signInField)
+  const codeKind = oneTimeCodeKindForField(field)
+  if (!signInField && !identityField) {
+    if (cardFields.length > 0) return { kind: 'card', cardFields, identityFields: [] }
+    return codeKind ? { kind: 'code', cardFields, identityFields: [] } : null
+  }
+
+  const scan = identityField ? identityTargetsInSurface(field) : null
+  const passwordSurface = passwordSurfaceForAnchor(field, scan)
   const signInKind =
     signInField && (passwordSurface === 'login' || passwordSurface === 'registration')
       ? passwordSurface
       : signInField && passwordSurface === 'none' && isSafeUsernameOnlyAnchor(field)
         ? 'username'
         : null
-  const cardFields = cardAnchorFields(field, signInField)
-  const codeKind = oneTimeCodeKindForField(field)
-  if (signInKind === 'login' || signInKind === 'registration') {
-    const identityFields = signInKind === 'registration' ? identityFieldsForAnchor(field) : []
-    return { kind: signInKind, cardFields, identityFields }
+
+  if (signInKind === 'login') return { kind: 'login', cardFields, identityFields: [] }
+  if (signInKind === 'registration') {
+    const identityFields = identityFieldKeysForTargets((scan ?? identityTargetsInSurface(field)).targets)
+    return { kind: 'registration', cardFields, identityFields }
   }
+  if (signInKind === 'username') {
+    const identityFields = scan ? identityFieldKeysForTargets(scan.targets) : []
+    const identityMode = identityFields.length > 1 && formOf(field) !== null
+    if (identityMode) return { kind: 'identity', cardFields, identityFields }
+    return { kind: 'username', cardFields, identityFields }
+  }
+
   const identityFields =
-    passwordSurface === 'none' && cardFields.length === 0 && !codeKind && identityFieldForInput(field)
-      ? identityFieldsForAnchor(field)
+    passwordSurface === 'none' && cardFields.length === 0 && !codeKind && scan
+      ? identityFieldKeysForTargets(scan.targets)
       : []
   const identityMode =
     identityFields.length > 1 ||
-    (identityFields.length === 1 && signInKind !== 'username' && declaresIdentityField(field))
+    (identityFields.length === 1 && declaresIdentityField(field))
   if (identityMode) return { kind: 'identity', cardFields, identityFields }
-  if (signInKind === 'username') return { kind: 'username', cardFields, identityFields }
   if (cardFields.length > 0) return { kind: 'card', cardFields, identityFields }
   if (codeKind) return { kind: 'code', cardFields, identityFields }
   return null
+}
+
+function passwordSurfaceForAnchor(
+  field: HTMLInputElement,
+  scan: IdentitySurfaceScan | null,
+): PasswordSurfaceKind {
+  const form = formOf(field)
+  if (form) {
+    return classifyPasswordFields(visiblePasswordFields().filter((password) => password.form === form))
+  }
+  if (!scan) return inspectPasswordSurface()
+  const root = scan.root
+  if (root) {
+    const inside = visiblePasswordFields().filter((password) => surfaceContains(root, password))
+    if (inside.length > 0) return classifyPasswordFields(inside)
+  }
+  const owner = field.parentElement
+  const nearby = owner
+    ? visiblePasswordFields().filter((password) => owner.contains(password))
+    : []
+  return nearby.length > 0 ? classifyPasswordFields(nearby) : 'none'
+}
+
+function formOf(field: HTMLInputElement): HTMLFormElement | null {
+  return field.form ?? field.closest('form')
+}
+
+function surfaceContains(root: Element | Document | ShadowRoot, element: Element): boolean {
+  return root instanceof Element ? root.contains(element) : element.getRootNode() === root
 }
 
 let sharedHostId: string | undefined
@@ -315,15 +373,11 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (choice) choiceValue = choice.value
   }
 
-  function showOverlay(field: HTMLInputElement) {
-    if (field === dismissedField) return
-    const plan = overlayPlan(field)
-    if (!plan) {
-      hideOverlay()
-      return
-    }
+  function showOverlay(anchor: SafeAnchor) {
+    if (anchor.field === dismissedField) return
+    const plan = anchor.plan
     ensureOverlay()
-    anchorField = field
+    anchorField = anchor.field
     shownKind = plan.kind
     cardMode = plan.kind === 'card'
     codeMode = plan.kind === 'code'
@@ -554,7 +608,15 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   }
 
   async function onFillIdentityClick(event: MouseEvent) {
-    await runFillRequest(event, options.onFillIdentityRequest, identityFillMessage, identityMode)
+    await runFillRequest(
+      event,
+      options.onFillIdentityRequest,
+      identityFillMessage,
+      identityMode,
+      () => {
+        if (anchorField) recordIdentityFillAnchor(anchorField)
+      },
+    )
   }
 
   async function runFillRequest(
@@ -562,6 +624,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     request: () => unknown,
     message: (result: unknown) => string,
     hideOnSuccess = false,
+    beforeRequest?: () => void,
   ) {
     if (filling || !anchorField) return
     if (await refuseRelease(event)) return
@@ -570,6 +633,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     renderState()
     if (status) status.textContent = ''
     try {
+      beforeRequest?.()
       const result = await request()
       if (status) status.textContent = message(result)
       if (hideOnSuccess && isRecord(result) && result.ok === true) {
@@ -578,6 +642,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     } catch {
       if (status) status.textContent = 'Sesame could not fill this form.'
     } finally {
+      clearIdentityFillAnchor()
       filling = false
       renderState()
     }
@@ -616,8 +681,12 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (anchorField) {
       const safeAnchor = findSafeAnchor(anchorField)
       if (safeAnchor) {
-        if ((overlayPlan(safeAnchor)?.kind ?? null) !== shownKind) showOverlay(safeAnchor)
-        else positionOverlay()
+        if (safeAnchor.plan.kind !== shownKind
+          || !sameFields(safeAnchor.plan.identityFields, identityFieldsAvailable)) {
+          showOverlay(safeAnchor)
+        } else {
+          positionOverlay()
+        }
         return
       }
       hideOverlay()
@@ -752,28 +821,20 @@ function focusedInput(): HTMLInputElement | null {
   return active instanceof HTMLInputElement ? active : null
 }
 
-function findSafeAnchor(field: HTMLInputElement): HTMLInputElement | null {
+export function findSafeAnchor(field: HTMLInputElement): SafeAnchor | null {
   if (collectInputs(document).truncated) return null
   if (!isVisibleInput(field)) return null
-  const passwordSurface = inspectPasswordSurface()
-  if (!isLoginField(field)) {
-    if (cardFieldsForInput(field).length > 0) return field
-    if (oneTimeCodeKindForField(field)) return field
-    if (passwordSurface !== 'none' || !identityFieldForInput(field)) return null
-    return overlayPlan(field)?.kind === 'identity' ? field : null
-  }
-  if (passwordSurface === 'none') {
-    if (isSafeUsernameOnlyAnchor(field)) return field
-    if (!identityFieldForInput(field)) return null
-    return overlayPlan(field)?.kind === 'identity' ? field : null
-  }
-  if (passwordSurface !== 'login' && passwordSurface !== 'registration') return null
+  const plan = overlayPlan(field)
+  if (!plan) return null
+  if (plan.kind !== 'login' && plan.kind !== 'registration') return { field, plan }
   const passwords = visiblePasswordFields()
   if (passwords.length === 0) return null
   const passwordOwner = ownerOf(passwords[0])
   if (passwords.some((candidate) => ownerOf(candidate) !== passwordOwner)) return null
-  if (field.type === 'password') return passwords.includes(field) ? field : null
-  return ownerOf(field) === passwordOwner ? field : null
+  if (field.type === 'password') {
+    return passwords.includes(field) ? { field, plan } : null
+  }
+  return ownerOf(field) === passwordOwner ? { field, plan } : null
 }
 
 function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
@@ -808,12 +869,6 @@ function isSafeUsernameOnlyAnchor(field: HTMLInputElement): boolean {
   return /log[\s_-]?in|sign[\s_-]?in|authenticate|account|identifier|session|continue|next/.test(
     hint,
   )
-}
-
-function visiblePasswordFields(): HTMLInputElement[] {
-  const scan = collectInputsOfType(document, 'password')
-  if (scan.truncated) return []
-  return scan.inputs.filter((input) => isVisibleInput(input))
 }
 
 function isLoginField(field: HTMLInputElement): boolean {
@@ -908,16 +963,17 @@ export function identityFillMessage(result: unknown): string {
     return 'Identity filled. Review the page before continuing.'
   }
   const code = recordString(result, 'code')
-  if (code === 'origin-mismatch') return 'The page changed. Try filling again.'
   if (code === 'no-fields') return 'No identity fields to fill on this form.'
   if (code === 'stale-document') return 'The page changed while filling. Try again.'
   if (code === 'field-write-failed') return 'This site blocked the field update. Nothing was submitted.'
-  if (code === 'vault-locked') return 'Unlock Sesame, then choose Fill identity again.'
+  if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then choose Fill identity again.'
   if (code === 'no-match') return 'No saved identity is available. Add one in Sesame.'
   if (code === 'approval-declined' || code === 'cancelled') return 'The request was declined, so nothing was filled.'
   if (code === 'approval-timeout') return 'The approval expired. Choose Fill identity to try again.'
-  if (code === 'desktop-unavailable' || code === 'host-disconnected') return 'Open Sesame, then try again.'
-  return 'Sesame could not fill this form.'
+  if (code === 'multiple-matches') return 'Several forms could take this identity. Click into the one you want, then try again.'
+  if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this identity.'
+  if (code === 'origin-mismatch') return 'The page changed. Try filling again.'
+  return fillMessage(result)
 }
 
 function registrationMessage(code: string): string {
@@ -932,4 +988,8 @@ function recordString(value: unknown, key: string): string {
     typeof (value as Record<string, unknown>)[key] === 'string'
     ? (value as Record<string, string>)[key]
     : ''
+}
+
+function sameFields(left: IdentityFieldKey[], right: IdentityFieldKey[]): boolean {
+  return left.length === right.length && left.every((field, index) => field === right[index])
 }

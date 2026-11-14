@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { attachInlineButton, overlayHost } from '../../src/content/overlay'
+import { attachInlineButton, findSafeAnchor, overlayHost } from '../../src/content/overlay'
+import { fillIdentitySurface } from '../../src/content/identity-writer'
 import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 function giveInputsLayout() {
@@ -203,6 +204,143 @@ describe('the inline control on an identity form', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(options.onFillIdentityRequest).not.toHaveBeenCalled()
     expect(identity.disabled).toBe(true)
+    detach()
+  })
+
+  it('fills the form of the control that opened the overlay, not the largest form', async () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `
+      <form id="other">
+        <input name="city" /><input name="address" />
+        <input name="postal_code" /><input name="country" />
+      </form>
+      <form id="shipping">
+        <input name="full_name" /><input type="email" name="email" />
+      </form>`
+    giveInputsLayout()
+    let prepared: unknown
+    const options = baseOptions()
+    options.onFillIdentityRequest = vi.fn(async () => {
+      prepared = fillIdentitySurface(location.origin, 'identity-fill-token-1234', null, 'prepare')
+      return { ok: true, filledFields: [] }
+    })
+    const detach = attachInlineButton(options)
+    focusInput('#shipping input[name="full_name"]')
+
+    await armRelease(roots, 'Fill identity')
+    trustedClick(buttonIn(roots, 'Fill identity'))
+    await vi.waitFor(() => expect(options.onFillIdentityRequest).toHaveBeenCalledTimes(1))
+    expect(prepared).toEqual({ ok: true, filledFields: ['fullName', 'email'] })
+    detach()
+  })
+
+  it('keeps the registration controls for a formless sign-up email', () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `<div>
+      <input type="email" name="email" />
+      <input type="password" name="new_password" autocomplete="new-password" />
+      <input type="password" name="confirm_password" autocomplete="new-password" />
+      <button type="submit">Create account</button>
+    </div>`
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusInput('input[name="email"]')
+
+    expect(actionLabels(roots)).toEqual(['Create password with Sesame', 'Fill identity'])
+    detach()
+  })
+
+  it('keeps the login fill for a formless sign-in email beside a name field', () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `<div class="signin">
+      <input name="full_name" />
+      <input type="email" name="email" />
+      <button type="submit">Sign in</button>
+    </div>`
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusInput('input[name="email"]')
+
+    expect(actionLabels(roots)).toEqual(['Fill with Sesame', 'Fill identity'])
+    detach()
+  })
+
+  it('offers the identity fill on a contact form while a sign-in form is on the page', () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `
+      <form id="login">
+        <input type="email" name="login_email" autocomplete="username" />
+        <input type="password" name="password" autocomplete="current-password" />
+        <button type="submit">Sign in</button>
+      </form>
+      <form id="contact">
+        <input name="full_name" />
+        <input type="email" name="contact_email" />
+      </form>`
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusInput('#contact input[name="full_name"]')
+
+    expect(actionLabels(roots)).toEqual(['Fill identity'])
+    detach()
+  })
+
+  it('offers the identity fill on a formless contact section while a sign-in form is on the page', () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `
+      <form id="login">
+        <input type="email" name="login_email" autocomplete="username" />
+        <input type="password" name="password" autocomplete="current-password" />
+        <button type="submit">Sign in</button>
+      </form>
+      <section id="contact">
+        <input name="full_name" />
+        <input type="email" name="contact_email" />
+      </section>`
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusInput('#contact input[type="email"]')
+
+    expect(actionLabels(roots)).toEqual(['Fill identity'])
+    detach()
+  })
+
+  it('returns the computed plan with the safe anchor', () => {
+    renderShippingForm()
+    const field = document.querySelector<HTMLInputElement>('input[name="full_name"]')!
+    const anchor = findSafeAnchor(field)
+
+    expect(anchor?.field).toBe(field)
+    expect(anchor?.plan.kind).toBe('identity')
+    expect(anchor?.plan.identityFields).toEqual(['fullName', 'email', 'addressLine1'])
+  })
+
+  it('shows and hides the identity fill when a sign-up step changes its identity fields', async () => {
+    const roots = captureShadow()
+    document.body.innerHTML = `<form>
+      <input type="password" name="new_password" autocomplete="new-password" />
+      <input type="password" name="confirm_password" autocomplete="new-password" />
+    </form>`
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    focusInput('input[name="new_password"]')
+    expect(actionLabels(roots)).toEqual(['Create password with Sesame'])
+
+    const form = document.querySelector('form')!
+    const name = document.createElement('input')
+    name.name = 'full_name'
+    name.autocomplete = 'name'
+    const email = document.createElement('input')
+    email.type = 'email'
+    email.name = 'email'
+    email.autocomplete = 'email'
+    form.append(name, email)
+    giveInputsLayout()
+    await vi.waitFor(() => expect(actionLabels(roots)).toEqual(['Create password with Sesame', 'Fill identity']))
+
+    name.remove()
+    email.remove()
+    await vi.waitFor(() => expect(actionLabels(roots)).toEqual(['Create password with Sesame']))
     detach()
   })
 })

@@ -2,14 +2,25 @@
 import type { IdentityFieldKey, IdentityFields } from '../protocol/native'
 import { setValue } from './field-writer'
 import type { IdentityTarget } from './identity-fields'
-import { controlHint, identityFieldKeysForTargets, identityTargetsInSurface, splitFullName } from './identity-fields'
+import {
+  clearIdentityFillAnchor,
+  controlHint,
+  identityFieldKeysForTargets,
+  identityTargetsInSurface,
+  splitFullName,
+} from './identity-fields'
 
 export type IdentityFillOutcome =
   | { ok: true; filledFields: IdentityFieldKey[] }
   | { ok: false; code: string }
 
 type FillPhase = 'prepare' | 'fill' | 'clear'
-type PendingIdentityFill = { token: string; origin: string; fields: IdentityFieldKey[] }
+type PendingIdentityFill = {
+  token: string
+  origin: string
+  fields: IdentityFieldKey[]
+  anchor: Element | null
+}
 type IsolatedWorld = typeof globalThis & { __sesamePendingIdentityFillV1?: PendingIdentityFill }
 type InputValueSetter = (this: HTMLInputElement, value: string) => void
 type SelectValueSetter = (this: HTMLSelectElement, value: string) => void
@@ -41,10 +52,12 @@ export function fillIdentitySurface(
   if (phase === 'clear') {
     const pending = isolated[PENDING_KEY]
     if (pending?.token === documentToken && pending.origin === expectedOrigin) clearPending(isolated)
+    clearIdentityFillAnchor()
     return success([])
   }
 
   const scan = identityTargetsInSurface()
+  clearIdentityFillAnchor()
 
   if (phase === 'prepare') {
     const fields = identityFieldKeysForTargets(scan.targets)
@@ -52,7 +65,7 @@ export function fillIdentitySurface(
     Object.defineProperty(isolated, PENDING_KEY, {
       configurable: true,
       writable: true,
-      value: { token: documentToken, origin: expectedOrigin, fields },
+      value: { token: documentToken, origin: expectedOrigin, fields, anchor: scan.anchor },
     })
     return success(fields)
   }
@@ -63,6 +76,9 @@ export function fillIdentitySurface(
     return failure('stale-document')
   }
   if (!values) return failure('fill-failed')
+  const fillScan = pending.anchor?.isConnected
+    ? identityTargetsInSurface(pending.anchor)
+    : scan
 
   const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set as
     | InputValueSetter
@@ -79,7 +95,7 @@ export function fillIdentitySurface(
   try {
     for (const field of pending.fields) {
       if (!values[field]) continue
-      const targets = scan.targets.filter((target) => target.key === field)
+      const targets = fillScan.targets.filter((target) => target.key === field)
       if (field === 'email') {
         for (const target of emailTargets(targets)) {
           if (!writeTarget(target, values, inputValueSetter, selectValueSetter, textareaValueSetter)) continue
@@ -96,6 +112,7 @@ export function fillIdentitySurface(
   } finally {
     for (const key of Object.keys(values) as IdentityFieldKey[]) values[key] = ''
     clearPending(isolated)
+    clearIdentityFillAnchor()
   }
   return filledFields.length > 0 ? success(filledFields) : failure('field-write-failed')
 }
@@ -103,7 +120,7 @@ export function fillIdentitySurface(
 function emailTargets(targets: IdentityTarget[]): IdentityTarget[] {
   const [first, ...rest] = targets
   if (!first) return []
-  return [first, ...rest.filter((target) => target.element.form !== null || isEmailConfirmation(target))]
+  return [first, ...rest.filter(isEmailConfirmation)]
 }
 
 function isEmailConfirmation(target: IdentityTarget): boolean {

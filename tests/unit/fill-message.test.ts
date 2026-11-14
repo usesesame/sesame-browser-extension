@@ -89,6 +89,25 @@ describe('inline fill messages', () => {
     expect(identityFillMessage({ ok: false, code: 'approval-declined' })).toBe('The request was declined, so nothing was filled.')
   })
 
+  it('explains identity connection, approval and multiple-form failures', () => {
+    expect(identityFillMessage({ ok: false, code: 'host-not-found' })).toBe('Open Sesame, then try again.')
+    expect(identityFillMessage({ ok: false, code: 'timeout' })).toBe(
+      'The desktop connection closed. Keep Sesame open and try again.',
+    )
+    expect(identityFillMessage({ ok: false, code: 'host-exited' })).toBe(
+      'The desktop connection closed. Keep Sesame open and try again.',
+    )
+    expect(identityFillMessage({ ok: false, code: 'approval-unavailable' })).toBe(
+      'Approval expired. Try filling again.',
+    )
+    expect(identityFillMessage({ ok: false, code: 'stale-request' })).toBe(
+      'Approval expired. Try filling again.',
+    )
+    expect(identityFillMessage({ ok: false, code: 'multiple-matches' })).toBe(
+      'Several forms could take this identity. Click into the one you want, then try again.',
+    )
+  })
+
   it('reports the filled one-time code and its remaining window', () => {
     expect(oneTimeCodeMessage({ ok: true, remainingSeconds: 18 }))
       .toBe('Code filled. About 18 seconds remain.')

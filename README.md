@@ -28,20 +28,18 @@ The extension asks for the minimum permissions by default:
 
 The inline field button is **optional**. Onboarding or the popup asks once for
 `https://*/*` through `optional_host_permissions`. After approval, the control
-appears on focused, unambiguous sign-in and registration fields, and on name,
-email, phone and address fields in forms without a password, where it offers
-your saved identity. An identity fill stays inside the form you are working in,
-splits your saved name into first and last name fields, picks matching country
-and region menu options and fills a confirm email field too. It uses a
-closed shadow root and fills only after a click on a control the browser reports
-as visible, using the IntersectionObserver v2 visibility check. It checks again
-after each click and stays disabled while it is covered, transparent, or behind
-a page popover, dialog, or fullscreen element. A cover shown for less than about
-a tenth of a second can still escape that check. Browsers without the check,
-such as Firefox, fill only from the popup. Extension pages refuse to run inside
-a frame. You can pause the control for the current origin, manage exceptions in
-Options, or revoke the permission. The popup and the fill shortcut remain
-available, which is `Alt+Shift+L` on Windows and Linux and `Command+Shift+L` on Mac.
+appears on focused, unambiguous sign-in and registration fields. It also offers
+your saved identity on name, email, phone and address fields, and that fill
+stays inside the form you are working in. It uses a closed shadow root and fills
+only after a click on a control the browser reports as visible, using the
+IntersectionObserver v2 visibility check. It checks again after each click and
+stays disabled while it is covered, transparent, or behind a page popover,
+dialog, or fullscreen element. A cover shown for less than about a tenth of a
+second can still escape that check. Browsers without the check, such as Firefox,
+fill only from the popup. Extension pages refuse to run inside a frame. You can
+pause the control for the current origin, manage exceptions in Options, or
+revoke the permission. The popup and the fill shortcut remain available, which
+is `Alt+Shift+L` on Windows and Linux and `Command+Shift+L` on Mac.
 
 ## Build
 

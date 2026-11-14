@@ -17,6 +17,8 @@ export interface IdentityTarget {
 export interface IdentitySurfaceScan {
   targets: IdentityTarget[]
   truncated: boolean
+  root: Element | Document | ShadowRoot | null
+  anchor: Element | null
 }
 
 interface TargetKind {
@@ -41,6 +43,8 @@ const AUTOCOMPLETE_TO_TARGET: Readonly<Record<string, TargetKind>> = Object.free
 
 const EMAIL = /\be ?mail\b/
 const PHONE = /\b(?:phone|mobile|telephone|tel|cell)\b/
+const NOT_A_PHONE = /\b(?:country|dial|calling) ?code\b|\b(?:prefix|extension)\b|\bext\b/
+const OTHER_RECIPIENT = /\b(?:recipient|friend|gift|referral|invite|invitee|colleague)\b|\bsomeone else'?s? (?:e ?mail|address)\b/
 const POSTAL_CODE = /\b(?:zip|postal|post) ?code\b|\bzip\b|\bpostal\b/
 const COUNTRY = /\bcountry\b/
 const COUNTRY_CODE = /\bcountry ?code\b/
@@ -72,31 +76,65 @@ export function declaresIdentityField(input: HTMLInputElement): boolean {
 
 export function identityTargetForInput(input: HTMLInputElement): IdentityTarget | undefined {
   if (!IDENTITY_INPUT_TYPES.has(input.type.toLowerCase())) return undefined
+  const hint = controlHint(input)
   const explicit = identityTargetKindForAutocomplete(input.autocomplete)
+  if ((explicit?.key === 'email' || input.type.toLowerCase() === 'email' || EMAIL.test(hint))
+    && OTHER_RECIPIENT.test(hint)) {
+    return undefined
+  }
   if (explicit) return { element: input, ...explicit }
   if (declaresOneTimeCode(input.autocomplete) || tokens(input.autocomplete).includes('additional-name')) {
     return undefined
   }
-  const hint = controlHint(input)
   if (looksLikeOneTimeCode(hint)) return undefined
   const type = input.type.toLowerCase()
   if (type === 'email') return { element: input, key: 'email', part: 'whole' }
   const kind = identityTargetKindForInputHint(hint)
   if (kind) return { element: input, ...kind }
-  return type === 'tel' && cardFieldsForInput(input).length === 0
+  return type === 'tel' && !NOT_A_PHONE.test(hint) && cardFieldsForInput(input).length === 0
     ? { element: input, key: 'phone', part: 'whole' }
     : undefined
 }
 
+const ANCHOR_KEY = '__sesameIdentityFillAnchorV1'
+const FORMLESS_CONTAINER_SELECTOR =
+  'fieldset, section, article, aside, dialog, [role="dialog"], [role="form"], main, header, footer, nav'
+
+type AnchorWorld = typeof globalThis & { [ANCHOR_KEY]?: Element }
+
+export function recordIdentityFillAnchor(anchor: Element | null): void {
+  const value = anchor?.isConnected ? anchor : undefined
+  try {
+    Object.defineProperty(globalThis, ANCHOR_KEY, { configurable: true, writable: true, value })
+  } catch {
+    ;(globalThis as AnchorWorld)[ANCHOR_KEY] = value
+  }
+}
+
+export function clearIdentityFillAnchor(): void {
+  try {
+    delete (globalThis as AnchorWorld)[ANCHOR_KEY]
+  } catch {
+    ;(globalThis as AnchorWorld)[ANCHOR_KEY] = undefined
+  }
+}
+
 export function identityTargetsInSurface(anchor?: Element | null): IdentitySurfaceScan {
   const scan = collectFormControls(document)
-  if (scan.truncated) return { targets: [], truncated: true }
+  if (scan.truncated) return { targets: [], truncated: true, root: null, anchor: null }
   const targets: IdentityTarget[] = []
   for (const control of scan.controls) {
     const target = identityTargetForVisibleControl(control)
     if (target) targets.push(target)
   }
-  return { targets: targetsInSurface(targets, anchor ?? focusedElement()), truncated: false }
+  const resolvedAnchor = anchor === undefined ? recordedAnchor() ?? focusedControl() : anchor
+  const selection = targetsInSurface(targets, resolvedAnchor)
+  return {
+    targets: selection.targets,
+    truncated: false,
+    root: selection.root,
+    anchor: resolvedAnchor,
+  }
 }
 
 export function identityFieldKeysForTargets(targets: IdentityTarget[]): IdentityFieldKey[] {
@@ -123,7 +161,7 @@ function identityTargetKindForAutocomplete(value: string): TargetKind | undefine
 
 function identityTargetKindForInputHint(hint: string): TargetKind | undefined {
   if (EMAIL.test(hint)) return { key: 'email', part: 'whole' }
-  if (PHONE.test(hint)) return { key: 'phone', part: 'whole' }
+  if (PHONE.test(hint) && !NOT_A_PHONE.test(hint)) return { key: 'phone', part: 'whole' }
   if (POSTAL_CODE.test(hint)) return { key: 'postalCode', part: 'whole' }
   if (COUNTRY.test(hint) && !COUNTRY_CODE.test(hint)) return { key: 'country', part: 'whole' }
   if (REGION.test(hint)) return { key: 'region', part: 'whole' }
@@ -182,23 +220,64 @@ function identityTargetForVisibleControl(control: IdentityFormControl): Identity
     : identityTargetForTextarea(control)
 }
 
-function targetsInSurface(targets: IdentityTarget[], anchor: Element | null): IdentityTarget[] {
-  const groups = new Map<HTMLFormElement | null, IdentityTarget[]>()
+interface SurfaceSelection {
+  targets: IdentityTarget[]
+  root: Element | Document | ShadowRoot | null
+}
+
+function targetsInSurface(targets: IdentityTarget[], anchor: Element | null): SurfaceSelection {
+  return anchor ? anchorSurface(targets, anchor) : fallbackSurface(targets)
+}
+
+function anchorSurface(targets: IdentityTarget[], anchor: Element): SurfaceSelection {
+  const form = formFor(anchor)
+  if (form) {
+    return { targets: targets.filter((target) => target.element.form === form), root: form }
+  }
+  for (let ancestor = anchor.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const inside = targets.filter(
+      (target) => target.element.form === null && ancestor.contains(target.element),
+    )
+    if (inside.length >= 2) return { targets: inside, root: ancestor }
+  }
+  const alone = targets.find((target) => target.element === anchor)
+  return alone ? { targets: [alone], root: anchor } : { targets: [], root: null }
+}
+
+function fallbackSurface(targets: IdentityTarget[]): SurfaceSelection {
+  const groups: SurfaceSelection[] = []
+  const indexes = new Map<Node, number>()
   for (const target of targets) {
     const owner = target.element.form
-    const group = groups.get(owner)
-    if (group) group.push(target)
-    else groups.set(owner, [target])
+      ?? closestContainer(target.element)
+      ?? target.element.getRootNode()
+    const index = indexes.get(owner)
+    if (index !== undefined) {
+      groups[index].targets.push(target)
+    } else {
+      indexes.set(owner, groups.length)
+      groups.push({ targets: [target], root: owner as Element | Document | ShadowRoot })
+    }
   }
-  if (anchor) {
-    const anchorTarget = targets.find((target) => target.element === anchor)
-    if (anchorTarget) return groups.get(anchorTarget.element.form) ?? []
-  }
-  let selected: IdentityTarget[] = []
-  for (const group of groups.values()) {
-    if (group.length > selected.length) selected = group
+  let selected: SurfaceSelection = { targets: [], root: null }
+  for (const group of groups) {
+    if (group.targets.length > selected.targets.length) selected = group
   }
   return selected
+}
+
+function formFor(element: Element): HTMLFormElement | null {
+  const form = (element as { form?: unknown }).form
+  return form instanceof HTMLFormElement ? form : element.closest('form')
+}
+
+function closestContainer(element: Element): Element | null {
+  return element.closest(FORMLESS_CONTAINER_SELECTOR)
+}
+
+function recordedAnchor(): Element | null {
+  const anchor = (globalThis as AnchorWorld)[ANCHOR_KEY]
+  return anchor?.isConnected ? anchor : null
 }
 
 function focusedElement(): Element | null {
@@ -209,6 +288,15 @@ function focusedElement(): Element | null {
     active = inner
   }
   return active
+}
+
+function focusedControl(): Element | null {
+  const active = focusedElement()
+  return active instanceof HTMLInputElement
+    || active instanceof HTMLSelectElement
+    || active instanceof HTMLTextAreaElement
+    ? active
+    : null
 }
 
 export function controlHint(control: IdentityFormControl): string {

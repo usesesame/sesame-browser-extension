@@ -68,7 +68,10 @@ export function inspectRegistrationSurface(): boolean {
 }
 
 export function inspectPasswordSurface(): PasswordSurfaceKind {
-  const fields = visiblePasswordFields()
+  return classifyPasswordFields(visiblePasswordFields())
+}
+
+export function classifyPasswordFields(fields: HTMLInputElement[]): PasswordSurfaceKind {
   if (fields.length === 0) return 'none'
   if (fields.length > 3) return 'ambiguous'
   const hasCurrent = fields.some(isCurrentPasswordField)
