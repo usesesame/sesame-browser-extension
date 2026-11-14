@@ -43,6 +43,9 @@ const AUTOCOMPLETE_TO_TARGET: Readonly<Record<string, TargetKind>> = Object.free
 
 const EMAIL = /\be ?mail\b/
 const PHONE = /\b(?:phone|mobile|telephone|tel|cell)\b/
+const TELEPHONE_PARTS = new Set([
+  'tel-country-code', 'tel-area-code', 'tel-local', 'tel-local-prefix', 'tel-local-suffix', 'tel-extension',
+])
 const NOT_A_PHONE = /\b(?:country|dial|calling) ?code\b|\b(?:prefix|extension)\b|\bext\b/
 const OTHER_RECIPIENT = /\b(?:recipient|friend|gift|referral|invite|invitee|colleague)\b|\bsomeone else'?s? (?:e ?mail|address)\b/
 const POSTAL_CODE = /\b(?:zip|postal|post) ?code\b|\bzip\b|\bpostal\b/
@@ -83,6 +86,7 @@ export function identityTargetForInput(input: HTMLInputElement): IdentityTarget 
     return undefined
   }
   if (explicit) return { element: input, ...explicit }
+  if (tokens(input.autocomplete).some((token) => TELEPHONE_PARTS.has(token))) return undefined
   if (declaresOneTimeCode(input.autocomplete) || tokens(input.autocomplete).includes('additional-name')) {
     return undefined
   }
@@ -135,6 +139,34 @@ export function identityTargetsInSurface(anchor?: Element | null): IdentitySurfa
     root: selection.root,
     anchor: resolvedAnchor,
   }
+}
+
+export type IdentitySurfaceRoot = Element | Document | ShadowRoot
+
+export function identityTargetsWithin(root: IdentitySurfaceRoot): { targets: IdentityTarget[]; truncated: boolean } {
+  const scan = collectFormControls(document)
+  if (scan.truncated) return { targets: [], truncated: true }
+  const targets: IdentityTarget[] = []
+  for (const control of scan.controls) {
+    const target = identityTargetForVisibleControl(control)
+    if (target && insideSurface(target, root)) targets.push(target)
+  }
+  return { targets, truncated: false }
+}
+
+export function isSurfaceConnected(root: IdentitySurfaceRoot): boolean {
+  if (root instanceof ShadowRoot) return root.host.isConnected
+  if (root instanceof Document) return root === document
+  return root.isConnected
+}
+
+function insideSurface(target: IdentityTarget, root: IdentitySurfaceRoot): boolean {
+  const element = target.element
+  if (root instanceof HTMLFormElement) return element.form === root
+  if (element.form !== null) return false
+  if (root instanceof Document) return element.getRootNode() === root && closestContainer(element) === null
+  if (root instanceof ShadowRoot) return element.getRootNode() === root
+  return root.contains(element)
 }
 
 export function identityFieldKeysForTargets(targets: IdentityTarget[]): IdentityFieldKey[] {
@@ -195,8 +227,8 @@ function identityTargetForTextarea(textarea: HTMLTextAreaElement): IdentityTarge
   }
   const explicit = identityTargetKindForAutocomplete(textarea.autocomplete)
   if (explicit) {
-    return explicit.key === 'addressLine1'
-      ? { element: textarea, key: 'addressLine1', part: 'street' }
+    return explicit.key === 'addressLine1' || explicit.key === 'addressLine2'
+      ? { element: textarea, key: explicit.key, part: 'whole' }
       : undefined
   }
   const hint = controlHint(textarea)
@@ -239,6 +271,13 @@ function anchorSurface(targets: IdentityTarget[], anchor: Element): SurfaceSelec
       (target) => target.element.form === null && ancestor.contains(target.element),
     )
     if (inside.length >= 2) return { targets: inside, root: ancestor }
+  }
+  const rootNode = anchor.getRootNode()
+  if (rootNode instanceof ShadowRoot) {
+    const inside = targets.filter(
+      (target) => target.element.form === null && target.element.getRootNode() === rootNode,
+    )
+    if (inside.length >= 2) return { targets: inside, root: rootNode }
   }
   const alone = targets.find((target) => target.element === anchor)
   return alone ? { targets: [alone], root: anchor } : { targets: [], root: null }

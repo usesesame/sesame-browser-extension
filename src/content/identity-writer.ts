@@ -7,7 +7,10 @@ import {
   controlHint,
   identityFieldKeysForTargets,
   identityTargetsInSurface,
+  identityTargetsWithin,
+  isSurfaceConnected,
   splitFullName,
+  type IdentitySurfaceRoot,
 } from './identity-fields'
 
 export type IdentityFillOutcome =
@@ -19,7 +22,7 @@ type PendingIdentityFill = {
   token: string
   origin: string
   fields: IdentityFieldKey[]
-  anchor: Element | null
+  root: IdentitySurfaceRoot
 }
 type IsolatedWorld = typeof globalThis & { __sesamePendingIdentityFillV1?: PendingIdentityFill }
 type InputValueSetter = (this: HTMLInputElement, value: string) => void
@@ -56,29 +59,31 @@ export function fillIdentitySurface(
     return success([])
   }
 
-  const scan = identityTargetsInSurface()
-  clearIdentityFillAnchor()
-
   if (phase === 'prepare') {
+    const scan = identityTargetsInSurface()
+    clearIdentityFillAnchor()
     const fields = identityFieldKeysForTargets(scan.targets)
-    if (fields.length === 0) return failure('no-fields')
+    if (fields.length === 0 || !scan.root) return failure('no-fields')
     Object.defineProperty(isolated, PENDING_KEY, {
       configurable: true,
       writable: true,
-      value: { token: documentToken, origin: expectedOrigin, fields, anchor: scan.anchor },
+      value: { token: documentToken, origin: expectedOrigin, fields, root: scan.root },
     })
     return success(fields)
   }
 
+  clearIdentityFillAnchor()
   const pending = isolated[PENDING_KEY]
   clearPending(isolated)
   if (!pending || pending.token !== documentToken || pending.origin !== expectedOrigin) {
     return failure('stale-document')
   }
   if (!values) return failure('fill-failed')
-  const fillScan = pending.anchor?.isConnected
-    ? identityTargetsInSurface(pending.anchor)
-    : scan
+  if (!isSurfaceConnected(pending.root)) {
+    for (const key of Object.keys(values) as IdentityFieldKey[]) values[key] = ''
+    return failure('stale-document')
+  }
+  const fillScan = identityTargetsWithin(pending.root)
 
   const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set as
     | InputValueSetter

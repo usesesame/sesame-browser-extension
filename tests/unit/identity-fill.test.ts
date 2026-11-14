@@ -533,3 +533,71 @@ describe('identity fill guards', () => {
     })
   })
 })
+
+describe('review follow-ups', () => {
+  it('leaves a telephone country code part alone and fills the full number field', () => {
+    render('<form><input type="tel" autocomplete="tel-country-code" /><input type="tel" name="phone" /></form>')
+    const [code, phone] = elements<HTMLInputElement>('input')
+    phone.focus()
+
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({ ok: true, filledFields: ['phone'] })
+    expect(fillIdentitySurface(origin, token, { phone: '+44 20 7946 0000' })).toEqual({ ok: true, filledFields: ['phone'] })
+    expect(code.value).toBe('')
+    expect(phone.value).toBe('+44 20 7946 0000')
+  })
+
+  it('keeps an address line 1 textarea to a single line', () => {
+    render('<form><textarea autocomplete="address-line1"></textarea><input autocomplete="address-line2" /></form>')
+    const textarea = element<HTMLTextAreaElement>('textarea')
+    const line2 = element<HTMLInputElement>('input')
+    textarea.focus()
+
+    fillIdentitySurface(origin, token, null, 'prepare')
+    fillIdentitySurface(origin, token, { addressLine1: '1 Example Street', addressLine2: 'Flat 2' })
+    expect(textarea.value).toBe('1 Example Street')
+    expect(line2.value).toBe('Flat 2')
+  })
+
+  it('treats an open shadow root as the surface around a formless field', () => {
+    render('<div id="host"></div><div><input name="full_name" /></div>')
+    const shadow = element<HTMLDivElement>('#host').attachShadow({ mode: 'open' })
+    const name = document.createElement('input')
+    name.name = 'full_name'
+    const email = document.createElement('input')
+    email.type = 'email'
+    shadow.append(name, email)
+    layout(name)
+    layout(email)
+    email.focus()
+
+    expect(fillIdentitySurface(origin, token, null, 'prepare')).toEqual({ ok: true, filledFields: ['fullName', 'email'] })
+    fillIdentitySurface(origin, token, { fullName: 'Ada Lovelace', email: 'ada@example.com' })
+    expect(name.value).toBe('Ada Lovelace')
+    expect(element<HTMLInputElement>('div:not(#host) input').value).toBe('')
+  })
+
+  it('refuses to fill when the prepared form is removed during approval', () => {
+    render('<form id="a"><input name="full_name" /><input type="email" name="email" /></form><form id="b"><input name="full_name" /><input type="email" name="email" /></form>')
+    element<HTMLInputElement>('#a input[name="email"]').focus()
+    fillIdentitySurface(origin, token, null, 'prepare')
+    element<HTMLFormElement>('#a').remove()
+    element<HTMLInputElement>('#b input[name="email"]').focus()
+
+    const identity = { fullName: 'Ada Lovelace', email: 'ada@example.com' }
+    expect(fillIdentitySurface(origin, token, identity)).toEqual({ ok: false, code: 'stale-document' })
+    expect(identity).toEqual({ fullName: '', email: '' })
+    expect(element<HTMLInputElement>('#b input[name="email"]').value).toBe('')
+  })
+
+  it('keeps filling the prepared form after focus moves to another form', () => {
+    render('<form id="a"><input name="full_name" /><input type="email" name="email" /><input name="city" /></form><form id="b"><input name="full_name" /><input type="email" name="email" /></form>')
+    blurActiveElement()
+    fillIdentitySurface(origin, token, null, 'prepare')
+    element<HTMLInputElement>('#b input[name="email"]').focus()
+
+    fillIdentitySurface(origin, token, { fullName: 'Ada Lovelace', email: 'ada@example.com', city: 'London' })
+    expect(element<HTMLInputElement>('#a input[name="email"]').value).toBe('ada@example.com')
+    expect(element<HTMLInputElement>('#b input[name="email"]').value).toBe('')
+  })
+})
+
