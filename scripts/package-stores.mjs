@@ -45,11 +45,17 @@ rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true })
 
 const packages = []
+let downloadEntries
+let downloadId
 for (const browser of browsers) {
   const entries = builtEntries(browser)
   const manifestEntry = entries.find(({ path }) => path === 'manifest.json')
   const builtManifest = JSON.parse(manifestEntry.data.toString('utf8'))
   const extensionId = verifyStoreManifest(browser, builtManifest, version, identity)
+  if (browser === 'chrome') {
+    downloadEntries = entries.map((entry) => ({ ...entry }))
+    downloadId = extensionId
+  }
   if (browser !== 'firefox') {
     const uploadManifest = { ...builtManifest }
     delete uploadManifest.key
@@ -63,9 +69,6 @@ for (const browser of browsers) {
   }))
 }
 
-const downloadEntries = builtEntries('chrome')
-const downloadManifest = JSON.parse(downloadEntries.find(({ path }) => path === 'manifest.json').data.toString('utf8'))
-const downloadId = verifyStoreManifest('chrome', downloadManifest, version, identity)
 packages.push(writePackage('chromium', `sesame-extension-${version}-chromium.zip`, downloadEntries, {
   channel: 'download',
   extensionId: downloadId,

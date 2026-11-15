@@ -2,8 +2,7 @@ name: Store release packages
 
 # Builds the Chrome, Edge, and experimental Firefox packages and their evidence.
 # It deliberately does not upload to a store: supported packages are verified
-# by hand in a clean profile before a person submits them. A version tag also
-# publishes the keyed Chromium download and the Firefox build as a GitHub release.
+# by hand in a clean profile before a person submits them.
 
 on:
   push:
@@ -190,6 +189,7 @@ jobs:
             }
             const record = JSON.parse(readFileSync("store-packages/store-release.json", "utf8"))
             if (`refs/tags/v${record.version}` !== process.env.GITHUB_REF) throw new Error("The package record is for another version.")
+            if (!Array.isArray(record.packages) || record.packages.length === 0) throw new Error("The package record lists no packages.")
             for (const entry of record.packages) {
               if (!/^[A-Za-z0-9._-]+\.zip$/.test(entry.filename)) throw new Error(`${entry.filename} is not a plain package filename.`)
               if (digest(`store-packages/${entry.filename}`) !== entry.sha256) throw new Error(`${entry.filename} is not the package the package job wrote.`)
@@ -202,7 +202,7 @@ jobs:
             writeFileSync("assets.txt", assets.map((name) => `store-packages/${name}`).join("\n") + "\nstore-packages/store-release.json\nSHA256SUMS\n")
             writeFileSync("SHA256SUMS", [...assets, "store-release.json"].map((name) => `${digest(`store-packages/${name}`)}  ${name}`).join("\n") + "\n")
             writeFileSync("notes.md", [
-              `To install Sesame by hand in Chrome, Edge, Brave or another Chromium browser, download ${download.filename} and unzip it. Open the extensions page in your browser, turn on developer mode, choose Load unpacked and pick the unzipped folder. This copy has the same extension id the Sesame desktop app expects, so it connects without extra setup, but it does not update itself.`,
+              `To install Sesame by hand in Chrome, Edge or Chromium, download ${download.filename} and unzip it. Open the extensions page in your browser, turn on developer mode, choose Load unpacked and pick the unzipped folder. This copy has the same extension id the Sesame desktop app expects, so it connects without extra setup, but it does not update itself.`,
               "",
               `${firefox.filename} is the experimental Firefox build. Release Firefox only loads it as a temporary add-on from about:debugging.`,
               "",
@@ -216,4 +216,4 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           mapfile -t assets < assets.txt
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Sesame extension ${TAG#v}" --notes-file notes.md --generate-notes "${assets[@]}"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease --title "Sesame extension ${TAG#v}" --notes-file notes.md --generate-notes "${assets[@]}"

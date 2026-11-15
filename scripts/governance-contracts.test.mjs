@@ -137,8 +137,10 @@ test('only the publish job can write to the repository and it publishes checked 
   assert.doesNotMatch(publish, /id-token|attestations:|environment:/, 'the publish job cannot sign')
   assert.doesNotMatch(publish, /npm (ci|install)|actions\/checkout@/, 'the publish job runs no repository or registry code')
   assert.match(publish, /EXPECTED_RECORD_SHA256: \$\{\{ needs\.package\.outputs\.record-sha256 \}\}/, 'the publish job checks the record the package job wrote')
-  assert.ok(publish.indexOf('digest(`store-packages/${entry.filename}`) !== entry.sha256') < publish.indexOf('gh release create'), 'every package is re-hashed before the release is created')
-  assert.match(publish, /gh release create "\$TAG" --repo "\$GITHUB_REPOSITORY" --verify-tag/, 'the release is created only for a tag that already exists')
+  const rehash = publish.indexOf('digest(`store-packages/${entry.filename}`) !== entry.sha256')
+  const create = publish.indexOf('gh release create')
+  assert.ok(rehash >= 0 && create > rehash, 'every package is re-hashed before the release is created')
+  assert.match(publish, /gh release create "\$TAG" --repo "\$GITHUB_REPOSITORY" --verify-tag --draft --prerelease/, 'the release waits as a draft pre-release for a person to check and publish it')
 })
 
 test('store releases require the desktop main contract before packaging', () => {

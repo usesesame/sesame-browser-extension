@@ -51,7 +51,7 @@ function rebuildAndCompare({ zipPath, browser, worktree }) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const usage =
-    'Usage: node scripts/check-store-zip.mjs --zip <store zip> [--browser chrome|edge|firefox] [--revision <git ref>] [--work-dir <dir>] [--keep]'
+    'Usage: node scripts/check-store-zip.mjs --zip <zip> [--browser chrome|edge|firefox|chromium] [--revision <git ref>] [--work-dir <dir>] [--keep]'
   let options
   try {
     options = parseStoreZipOptions(process.argv.slice(2))
@@ -61,7 +61,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   const { zipPath, browser, revision, workRoot, keep } = options
 
-  if (!zipPath || !['chrome', 'edge', 'firefox'].includes(browser)) {
+  if (!zipPath || !['chrome', 'edge', 'firefox', 'chromium'].includes(browser)) {
     console.error(usage)
     process.exit(2)
   }

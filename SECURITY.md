@@ -122,6 +122,7 @@ Stated plainly so a report does not spend effort on a known position:
   and an explicit approval it can do nothing with a credential.
 - Firefox is not a supported release. An experimental Firefox package builds
   from `manifests/firefox.json` and is checked against the pinned Gecko id, but
-  it is not published to a store and no test runs it in Firefox.
+  it is not published to a store and no test runs it in Firefox. GitHub
+  releases carry it only as an experimental download.
 - The extension does not submit forms, click through login steps, intercept
   passkeys, collect browsing history, or run analytics.

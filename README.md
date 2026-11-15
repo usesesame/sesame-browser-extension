@@ -13,7 +13,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for what lives where.
 To install a released build without a store, download
 `sesame-extension-<version>-chromium.zip` from
 [Releases](https://github.com/usesesame/sesame-browser-extension/releases),
-unzip it and load the folder with Load unpacked in any Chromium browser. It
+unzip it and load the folder with Load unpacked in Chrome, Edge or Chromium. It
 keeps the extension id the desktop app expects, but it does not update itself.
 
 > **Load unpacked:** Point Chrome at `dist/chrome` and Edge at `dist/edge`. Do
@@ -128,8 +128,8 @@ That ends in `npm run package:stores`, which writes Chrome, Edge, and
 experimental Firefox archives, their SHA-256 digests, and a dependency SBOM to
 `store-packages/`. It also writes the Chromium download for GitHub releases,
 which keeps the packing key that the store uploads must drop. A version tag runs
-the release workflow, which attests every archive and publishes the Chromium
-download, the Firefox build and the SBOM as a GitHub release.
+the release workflow, which attests every archive and drafts a GitHub
+pre-release with the Chromium download, the Firefox build and the SBOM.
 Entry order, timestamps, and file modes are fixed, so the same commit and Node
 version reproduce the same digests. The packager refuses a package that carries
 the integration build's localhost host permissions, a stale manifest version, a
