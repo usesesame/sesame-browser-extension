@@ -10,6 +10,10 @@ The selected directory must contain `manifest.json`, `background.js`,
 `popup.html`, and the `icons` directory. If those files are missing, the build
 output is not present or is stale.
 
+A released build is also on the GitHub releases page as
+`sesame-extension-<version>-chromium.zip`. Unzip it and select the unzipped
+folder in the same dialog.
+
 These unpacked folders are for development and private testing with disposable
 credentials. Normal users should eventually install the signed extension from
 the Chrome Web Store or Microsoft Edge Add-ons; they should not build the

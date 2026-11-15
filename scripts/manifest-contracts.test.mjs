@@ -121,6 +121,14 @@ test('the packaging script strips the key from each Chromium zip after checking 
   assert.match(script, /verifyUploadManifest\(browser, uploadManifest\)/)
 })
 
+test('the GitHub download keeps the packing key so an unpacked copy gets the pinned id', () => {
+  const script = read('scripts', 'package-stores.mjs')
+  const download = script.slice(script.indexOf("const downloadEntries = builtEntries('chrome')"), script.indexOf('function builtEntries('))
+  assert.match(download, /verifyStoreManifest\('chrome', downloadManifest, version, identity\)/)
+  assert.match(download, /channel: 'download'/)
+  assert.doesNotMatch(download, /delete|verifyUploadManifest/)
+})
+
 test('a Chromium package is refused when the native host contract does not allow the store id', async () => {
   const { verifyStoreManifest } = await import('./store-manifest.mjs')
   const identity = JSON.parse(read('contracts', 'native-host.json'))

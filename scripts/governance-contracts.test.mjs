@@ -125,6 +125,22 @@ test('the store packages are built apart from the test browser and attested afte
   assert.doesNotMatch(attest, /npm (ci|install)|actions\/checkout@/, 'the attest job runs no repository or registry code')
 })
 
+test('only the publish job can write to the repository and it publishes checked files after attestation', () => {
+  const workflow = read('.github', 'workflows', 'release.yml')
+  for (const job of ['package', 'browser', 'attest']) {
+    assert.doesNotMatch(jobBlock(workflow, job), /contents: write/, `the ${job} job must not write to the repository`)
+  }
+  const publish = jobBlock(workflow, 'publish')
+  assert.match(publish, /needs: \[package, attest\]/, 'a release is published only after the packages are attested')
+  assert.match(publish, /if: startsWith\(github\.ref, 'refs\/tags\/v'\)/, 'only a version tag publishes a release')
+  assert.match(publish, /permissions:\s*\n\s+contents: write\s*\n/, 'the publish job asks for contents: write and nothing else')
+  assert.doesNotMatch(publish, /id-token|attestations:|environment:/, 'the publish job cannot sign')
+  assert.doesNotMatch(publish, /npm (ci|install)|actions\/checkout@/, 'the publish job runs no repository or registry code')
+  assert.match(publish, /EXPECTED_RECORD_SHA256: \$\{\{ needs\.package\.outputs\.record-sha256 \}\}/, 'the publish job checks the record the package job wrote')
+  assert.ok(publish.indexOf('digest(`store-packages/${entry.filename}`) !== entry.sha256') < publish.indexOf('gh release create'), 'every package is re-hashed before the release is created')
+  assert.match(publish, /gh release create "\$TAG" --repo "\$GITHUB_REPOSITORY" --verify-tag/, 'the release is created only for a tag that already exists')
+})
+
 test('store releases require the desktop main contract before packaging', () => {
   const workflow = read('.github', 'workflows', 'release.yml')
   const compatibility = workflow.indexOf('run: npm run compat:host')
