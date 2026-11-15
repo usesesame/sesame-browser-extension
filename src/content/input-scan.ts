@@ -10,6 +10,12 @@ export interface InputScanResult {
   truncated: boolean
 }
 
+export type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+
+export interface FormControlScanResult extends InputScanResult {
+  controls: FormControl[]
+}
+
 export type ScanRoot = Document | ShadowRoot | Element
 
 export const DEFAULT_MAX_SCAN_DEPTH = 8
@@ -21,9 +27,33 @@ interface PendingRoot {
 }
 
 export function collectInputs(root: ScanRoot, options: InputScanOptions = {}): InputScanResult {
+  const { inputs, shadowRoots, truncated } = walkControls(root, options, false)
+  return { inputs, shadowRoots, truncated }
+}
+
+export function collectFormControls(root: ScanRoot, options: InputScanOptions = {}): FormControlScanResult {
+  return walkControls(root, options, true)
+}
+
+function walkControls(
+  root: ScanRoot,
+  options: InputScanOptions,
+  withControls: false,
+): InputScanResult
+function walkControls(
+  root: ScanRoot,
+  options: InputScanOptions,
+  withControls: true,
+): FormControlScanResult
+function walkControls(
+  root: ScanRoot,
+  options: InputScanOptions,
+  withControls: boolean,
+): InputScanResult | FormControlScanResult {
   const maxDepth = scanLimit(options.maxDepth, DEFAULT_MAX_SCAN_DEPTH)
   const maxNodes = scanLimit(options.maxNodes, DEFAULT_MAX_SCAN_NODES)
   const inputs: HTMLInputElement[] = []
+  const controls: FormControl[] = []
   const shadowRoots: ShadowRoot[] = []
   const pending: PendingRoot[] = [{ root, depth: 0 }]
   let visited = 0
@@ -33,18 +63,34 @@ export function collectInputs(root: ScanRoot, options: InputScanOptions = {}): I
     const walkerDocument = current.root.ownerDocument ?? document
     const walker = walkerDocument.createTreeWalker(current.root, NodeFilter.SHOW_ELEMENT)
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-      if (visited >= maxNodes) return { inputs, shadowRoots, truncated: true }
+      if (visited >= maxNodes) {
+        return withControls
+          ? { inputs, controls, shadowRoots, truncated: true }
+          : { inputs, shadowRoots, truncated: true }
+      }
       visited += 1
       if (node instanceof HTMLInputElement) inputs.push(node)
+      if (withControls
+        && (node instanceof HTMLInputElement
+          || node instanceof HTMLSelectElement
+          || node instanceof HTMLTextAreaElement)) {
+        controls.push(node)
+      }
       const shadowRoot = (node as Element).shadowRoot
       if (!shadowRoot) continue
-      if (current.depth >= maxDepth) return { inputs, shadowRoots, truncated: true }
+      if (current.depth >= maxDepth) {
+        return withControls
+          ? { inputs, controls, shadowRoots, truncated: true }
+          : { inputs, shadowRoots, truncated: true }
+      }
       shadowRoots.push(shadowRoot)
       pending.push({ root: shadowRoot, depth: current.depth + 1 })
     }
   }
 
-  return { inputs, shadowRoots, truncated: false }
+  return withControls
+    ? { inputs, controls, shadowRoots, truncated: false }
+    : { inputs, shadowRoots, truncated: false }
 }
 
 export function collectInputsOfType(
