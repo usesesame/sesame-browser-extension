@@ -1,262 +1,71 @@
 # Sesame browser extension
 
-Sesame supports Chrome and Edge on Windows and on Linux from the deb, rpm and
-AppImage desktop packages. The same source also builds an experimental Firefox package
-for compatibility work. Firefox is not a supported store release.
+This is the browser extension for the Sesame password manager. It fills logins,
+identities, cards and one-time codes on web pages, and every fill needs your
+approval in the Sesame desktop app. The extension never holds your vault and
+never submits a form for you.
 
-This repository contains the extension's manifests, tests, release scripts,
-and native-host compatibility checks. It builds without desktop source code.
+It supports Chrome and Edge on Windows and Linux, and it needs
+Sesame desktop 0.3.0 or later. An experimental Firefox build comes from the
+same source, but it is not a supported release yet.
 
-It does not contain the vault, the desktop app, or the native messaging host.
-See [CONTRIBUTING.md](CONTRIBUTING.md) for what lives where.
+## Install
 
-To install a released build without a store, download
-`sesame-extension-<version>-chromium.zip` from
-[Releases](https://github.com/usesesame/sesame-browser-extension/releases),
-unzip it and load the folder with Load unpacked in Chrome, Edge or Chromium. It
-keeps the extension id the desktop app expects, but it does not update itself.
+Most people should install Sesame from the
+[Chrome Web Store](https://chromewebstore.google.com/detail/sesame/aodkkjabifjcbppgccgjidcmaiamddla).
+Edge can install it from there too.
 
-> **Load unpacked:** Point Chrome at `dist/chrome` and Edge at `dist/edge`. Do
-> not select this source directory: it intentionally has no root
-> `manifest.json`. See [LOAD-UNPACKED.md](LOAD-UNPACKED.md).
+You can also download `sesame-extension-<version>-chromium.zip` from
+[Releases](https://github.com/usesesame/sesame-browser-extension/releases).
+Unzip it, open the extensions page in Chrome, Edge or Chromium, turn on
+developer mode and choose Load unpacked. This copy connects to the desktop app
+like the store version, but the browser won't update it, so install each new
+release by hand.
 
-## Permission model
+## Using it
 
-The extension asks for the minimum permissions by default:
+Open the toolbar popup on a sign-in page and choose Fill, or press
+`Alt+Shift+L` on Windows and Linux or `Command+Shift+L` on Mac. Press
+`Alt+Shift+F` or `Command+Shift+I` to fill your saved identity instead.
 
-- `activeTab`: temporary access to the active tab when the popup is opened.
-- `scripting`: required to inspect or fill the active tab from the popup.
-- `nativeMessaging`: required to talk to the local Sesame desktop app.
-- `storage`: stores only the origins where the user explicitly pauses the
-  inline control and the first-run onboarding preference.
-- `contextMenus`: adds a **Fill with Sesame** right-click entry that starts the
-  same approved fill flow as the popup and the keyboard shortcut.
+If you allow it once, a small Sesame button also appears under sign-in, sign-up
+and address fields when you click into them. It only fills after you click it,
+and it stays disabled while anything covers it. You can pause it for a site in
+Options or remove the permission to turn it off.
 
-The inline field button is **optional**. Onboarding or the popup asks once for
-`https://*/*` through `optional_host_permissions`. After approval, the control
-appears on focused, unambiguous sign-in and registration fields. It also offers
-your saved identity on name, email, phone and address fields, and that fill
-stays inside the form you are working in. It uses a closed shadow root and fills
-only after a click on a control the browser reports as visible, using the
-IntersectionObserver v2 visibility check. It checks again after each click and
-stays disabled while it is covered, transparent, or behind a page popover,
-dialog, or fullscreen element. A cover shown for less than about a tenth of a
-second can still escape that check. Browsers without the check, such as Firefox,
-fill only from the popup. Extension pages refuse to run inside a frame. You can
-pause the control for the current origin, manage exceptions in Options, or
-revoke the permission. The popup and the fill shortcut remain available, which
-is `Alt+Shift+L` on Windows and Linux and `Command+Shift+L` on Mac.
+## Development
 
-## Build
+You need Node.js 24.20 and a Chromium for the browser tests.
 
-```powershell
+```sh
 npm ci
 npm run build:chrome
-# or
-npm run build:edge
+npm run ci
 ```
 
-Output is written to `dist/<browser>/`. Load that directory as an unpacked
-extension in Chrome or Edge.
+Load `dist/chrome` or `dist/edge` with Load unpacked to try your build.
+[LOAD-UNPACKED.md](LOAD-UNPACKED.md) explains why the source folder itself
+can't be loaded. `npm run ci` runs everything a pull request needs, including
+a real Chromium, and [CONTRIBUTING.md](CONTRIBUTING.md) lists what to run for
+each kind of change.
 
-## State machine
+## How it talks to the desktop app
 
-The fill flow is represented explicitly as:
+The desktop app owns the native messaging protocol, and this repository keeps a
+pinned copy of each version under `contracts/browser/`. Version 1 covers
+identities, saving and the basic requests, version 2 covers cards, version 3
+and version 5 cover logins, version 4 covers one-time codes, and version 6 adds
+the capability check. Changing the wire format starts with a new contract in
+the desktop repository.
 
-```
-disconnected → desktop-closed → ready
-ready → inspecting → awaiting-approval → filling → complete
-                              ↘ cancelled / expired / failed
-```
+The native host that the browser starts ships with the desktop app, which
+registers it for each supported browser on every start.
+[DESIGN.md](DESIGN.md) covers the host, the fill flow and the security limits,
+and [SECURITY.md](SECURITY.md) says how to report a problem.
 
-Credentials live only in the active call stack. If the service worker
-terminates, the underlying native port closes and the request fails closed.
-A registration form that Sesame filled is read only when you choose
-**Save this login** in the popup. The extension reads the new password at that
-moment, sends it to the desktop approval, and holds nothing after the answer.
-A password-change form works differently: **Change password** fills the stored
-current password and a generated new one, and the generated value stays in the
-background worker's memory until you save it, the tab closes, the site changes
-origin, or the ten-minute arm expires. A form submit does not read or save
-anything.
+## Releases
 
-## Tests
-
-The repository has unit coverage for detection, coordination, native protocol
-validation, and card and identity filling. `npm run test:browser` builds the
-integration bundle and drives it in a real Chromium through `tests/browser`. It
-asserts sign-in form inspection, origin and document-token binding, fail-closed
-behavior when a document is replaced between approval and fill, overlay
-detachment when a site is paused, the inline release gate on hidden, transparent,
-popover-covered, and stylesheet-covered overlays, framed extension page refusal, the fill port
-staying closed to non-popup callers, and the onboarding and popup connection
-states and actions. Install a
-test browser with `npx playwright-core install chromium`; the lockfile pins the
-browser build. Set `SESAME_BROWSER_TEST_EXECUTABLE` when Chromium is not on a
-standard path. Desktop approval needs the desktop binary, so it stays covered
-by the desktop repository.
-
-```powershell
-npm run check
-npm run lint
-npm run design:tokens:check
-npm run version:check
-npm run test:unit
-npm run build:chrome
-npm run build:edge
-npm run build:firefox
-npm run package:stores
-```
-
-`npm run ci` runs the complete release gate, including the real-browser suite
-through `npm run test:browser`. It fails when the browser or the built
-extension is unavailable, so a release cannot pass without browser assertions.
-
-The extension version is independent from the desktop version. Change
-`package.json`, then run `npm run version:sync` to update the Chrome and Edge
-manifests. The experimental Firefox manifest must match the package version too;
-`npm run package:stores` enforces that when it creates the archives.
-`npm run version:check` checks the package, Chrome, and Edge values.
-
-## Store packages
-
-```powershell
-npm run release:check
-```
-
-That ends in `npm run package:stores`, which writes Chrome, Edge, and
-experimental Firefox archives, their SHA-256 digests, and a dependency SBOM to
-`store-packages/`. It also writes the Chromium download for GitHub releases,
-which keeps the packing key that the store uploads must drop. A version tag runs
-the release workflow, which attests every archive and drafts a GitHub
-pre-release with the Chromium download, the Firefox build and the SBOM.
-Entry order, timestamps, and file modes are fixed, so the same commit and Node
-version reproduce the same digests. The packager refuses a package that carries
-the integration build's localhost host permissions, a stale manifest version, a
-widened permission set, a source map, or an extension identity the pinned
-native host would not answer.
-
-Verify the Chrome and Edge archives in clean profiles before uploading. Unit
-tests and integration builds do not replace either store's installation flow.
-
-## Browser protocol compatibility
-
-The desktop owns the native-messaging protocol. This repository keeps closed
-schemas, fictional test vectors, source commits, and SHA-256 digests in
-`contracts/browser/`. Version 1 covers capabilities, activation, identity
-filling, and save requests. Version 2 covers card filling. Version 3 and
-version 5 cover login filling, and the extension sends version 5. Version 4
-covers one-time codes. Version 6 covers the capability probe and lists the
-version each operation uses.
-
-Changing a wire shape needs a tagged contract and an explicit compatibility
-decision. Updating TypeScript types alone is not enough.
-
-The extension needs Sesame desktop 0.3.0 or later. A desktop older than 0.3.0
-does not speak version 6, so the capability probe fails with a protocol
-mismatch and the extension asks the user to update the desktop app.
-
-Each request uses the version owned by its operation. The general operations
-remain on version 1 while card requests use version 2; neither version is a
-claim that every operation can negotiate between both contracts.
-
-```powershell
-npm run compat:host
-```
-
-That downloads the fixtures the desktop publishes, checks them against the
-recorded digests at the pinned implementation commit, checks the compatibility
-range at the desktop's tracking branch, and replays every downloaded vector
-through the real validators. It runs on a schedule rather than in pull-request
-CI. It needs network access to the desktop repository, and it needs
-no token, because that repository is public; `SESAME_CONTRACT_TOKEN` is only
-needed if it is ever made private again.
-
-## Native host distribution
-
-The native host belongs to, and ships with, the Sesame desktop product, not
-this extension. This repository contains only the pinned identity contract used
-to verify store manifests and an explicit development registration helper. A
-production desktop release must install a signed, versioned host and support
-upgrade and removal:
-
-- **Install**: a signed MSI or EXE installer places the native host beside
-  `sesame.exe`, writes the host manifest under the app's local data directory,
-  and creates the registry key
-  `HKCU\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser`
-  pointing to that manifest. The desktop app also re-registers the native
-  messaging host when it starts, so startup repairs a missing or stale
-  registration.
-- **Upgrade**: the installer increments the host manifest `version`, stops the
-  running host process, replaces the binary, and updates the registry path if it
-  changed.
-- **Repair**: the installer re-creates the registry key and rewrites the host
-  manifest if either is missing.
-- **Removal**: uninstall removes the registry key and host manifest before
-  removing the desktop installation. The extension will then report
-  `host-not-found` until the user reinstalls.
-
-On Linux the deb and rpm packages install `sesame-browser-host` beside
-`/usr/bin/sesame`. The manifest files under
-`~/.config/{google-chrome,chromium,net.imput.helium,microsoft-edge}/NativeMessagingHosts/` and
-`~/.mozilla/native-messaging-hosts/` are the registration, and the desktop app
-rewrites them at startup. Removing the package removes the manifests. The
-AppImage build copies the host to `~/.local/share/sesame/browser-host` and
-registers that copy, because the mounted image has no stable path. The app
-checks the copied host by the contents of its executable.
-
-The host manifest pins the allowed extension origin. It must not allow arbitrary
-extension IDs or debug hosts. The native host never opens the vault
-independently; it only validates and relays requests to the local desktop broker.
-
-For local development only, register an externally supplied desktop host path:
-
-```powershell
-.\install-native-host.ps1 -HostPath C:\path\to\sesame-browser-host.exe
-```
-
-and remove that registration with:
-
-```powershell
-.\uninstall-native-host.ps1 -HostPath C:\path\to\sesame-browser-host.exe
-```
-
-The helpers carry no registration facts of their own: the host binary writes
-and removes the manifests and registry keys the desktop owns, for every browser
-that desktop supports. The install helper refuses debug binaries unless
-`-AllowDebugHost` is explicit, and it cannot accept an arbitrary extension id.
-The host must be beside `sesame.exe`, which is required for the helper to
-authenticate the desktop broker. Full native-host launch and desktop approval
-tests are owned by the desktop product because they require its binary and
-vault. This extension's CI uses a protocol fixture and never receives a
-credential through an environment variable or test log.
-
-## Not in this beta
-
-- A supported Firefox release. An experimental Firefox package builds from
-  `manifests/firefox.json` and is checked against the pinned Gecko id, but no
-  test runs it in Firefox.
-- Automatic submission, passkey interception, browsing-history collection,
-  analytics, or background page scanning.
-- Credentials are never written to `chrome.storage`, diagnostics, console
-  output, extension badges, or error messages.
-
-## Multi-step and SPA login support
-
-Each fill action prepares and binds the exact current document. Modern sites
-often split login across multiple steps or replace fields dynamically, so the
-extension supports:
-
-- **Phase detection**: the content script reports whether the current page has a
-  username-only step, a password-only step, or a combined form.
-- **Single-field requests and writes**: a safe username-only or password-only
-  step requests and receives only its matching credential field. The other
-  value does not cross the native response boundary or reach the page.
-- **DOM observation**: the optional inline control now follows newly injected
-  fields. The one-shot popup fill still prepares and binds the exact current
-  document before approval.
-- **Step sequencing**: the popup labels a username-only action explicitly. The
-  user advances the website and triggers a new, separately approved fill for
-  the password document.
-- **No auto-advance**: the extension never clicks "Next" or "Sign in". The user
-  advances the site manually and triggers each fill explicitly.
+A version tag runs the release workflow. It builds the Chrome, Edge and Firefox
+packages, attests them and drafts a GitHub pre-release with the downloadable
+Chromium zip. [CONTRIBUTING.md](CONTRIBUTING.md#releasing-to-the-stores) has
+the steps.
