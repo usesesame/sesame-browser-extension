@@ -45,7 +45,37 @@ rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true })
 
 const packages = []
+let downloadEntries
+let downloadId
 for (const browser of browsers) {
+  const entries = builtEntries(browser)
+  const manifestEntry = entries.find(({ path }) => path === 'manifest.json')
+  const builtManifest = JSON.parse(manifestEntry.data.toString('utf8'))
+  const extensionId = verifyStoreManifest(browser, builtManifest, version, identity)
+  if (browser === 'chrome') {
+    downloadEntries = entries.map((entry) => ({ ...entry }))
+    downloadId = extensionId
+  }
+  if (browser !== 'firefox') {
+    const uploadManifest = { ...builtManifest }
+    delete uploadManifest.key
+    manifestEntry.data = Buffer.from(JSON.stringify(uploadManifest))
+    verifyUploadManifest(browser, uploadManifest)
+  }
+  packages.push(writePackage(browser, `sesame-extension-${version}-${browser}.zip`, entries, {
+    channel: 'store',
+    extensionId,
+    storeAssignsId: browser !== 'firefox',
+  }))
+}
+
+packages.push(writePackage('chromium', `sesame-extension-${version}-chromium.zip`, downloadEntries, {
+  channel: 'download',
+  extensionId: downloadId,
+  storeAssignsId: false,
+}))
+
+function builtEntries(browser) {
   const directory = join(root, 'dist', browser)
   const entries = collect(directory)
   if (entries.length === 0) {
@@ -53,18 +83,11 @@ for (const browser of browsers) {
   }
   const sourceMap = entries.find(({ path }) => path.endsWith('.map'))
   if (sourceMap) throw new Error(`${browser} package: ${sourceMap.path} must not be shipped.`)
+  if (!entries.some(({ path }) => path === 'manifest.json')) throw new Error(`${browser} package: manifest.json is missing.`)
+  return entries
+}
 
-  const manifestEntry = entries.find(({ path }) => path === 'manifest.json')
-  if (!manifestEntry) throw new Error(`${browser} package: manifest.json is missing.`)
-  const builtManifest = JSON.parse(manifestEntry.data.toString('utf8'))
-  const extensionId = verifyStoreManifest(browser, builtManifest, version, identity)
-  if (browser !== 'firefox') {
-    const uploadManifest = { ...builtManifest }
-    delete uploadManifest.key
-    manifestEntry.data = Buffer.from(JSON.stringify(uploadManifest))
-    verifyUploadManifest(browser, uploadManifest)
-  }
-
+function writePackage(browser, filename, entries, details) {
   const archive = createZip(entries)
   const restored = readZip(archive)
   if (restored.length !== entries.length) throw new Error(`${browser} package: archive lost an entry.`)
@@ -73,18 +96,15 @@ for (const browser of browsers) {
       throw new Error(`${browser} package: ${entry.path} does not round-trip.`)
     }
   }
-
-  const filename = `sesame-extension-${version}-${browser}.zip`
   writeFileSync(join(output, filename), archive)
-  packages.push({
+  return {
     browser,
     filename,
-    extensionId,
-    storeAssignsId: browser !== 'firefox',
+    ...details,
     files: entries.length,
     bytes: archive.length,
     sha256: sha256(archive),
-  })
+  }
 }
 
 const components = componentsFromLockfile()
@@ -108,7 +128,7 @@ const record = {
   nativeHostName: identity.host_name,
   packages,
   sbom: { filename: sbomFilename, components: components.length, lockfileSha256: sha256(read('package-lock.json')) },
-  extensionIdNote: 'The Chromium stores refuse a key in the uploaded manifest and give the listing their own extension id. extensionId is the id the packing key derives for unpacked and development builds. The host must also allow the id the store assigns.',
+  extensionIdNote: 'The Chromium stores refuse a key in the uploaded manifest and give the listing their own extension id. extensionId is the id the packing key derives for unpacked and development builds. The host must also allow the id the store assigns. The chromium download keeps the key, so a person who loads it unpacked gets the id the desktop host already allows.',
   reproducible: 'Entry order, timestamps, and file modes are fixed. The same commit and Node version rebuild the same digests.',
 }
 writeFileSync(join(output, 'store-release.json'), `${JSON.stringify(record, null, 2)}\n`)
@@ -116,4 +136,4 @@ writeFileSync(join(output, 'store-release.json'), `${JSON.stringify(record, null
 for (const entry of packages) {
   console.log(`${entry.filename}  ${entry.files} files  ${entry.bytes} bytes  sha256:${entry.sha256}`)
 }
-console.log(`Wrote ${packages.length} store packages and ${components.length} locked components to ${relative(root, output)}/`)
+console.log(`Wrote ${packages.length} packages and ${components.length} locked components to ${relative(root, output)}/`)

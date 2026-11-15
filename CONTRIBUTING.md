@@ -96,10 +96,11 @@ this extension.
    experimental Firefox manifest to the same value.
 2. Open a pull request. `npm run ci` must pass.
 3. Tag `v<version>` on `main`. The release workflow builds the Chrome, Edge,
-   and experimental Firefox packages, records their SHA-256 digests, and
-   generates the dependency SBOM.
-4. Verify the Chrome and Edge packages by hand in a clean profile before
-   uploading. Unit tests and integration builds do not replace either store's
+   and experimental Firefox packages, records their SHA-256 digests, generates
+   the dependency SBOM, and drafts a GitHub pre-release with the Chromium
+   download, the Firefox build and the SBOM.
+4. Verify the Chrome and Edge packages and the Chromium download by hand in a
+   clean profile before uploading or publishing the draft release. Unit tests and integration builds do not replace either store's
    installation flow.
 5. The native host pins the Chromium extension identity and the Firefox Gecko
    id with no wildcards. Verify every packaged identity against that contract.
