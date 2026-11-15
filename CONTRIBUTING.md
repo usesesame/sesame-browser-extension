@@ -36,8 +36,8 @@ have touched anything, the problem is your toolchain rather than your change.
 
 Then read:
 
-1. [README.md](README.md) for the permission model, the fill state machine, and
-   the protocol boundary.
+1. [DESIGN.md](DESIGN.md) for the permissions, the fill flow and the
+   protocol boundary.
 2. [SECURITY.md](SECURITY.md) for what counts as a vulnerability here.
 3. [LOAD-UNPACKED.md](LOAD-UNPACKED.md) for loading a local build.
 
