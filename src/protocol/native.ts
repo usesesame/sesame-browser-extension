@@ -8,6 +8,8 @@ export const FILL_MATCH_PROTOCOL_VERSION = 3
 export const TOTP_PROTOCOL_VERSION = 4
 export const FILL_LOOKALIKE_PROTOCOL_VERSION = 5
 export const FILL_SITE_PROTOCOL_VERSION = 7
+export const PENDING_PASSWORD_PROTOCOL_VERSION = 8
+export const HANDLE_PATTERN = /^[A-Za-z0-9_-]{43}$/
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
@@ -15,6 +17,10 @@ export const MAX_LOOKALIKE_HOST = 128
 export type FillFields = 'username' | 'password' | 'both'
 export type FillMatchKind = 'exact' | 'wwwAlias' | 'site'
 export type FillProtocolVersion = typeof FILL_LOOKALIKE_PROTOCOL_VERSION | typeof FILL_SITE_PROTOCOL_VERSION
+export type PasswordStyle = { style: 'characters'; size: number } | { style: 'passphrase'; size: number }
+export type PendingAction = 'filled' | 'notFilled' | 'accepted'
+export type PendingState = 'unconfirmed' | 'confirmed' | 'returned' | 'unknown'
+export const DEFAULT_PASSWORD_STYLE: PasswordStyle = { style: 'characters', size: 20 }
 
 // Must stay byte-for-byte the same set as the desktop's IDENTITY_FIELD_KEYS.
 export const IDENTITY_FIELD_KEYS = [
@@ -40,6 +46,9 @@ export type NativeRequest =
   | { version: number; type: 'identity'; requestId: string; origin: string; fields: string }
   | { version: 2; type: 'card'; requestId: string; origin: string; fields: string }
   | { version: number; type: 'save'; requestId: string; origin: string; kind: 'new' | 'update'; title?: string; username?: string; password: string }
+  | { version: 8; type: 'change'; requestId: string; origin: string; style: PasswordStyle['style']; size: number }
+  | { version: 8; type: 'create'; requestId: string; origin: string; style: PasswordStyle['style']; size: number }
+  | { version: 8; type: 'pending'; requestId: string; origin: string; handle: string; action: PendingAction; username?: string }
 
 export type NativeResult =
   | { ok: true; protocolVersion: number; capabilities: DesktopCapabilities }
@@ -49,8 +58,23 @@ export type NativeResult =
   | { ok: true; identity: IdentityFields }
   | { ok: true; card: CardFields }
   | { ok: true; saved: true }
+  | { ok: true; changed: ChangedPasswords }
+  | { ok: true; created: CreatedPassword }
+  | { ok: true; pendingState: PendingState }
   | { ok: false; code: 'lookalike-domain'; lookalike: string }
   | { ok: false; code: string }
+
+export interface ChangedPasswords {
+  currentPassword: string
+  newPassword: string
+  handle: string
+  matchKind: FillMatchKind
+}
+
+export interface CreatedPassword {
+  password: string
+  handle: string
+}
 
 export interface DesktopCapabilities {
   desktopAvailable: boolean
@@ -81,6 +105,12 @@ const FIELDS_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', '
 const CARD_KEYS = new Set(['version', 'type', 'requestId', 'card'])
 const TOTP_KEYS = new Set(['version', 'type', 'requestId', 'code', 'remainingSeconds'])
 const SAVE_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'kind', 'password'])
+const GENERATE_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'style', 'size'])
+const PENDING_REQUEST_KEYS = new Set(['version', 'type', 'requestId', 'origin', 'handle', 'action'])
+const CHANGED_KEYS = new Set(['version', 'type', 'requestId', 'currentPassword', 'newPassword', 'handle', 'matchKind'])
+const CREATED_KEYS = new Set(['version', 'type', 'requestId', 'password', 'handle'])
+const PENDING_STATE_KEYS = new Set(['version', 'type', 'requestId', 'state'])
+const PENDING_STATES: ReadonlySet<string> = new Set(['unconfirmed', 'confirmed', 'returned', 'unknown'])
 const UNAVAILABLE_CODES: Readonly<Record<string, string>> = Object.freeze({
   desktopUnavailable: 'desktop-unavailable',
   locked: 'vault-locked',
@@ -135,6 +165,9 @@ function supportsRequestVersion(type: unknown, version: unknown): boolean {
     case 'activate':
     case 'identity':
     case 'save': return version === PROTOCOL_VERSION
+    case 'change':
+    case 'create':
+    case 'pending': return version === PENDING_PASSWORD_PROTOCOL_VERSION
     default: return false
   }
 }
@@ -175,6 +208,21 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
     const fields = value.fields.split(',')
     return fields.length > 0 && new Set(fields).size === fields.length && fields.every((field) => CARD_FIELD_KEYS.includes(field as CardFieldKey))
   }
+  if (value.type === 'change' || value.type === 'create') {
+    return hasExactKeys(value, GENERATE_REQUEST_KEYS)
+      && isWireOrigin(value.origin)
+      && isPasswordStyle(value.style, value.size)
+  }
+  if (value.type === 'pending') {
+    const allowed = new Set(PENDING_REQUEST_KEYS)
+    if (value.username !== undefined) allowed.add('username')
+    return hasExactKeys(value, allowed)
+      && isWireOrigin(value.origin)
+      && isHandle(value.handle)
+      && (value.action === 'filled' || value.action === 'notFilled' || value.action === 'accepted')
+      && (value.username === undefined
+        || (value.action === 'accepted' && typeof value.username === 'string' && value.username.length <= MAX_CREDENTIAL_FIELD))
+  }
   if (value.type === 'save') {
     const allowed = new Set(SAVE_REQUEST_KEYS)
     if (value.title !== undefined) allowed.add('title')
@@ -203,11 +251,40 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
     if (typeof raw.message !== 'string' || !ERROR_MESSAGES.has(raw.message)) {
       return { ok: false, code: 'invalid-response' }
     }
+    if (raw.message === UNSUPPORTED_VERSION_MESSAGE && request.version === PENDING_PASSWORD_PROTOCOL_VERSION) {
+      return { ok: false, code: 'pending-version-unsupported' }
+    }
     return request.type === 'fill'
       && request.version === FILL_SITE_PROTOCOL_VERSION
       && raw.message === UNSUPPORTED_VERSION_MESSAGE
       ? { ok: false, code: 'fill-version-unsupported' }
       : { ok: false, code: 'host-rejected-request' }
+  }
+
+  if (request.type === 'change') {
+    if (raw.type === 'change-unavailable') {
+      return raw.reason === 'lookalike' ? decodeLookalikeUnavailable(raw) : decodeUnavailable(raw)
+    }
+    if (raw.type !== 'changed' || !hasExactKeys(raw, CHANGED_KEYS)) return { ok: false, code: 'unsafe-response' }
+    if (!isSecret(raw.currentPassword) || !isSecret(raw.newPassword) || !isHandle(raw.handle)
+      || !isFillMatchKind(raw.matchKind, FILL_SITE_PROTOCOL_VERSION)) {
+      return { ok: false, code: 'unsafe-response' }
+    }
+    return { ok: true, changed: { currentPassword: raw.currentPassword, newPassword: raw.newPassword, handle: raw.handle, matchKind: raw.matchKind } }
+  }
+
+  if (request.type === 'create') {
+    if (raw.type === 'create-unavailable') return decodeUnavailable(raw)
+    if (raw.type !== 'created' || !hasExactKeys(raw, CREATED_KEYS)) return { ok: false, code: 'unsafe-response' }
+    if (!isSecret(raw.password) || !isHandle(raw.handle)) return { ok: false, code: 'unsafe-response' }
+    return { ok: true, created: { password: raw.password, handle: raw.handle } }
+  }
+
+  if (request.type === 'pending') {
+    if (raw.type === 'pending-unavailable') return decodeUnavailable(raw)
+    if (raw.type !== 'pending-state' || !hasExactKeys(raw, PENDING_STATE_KEYS)) return { ok: false, code: 'unsafe-response' }
+    if (typeof raw.state !== 'string' || !PENDING_STATES.has(raw.state)) return { ok: false, code: 'invalid-response' }
+    return { ok: true, pendingState: raw.state as PendingState }
   }
 
   if (request.type === 'capabilities') {
@@ -440,6 +517,57 @@ export function makeSaveRequest(
   if (title) request.title = title
   if (options.username) request.username = options.username
   return request
+}
+
+function generateRequest(type: 'change' | 'create', origin: string, style: PasswordStyle): Extract<NativeRequest, { type: 'change' | 'create' }> {
+  const normalizedOrigin = normalizeFillOrigin(origin)
+  if (!normalizedOrigin) throw new TypeError(`${type} request requires a normalized web origin`)
+  if (!isPasswordStyle(style.style, style.size)) throw new TypeError(`${type} request requires a supported password style`)
+  return { version: PENDING_PASSWORD_PROTOCOL_VERSION, type, requestId: crypto.randomUUID(), origin: normalizedOrigin, style: style.style, size: style.size }
+}
+
+export function makeChangeRequest(origin: string, style: PasswordStyle = DEFAULT_PASSWORD_STYLE): Extract<NativeRequest, { type: 'change' }> {
+  return generateRequest('change', origin, style) as Extract<NativeRequest, { type: 'change' }>
+}
+
+export function makeCreateRequest(origin: string, style: PasswordStyle = DEFAULT_PASSWORD_STYLE): Extract<NativeRequest, { type: 'create' }> {
+  return generateRequest('create', origin, style) as Extract<NativeRequest, { type: 'create' }>
+}
+
+export function makePendingRequest(
+  origin: string,
+  handle: string,
+  action: PendingAction,
+  username?: string,
+): Extract<NativeRequest, { type: 'pending' }> {
+  const normalizedOrigin = normalizeFillOrigin(origin)
+  if (!normalizedOrigin) throw new TypeError('pending request requires a normalized web origin')
+  if (!isHandle(handle)) throw new TypeError('pending request requires a handle')
+  const request: Extract<NativeRequest, { type: 'pending' }> = {
+    version: PENDING_PASSWORD_PROTOCOL_VERSION,
+    type: 'pending',
+    requestId: crypto.randomUUID(),
+    origin: normalizedOrigin,
+    handle,
+    action,
+  }
+  const trimmed = username?.trim()
+  if (action === 'accepted' && trimmed && trimmed.length <= MAX_CREDENTIAL_FIELD) request.username = trimmed
+  return request
+}
+
+export function isHandle(value: unknown): value is string {
+  return typeof value === 'string' && HANDLE_PATTERN.test(value)
+}
+
+export function isPasswordStyle(style: unknown, size: unknown): boolean {
+  if (typeof size !== 'number' || !Number.isInteger(size)) return false
+  return (style === 'characters' && size >= 16 && size <= 64)
+    || (style === 'passphrase' && size >= 5 && size <= 10)
+}
+
+function isSecret(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_CREDENTIAL_FIELD
 }
 
 export function normalizeFillOrigin(value: unknown): string | null {

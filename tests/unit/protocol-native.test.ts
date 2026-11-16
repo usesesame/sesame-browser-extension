@@ -14,7 +14,11 @@ import {
   isCredential,
   isNativeRequest,
   makeCardRequest,
+  makeChangeRequest,
+  makeCreateRequest,
   makeIdentityRequest,
+  makePendingRequest,
+  PENDING_PASSWORD_PROTOCOL_VERSION,
   makeRequest,
   makeSaveRequest,
   makeTotpRequest,
@@ -732,4 +736,45 @@ it('requires the new capabilities version and rejects lock fields on it', () => 
   expect(respond(request, {
     type: 'capabilities', installed: true, desktopAvailable: true, locked: true, fillAvailable: false,
   })).toEqual({ ok: false, code: 'unsafe-response' })
+})
+
+describe('protocol 8 pending passwords', () => {
+  const handle = 'fictional-handle-for-examples-only-AAAAAAAA'
+
+  it('builds change and create requests that carry no password', () => {
+    for (const request of [makeChangeRequest('https://example.com/'), makeCreateRequest('https://example.com', { style: 'passphrase', size: 6 })]) {
+      expect(request.version).toBe(PENDING_PASSWORD_PROTOCOL_VERSION)
+      expect(Object.keys(request).sort()).toEqual(['origin', 'requestId', 'size', 'style', 'type', 'version'])
+      expect(request.origin).toBe('https://example.com')
+      expect(isNativeRequest(request)).toBe(true)
+    }
+  })
+
+  it('refuses a request with a password, an unknown style or a short handle', () => {
+    expect(isNativeRequest({ ...makeChangeRequest('https://example.com'), password: 'fictional-example-value' })).toBe(false)
+    expect(isNativeRequest({ ...makeChangeRequest('https://example.com'), size: 15 })).toBe(false)
+    expect(isNativeRequest({ ...makePendingRequest('https://example.com', handle, 'filled'), handle: 'short' })).toBe(false)
+    expect(() => makeChangeRequest('https://example.com', { style: 'passphrase', size: 11 })).toThrow(TypeError)
+    expect(() => makePendingRequest('https://example.com', 'short', 'filled')).toThrow(TypeError)
+  })
+
+  it('sends a username only with an acceptance', () => {
+    expect(makePendingRequest('https://example.com', handle, 'filled', 'casey@example.com')).not.toHaveProperty('username')
+    expect(makePendingRequest('https://example.com', handle, 'accepted', ' casey@example.com ').username).toBe('casey@example.com')
+    expect(makePendingRequest('https://example.com', handle, 'accepted', '   ')).not.toHaveProperty('username')
+  })
+
+  it('reads a pending state and rejects one that echoes a secret', () => {
+    const request = makePendingRequest('https://example.com', handle, 'accepted')
+    const reply = { version: 8, type: 'pending-state', requestId: request.requestId, state: 'confirmed' }
+    expect(safeNativeResponse(reply, request)).toEqual({ ok: true, pendingState: 'confirmed' })
+    expect(safeNativeResponse({ ...reply, handle }, request)).toEqual({ ok: false, code: 'unsafe-response' })
+    expect(safeNativeResponse({ ...reply, password: 'fictional-example-value' }, request)).toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('does not accept a change answer for a fill request', () => {
+    const fill = makeRequest('fill', 'https://example.com', 'password')
+    const reply = { version: 7, type: 'changed', requestId: fill.requestId, currentPassword: 'a', newPassword: 'b', handle, matchKind: 'exact' }
+    expect(safeNativeResponse(reply, fill).ok).toBe(false)
+  })
 })

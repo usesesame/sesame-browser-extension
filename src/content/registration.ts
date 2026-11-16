@@ -1,5 +1,4 @@
 import { isUsernameField } from './field-detector'
-import { EFF_WORDLIST } from './eff-wordlist'
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
 import { collectInputs, collectInputsOfType } from './input-scan'
@@ -10,58 +9,7 @@ export type RegistrationOutcome =
   | { version: 1; ok: true; code: 'registration-filled'; fieldsFilled: number }
   | { version: 1; ok: false; code: string }
 
-type RandomBytes = (buffer: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>
 export type PasswordSurfaceKind = 'none' | 'login' | 'registration' | 'password-change' | 'ambiguous'
-
-export type RegistrationPasswordMode = 'characters' | 'passphrase'
-
-export interface RegistrationPasswordOptions {
-  mode?: RegistrationPasswordMode
-  length?: number
-  words?: number
-}
-
-export const PASSPHRASE_MIN_WORDS = 5
-export const PASSPHRASE_MAX_WORDS = 10
-export const PASSPHRASE_DEFAULT_WORDS = 6
-
-export function makeRegistrationPassword(
-  options: RegistrationPasswordOptions = {},
-  getRandomValues: RandomBytes = (buffer) => crypto.getRandomValues(buffer),
-): string {
-  if (options.mode === 'passphrase') {
-    const words = options.words ?? PASSPHRASE_DEFAULT_WORDS
-    if (!Number.isInteger(words) || words < PASSPHRASE_MIN_WORDS || words > PASSPHRASE_MAX_WORDS) {
-      throw new RangeError(
-        `registration passphrase must be between ${PASSPHRASE_MIN_WORDS} and ${PASSPHRASE_MAX_WORDS} words`,
-      )
-    }
-    return Array.from(
-      { length: words },
-      () => EFF_WORDLIST[secureRandomIndex(EFF_WORDLIST.length, getRandomValues)],
-    ).join('-')
-  }
-  const length = options.length ?? 20
-  if (!Number.isInteger(length) || length < 16 || length > 64) {
-    throw new RangeError('registration password length must be between 16 and 64')
-  }
-  const groups = [
-    'ABCDEFGHJKLMNPQRSTUVWXYZ',
-    'abcdefghijkmnopqrstuvwxyz',
-    '23456789',
-    '!@#$%^&*()-_=+',
-  ]
-  const alphabet = groups.join('')
-  const characters = groups.map((group) => group[secureRandomIndex(group.length, getRandomValues)])
-  while (characters.length < length) {
-    characters.push(alphabet[secureRandomIndex(alphabet.length, getRandomValues)])
-  }
-  for (let index = characters.length - 1; index > 0; index -= 1) {
-    const swapIndex = secureRandomIndex(index + 1, getRandomValues)
-    ;[characters[index], characters[swapIndex]] = [characters[swapIndex], characters[index]]
-  }
-  return characters.join('')
-}
 
 export function inspectRegistrationSurface(): boolean {
   return inspectPasswordSurface() === 'registration'
@@ -130,6 +78,62 @@ export function fillRegistrationSurface(expectedOrigin: string, password: string
   return { version: REGISTRATION_VERSION, ok: true, code: 'registration-filled', fieldsFilled }
 }
 
+type PendingRegistration = { token: string; origin: string }
+type RegistrationWorld = typeof globalThis & { __sesamePendingRegistrationV1?: PendingRegistration }
+const PENDING_REGISTRATION_KEY = '__sesamePendingRegistrationV1'
+
+function clearPendingRegistration(world: RegistrationWorld): void {
+  try {
+    delete world[PENDING_REGISTRATION_KEY]
+  } catch {
+    world[PENDING_REGISTRATION_KEY] = undefined
+  }
+}
+
+export function fillGeneratedRegistration(
+  expectedOrigin: string,
+  documentToken: string,
+  password: string | null,
+  phase: 'prepare' | 'fill' | 'clear' = 'fill',
+): RegistrationOutcome {
+  if (typeof expectedOrigin !== 'string' || location.origin !== expectedOrigin) return failure('origin-mismatch')
+  if (typeof documentToken !== 'string' || documentToken.length < 16 || documentToken.length > 128) {
+    return failure('stale-document')
+  }
+  const world = globalThis as RegistrationWorld
+  if (phase === 'clear') {
+    const pending = world[PENDING_REGISTRATION_KEY]
+    if (pending?.token === documentToken && pending.origin === expectedOrigin) clearPendingRegistration(world)
+    return failure('registration-fill-failed')
+  }
+  if (phase === 'prepare') {
+    if (inspectPasswordSurface() !== 'registration') return failure('not-registration-form')
+    Object.defineProperty(world, PENDING_REGISTRATION_KEY, {
+      configurable: true,
+      value: { token: documentToken, origin: expectedOrigin },
+      writable: true,
+    })
+    return { version: REGISTRATION_VERSION, ok: true, code: 'registration-filled', fieldsFilled: 1 }
+  }
+  const pending = world[PENDING_REGISTRATION_KEY]
+  clearPendingRegistration(world)
+  if (!pending || pending.token !== documentToken || pending.origin !== expectedOrigin) return failure('stale-document')
+  return fillRegistrationSurface(expectedOrigin, password ?? '')
+}
+
+export function captureSignupUsername(): string {
+  if (inspectPasswordSurface() !== 'registration') return ''
+  const passwordFields = visiblePasswordFields()
+  if (passwordFields.length === 0) return ''
+  const owner = passwordFields[0].form ?? passwordFields[0].parentElement ?? passwordFields[0]
+  const scan = collectInputs(document)
+  if (scan.truncated) return ''
+  const usernameField = scan.inputs
+    .filter((field) => field.type !== 'password' && isVisibleInput(field, { rejectAriaHiddenAncestor: true, minimumSize: 1 }) && isUsernameField(field))
+    .find((field) => (field.form ?? field.parentElement ?? field) === owner)
+  return usernameField?.value ?? ''
+}
+
 export interface SignupCapture {
   origin: string
   username: string
@@ -195,7 +199,7 @@ export function normalizeRegistrationOutcome(value: unknown): RegistrationOutcom
   }
   const safeCodes = new Set([
     'field-write-failed', 'multiple-matches', 'no-fields', 'not-registration-form',
-    'origin-mismatch', 'password-change-form', 'registration-fill-failed',
+    'origin-mismatch', 'password-change-form', 'registration-fill-failed', 'stale-document',
   ])
   return failure(typeof value.code === 'string' && safeCodes.has(value.code)
     ? value.code
@@ -230,23 +234,6 @@ export function isRegistrationField(field: HTMLInputElement): boolean {
 
 function tokens(value: unknown): string[] {
   return String(value ?? '').toLowerCase().split(/\s+/).filter(Boolean)
-}
-
-function secureRandomIndex(maxExclusive: number, getRandomValues: RandomBytes): number {
-  if (!Number.isInteger(maxExclusive) || maxExclusive < 1) {
-    throw new RangeError('random index bound must be a positive integer')
-  }
-  const byteLength = Math.max(1, Math.ceil(Math.log2(maxExclusive) / 8))
-  const range = 256 ** byteLength
-  const limit = range - (range % maxExclusive)
-  const sample = new Uint8Array(byteLength)
-  let value = 0
-  do {
-    getRandomValues(sample)
-    value = 0
-    for (const byte of sample) value = value * 256 + byte
-  } while (value >= limit)
-  return value % maxExclusive
 }
 
 function failure(code: string): RegistrationOutcome {

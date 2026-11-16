@@ -7,7 +7,7 @@ import { fillCardSurface } from './card-writer'
 import { fillOneTimeCodeSurface, inspectOneTimeCodeSurface } from './one-time-code'
 import { attachInlineButton, showFillStatus } from './overlay'
 import { fillPasswordChangeSurface } from './password-change'
-import { fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
+import { captureSignupUsername, fillGeneratedRegistration, fillRegistrationSurface, inspectPasswordSurface, inspectRegistrationSurface } from './registration'
 import { saveCurrentLogin } from './signup-capture'
 
 type GlobalApi = {
@@ -20,6 +20,8 @@ type GlobalApi = {
   sesameInspectOneTimeCodeSurface: typeof inspectOneTimeCodeSurface
   sesameFillOneTimeCodeSurface: typeof fillOneTimeCodeSurface
   sesameFillRegistrationSurface: typeof fillRegistrationSurface
+  sesameFillGeneratedRegistration: typeof fillGeneratedRegistration
+  sesameCaptureSignupUsername: typeof captureSignupUsername
   sesameInspectRegistrationSurface: typeof inspectRegistrationSurface
   sesameInspectPasswordSurface: typeof inspectPasswordSurface
   sesameFillPasswordChangeSurface: typeof fillPasswordChangeSurface
@@ -39,6 +41,8 @@ const api: GlobalApi = {
   sesameInspectOneTimeCodeSurface: inspectOneTimeCodeSurface,
   sesameFillOneTimeCodeSurface: fillOneTimeCodeSurface,
   sesameFillRegistrationSurface: fillRegistrationSurface,
+  sesameFillGeneratedRegistration: fillGeneratedRegistration,
+  sesameCaptureSignupUsername: captureSignupUsername,
   sesameInspectRegistrationSurface: inspectRegistrationSurface,
   sesameInspectPasswordSurface: inspectPasswordSurface,
   sesameFillPasswordChangeSurface: fillPasswordChangeSurface,
@@ -47,6 +51,7 @@ const api: GlobalApi = {
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return undefined
     return attachInlineButton({
       onFillRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill' }),
+      onCreatePasswordRequest: (style) => chrome.runtime.sendMessage({ type: 'sesame:create-password', style: style.style, size: style.size }),
       onConnectionCheck: (force = false) => chrome.runtime.sendMessage({ type: 'sesame:connect', force }),
       onOpenDesktop: () => chrome.runtime.sendMessage({ type: 'sesame:open-desktop' }),
       onFillIdentityRequest: () => chrome.runtime.sendMessage({ type: 'sesame:autofill-identity' }),
@@ -73,6 +78,8 @@ export {
   inspectOneTimeCodeSurface,
   fillOneTimeCodeSurface,
   fillRegistrationSurface,
+  fillGeneratedRegistration,
+  captureSignupUsername,
   inspectRegistrationSurface,
   inspectPasswordSurface,
   fillPasswordChangeSurface,

@@ -7,6 +7,9 @@ import {
   FILL_SITE_PROTOCOL_VERSION,
   makeIdentityRequest,
   makeCardRequest,
+  makeChangeRequest,
+  makeCreateRequest,
+  makePendingRequest,
   makeRequest,
   makeSaveRequest,
   makeTotpRequest,
@@ -17,7 +20,12 @@ import {
   type IdentityFields,
   type CardFieldKey,
   type CardFields,
+  type ChangedPasswords,
+  type CreatedPassword,
   type NativeRequest,
+  type PasswordStyle,
+  type PendingAction,
+  type PendingState,
 } from '../protocol/native'
 import type { Browser, NativePort } from '../platform/chrome'
 
@@ -245,6 +253,40 @@ export async function requestSave(
   return result.response.saved === true ? { ok: true } : { ok: false, code: 'invalid-response' }
 }
 
+export async function requestChange(
+  browser: Browser,
+  origin: string,
+  style: PasswordStyle,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<{ ok: true; changed: ChangedPasswords } | { ok: false; code: string; lookalike?: string }> {
+  const result = await connectOnce(browser, makeChangeRequest(origin, style), { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal })
+  if (!result.ok) return result
+  return result.response.changed ? { ok: true, changed: result.response.changed } : { ok: false, code: 'invalid-response' }
+}
+
+export async function requestCreate(
+  browser: Browser,
+  origin: string,
+  style: PasswordStyle,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<{ ok: true; created: CreatedPassword } | { ok: false; code: string }> {
+  const result = await connectOnce(browser, makeCreateRequest(origin, style), { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal })
+  if (!result.ok) return { ok: false, code: result.code }
+  return result.response.created ? { ok: true, created: result.response.created } : { ok: false, code: 'invalid-response' }
+}
+
+export async function requestPending(
+  browser: Browser,
+  origin: string,
+  handle: string,
+  action: PendingAction,
+  options: { timeoutMs?: number; signal?: AbortSignal; username?: string } = {}
+): Promise<{ ok: true; state: PendingState } | { ok: false; code: string }> {
+  const result = await connectOnce(browser, makePendingRequest(origin, handle, action, options.username), { timeoutMs: options.timeoutMs ?? NATIVE_PROBE_TIMEOUT_MS, signal: options.signal })
+  if (!result.ok) return { ok: false, code: result.code }
+  return result.response.pendingState ? { ok: true, state: result.response.pendingState } : { ok: false, code: 'invalid-response' }
+}
+
 interface ConnectOnceResult {
   ok: true
   response: {
@@ -258,6 +300,9 @@ interface ConnectOnceResult {
     identity?: IdentityFields
     card?: CardFields
     saved?: true
+    changed?: ChangedPasswords
+    created?: CreatedPassword
+    pendingState?: PendingState
   }
 }
 
@@ -355,6 +400,15 @@ export function connectOnce(
       }
       if (response.ok && 'saved' in response) {
         return finish('ok', { saved: true })
+      }
+      if (response.ok && 'changed' in response) {
+        return finish('ok', { changed: response.changed })
+      }
+      if (response.ok && 'created' in response) {
+        return finish('ok', { created: response.created })
+      }
+      if (response.ok && 'pendingState' in response) {
+        return finish('ok', { pendingState: response.pendingState })
       }
       finish('invalid-response')
     })

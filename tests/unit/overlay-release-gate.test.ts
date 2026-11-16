@@ -410,28 +410,25 @@ describe('the inline release gate', () => {
     detach()
   })
 
-  it('applies the same check to copy password', async () => {
+  it('applies the same check to create password', async () => {
     const roots = captureShadow()
     document.body.innerHTML =
       '<input type="password" name="new_password" /><input type="password" name="confirm_password" />'
     giveInputsLayout()
-    const detach = attachInlineButton(baseOptions())
+    const onCreatePasswordRequest = vi.fn().mockResolvedValue({ ok: true })
+    const detach = attachInlineButton({ ...baseOptions(), onCreatePasswordRequest })
     focusFirstInput()
     const create = buttonIn(roots, 'Create password with Sesame')
     visibilityObserver().report({ isVisible: true, isIntersecting: true })
     await vi.waitFor(() => expect(create.disabled).toBe(false))
-    trustedClick(create)
-    const copy = buttonIn(roots, 'Copy password')
-    await vi.waitFor(() => expect(copy.hidden).toBe(false))
-    await vi.waitFor(() => expect(copy.disabled).toBe(false))
 
-    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
     overlayHost()!.style.setProperty('opacity', '0', 'important')
-    trustedClick(copy)
+    trustedClick(create)
     await settle(0)
 
-    expect(writeText).not.toHaveBeenCalled()
+    expect(onCreatePasswordRequest).not.toHaveBeenCalled()
     expect(statusText(roots)).toContain('cannot confirm this control is visible')
+    expect(buttonIn(roots, 'Copy password')).toBeUndefined()
     detach()
   })
 

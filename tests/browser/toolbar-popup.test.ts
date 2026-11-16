@@ -242,12 +242,20 @@ async function installDeferredNativeHost(): Promise<void> {
               listeners({ ...base, type: 'capabilities', installed: true, desktopAvailable: true })
               return
             }
+            if (request?.type === 'pending') {
+              listeners({ ...base, type: 'pending-state', state: 'unconfirmed' })
+              return
+            }
             state.requests += 1
             port.waiting = true
             waiting.push({
               port,
               deliver: () => {
-                if (request?.type === 'identity') {
+                if (request?.type === 'change') {
+                  listeners({ ...base, type: 'changed', currentPassword: 'fictional-popup-pass', newPassword: 'fictional-popup-new-pass', handle: 'fictional-handle-for-examples-only-AAAAAAAA', matchKind: 'exact' })
+                } else if (request?.type === 'create') {
+                  listeners({ ...base, type: 'created', password: 'fictional-popup-new-pass', handle: 'fictional-handle-for-examples-only-AAAAAAAA' })
+                } else if (request?.type === 'identity') {
                   const identity: Record<string, string> = {}
                   for (const key of (request.fields ?? '').split(',')) {
                     identity[key] = key === 'email' ? 'jamie@example.test' : `Fictional ${key}`
@@ -378,11 +386,6 @@ async function finish(page: Page, popup: ToolbarPopup): Promise<void> {
   if (!page.isClosed()) await page.close()
 }
 
-async function clipboardWrites(): Promise<string[]> {
-  const stored = await worker.evaluate(async () => chrome.storage.session.get(null))
-  return Object.keys(stored).filter((key) => key.startsWith('clip:')).sort().map((key) => String(stored[key]))
-}
-
 const fieldValue = (page: Page, id: string) =>
   page.evaluate((target) => (document.getElementById(target) as HTMLInputElement).value, id)
 
@@ -418,9 +421,8 @@ describe('toolbar popup lifecycle', () => {
       expect((await nativeCounts()).cancelled).toBe(0)
       await approvePendingRequests()
       await expect.poll(() => fieldValue(page, 'current'), { timeout: 10000 }).toBe(approvedPassword)
-      const next = await fieldValue(page, 'new')
-      expect(next.length).toBeGreaterThanOrEqual(16)
-      expect(await fieldValue(page, 'confirm')).toBe(next)
+      expect(await fieldValue(page, 'new')).toBe('fictional-popup-new-pass')
+      expect(await fieldValue(page, 'confirm')).toBe('fictional-popup-new-pass')
     } finally {
       await finish(page, popup)
     }
@@ -503,30 +505,18 @@ describe('toolbar popup lifecycle', () => {
     }
   }, 40000)
 
-  it('clears a temporarily copied password when the popup closes', async () => {
-    const page = await openFixture('/registration')
-    const popup = await openToolbarPopup()
+  it('fills a created password without showing or copying it in the popup', async () => {
+    const { page, popup } = await startPopupFill('/registration', 'Create password')
     try {
-      await popup.evaluate(`(() => {
-        let held = ''
-        const record = (value) => chrome.storage.session.set({ [\`clip:\${(performance.timeOrigin + performance.now()).toFixed(3).padStart(20, '0')}\`]: value })
-        Object.defineProperty(navigator, 'clipboard', {
-          value: {
-            writeText: async (value) => { held = value; await record(value) },
-            readText: async () => held,
-          },
-        })
-      })()`)
-      await waitForPopupButton(popup, 'Create password')
-      await popup.click('Create password')
-      await waitForPopupButton(popup, 'Copy temporarily')
-      await popup.click('Copy temporarily')
-      await expect.poll(async () => (await clipboardWrites()).at(-1) ?? '', { timeout: 5000 }).toMatch(/.{16,}/)
-      expect((await clipboardWrites()).at(-1)).toBe(await fieldValue(page, 'password'))
-      await closePopupAndSettle(popup)
-      await expect.poll(async () => (await clipboardWrites()).at(-1), { timeout: 5000 }).toBe('')
+      await approvePendingRequests()
+      await expect.poll(() => fieldValue(page, 'password'), { timeout: 10000 }).toBe('fictional-popup-new-pass')
+      await waitForPopupButton(popup, 'The site accepted it')
+      const popupText = await popup.evaluate('document.body.innerText')
+      expect(String(popupText)).not.toContain('fictional-popup-new-pass')
+      expect(String(popupText)).not.toMatch(/Copy/)
+      const stored = await worker.evaluate(async () => JSON.stringify(await chrome.storage.session.get(null)))
+      expect(stored).not.toContain('fictional-popup-new-pass')
     } finally {
-      await worker.evaluate(async () => { await chrome.storage.session.clear() })
       await finish(page, popup)
     }
   }, 40000)
