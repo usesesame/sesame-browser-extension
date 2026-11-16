@@ -7,12 +7,14 @@ export const CARD_PROTOCOL_VERSION = 2
 export const FILL_MATCH_PROTOCOL_VERSION = 3
 export const TOTP_PROTOCOL_VERSION = 4
 export const FILL_LOOKALIKE_PROTOCOL_VERSION = 5
+export const FILL_SITE_PROTOCOL_VERSION = 7
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
 export const MAX_LOOKALIKE_HOST = 128
 export type FillFields = 'username' | 'password' | 'both'
-export type FillMatchKind = 'exact' | 'wwwAlias'
+export type FillMatchKind = 'exact' | 'wwwAlias' | 'site'
+export type FillProtocolVersion = typeof FILL_LOOKALIKE_PROTOCOL_VERSION | typeof FILL_SITE_PROTOCOL_VERSION
 
 // Must stay byte-for-byte the same set as the desktop's IDENTITY_FIELD_KEYS.
 export const IDENTITY_FIELD_KEYS = [
@@ -90,6 +92,7 @@ const UNAVAILABLE_CODES: Readonly<Record<string, string>> = Object.freeze({
   invalidSelection: 'invalid-selection',
   multipleMatches: 'multiple-matches',
 })
+const UNSUPPORTED_VERSION_MESSAGE = 'Unsupported protocol version.'
 const ERROR_MESSAGES = new Set([
   'Unsupported protocol version.',
   'Invalid browser request.',
@@ -125,7 +128,7 @@ function legacyCapabilitiesAreWellFormed(value: Record<string, unknown>): boolea
 
 function supportsRequestVersion(type: unknown, version: unknown): boolean {
   switch (type) {
-    case 'fill': return version === FILL_LOOKALIKE_PROTOCOL_VERSION
+    case 'fill': return isFillProtocolVersion(version)
     case 'totp': return version === TOTP_PROTOCOL_VERSION
     case 'card': return version === CARD_PROTOCOL_VERSION
     case 'capabilities': return version === CAPABILITIES_PROTOCOL_VERSION
@@ -197,9 +200,14 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (raw.type === 'error') {
     if (!hasExactKeys(raw, ERROR_KEYS)) return { ok: false, code: 'unsafe-response' }
-    return typeof raw.message === 'string' && ERROR_MESSAGES.has(raw.message)
-      ? { ok: false, code: 'host-rejected-request' }
-      : { ok: false, code: 'invalid-response' }
+    if (typeof raw.message !== 'string' || !ERROR_MESSAGES.has(raw.message)) {
+      return { ok: false, code: 'invalid-response' }
+    }
+    return request.type === 'fill'
+      && request.version === FILL_SITE_PROTOCOL_VERSION
+      && raw.message === UNSUPPORTED_VERSION_MESSAGE
+      ? { ok: false, code: 'fill-version-unsupported' }
+      : { ok: false, code: 'host-rejected-request' }
   }
 
   if (request.type === 'capabilities') {
@@ -295,7 +303,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
 
   if (raw.type === 'fill-unavailable') {
     if (raw.reason === 'lookalike') {
-      return request.version === FILL_LOOKALIKE_PROTOCOL_VERSION
+      return isFillProtocolVersion(request.version)
         ? decodeLookalikeUnavailable(raw)
         : { ok: false, code: 'protocol-mismatch' }
     }
@@ -306,11 +314,11 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
   const expectedKeys = fields === 'username' ? FILL_USERNAME_KEYS
     : fields === 'password' ? FILL_PASSWORD_KEYS : FILL_BOTH_KEYS
   const requiresMatchKind = request.version === FILL_MATCH_PROTOCOL_VERSION
-    || request.version === FILL_LOOKALIKE_PROTOCOL_VERSION
+    || isFillProtocolVersion(request.version)
   if (!hasExactKeys(raw, requiresMatchKind ? new Set([...expectedKeys, 'matchKind']) : expectedKeys)) {
     return { ok: false, code: 'unsafe-response' }
   }
-  if (requiresMatchKind && !isFillMatchKind(raw.matchKind)) {
+  if (requiresMatchKind && !isFillMatchKind(raw.matchKind, request.version)) {
     return { ok: false, code: 'unsafe-response' }
   }
 
@@ -324,7 +332,7 @@ export function safeNativeResponse(raw: unknown, request: NativeRequest): Native
       ? typeof credential.password === 'string' && credential.password.length > 0 && credential.password.length <= MAX_CREDENTIAL_FIELD
       : isCredential(credential)
   if (!valid) return { ok: false, code: 'invalid-response' }
-  return requiresMatchKind && isFillMatchKind(raw.matchKind)
+  return requiresMatchKind && isFillMatchKind(raw.matchKind, request.version)
     ? { ok: true, credential, matchKind: raw.matchKind }
     : { ok: true, credential }
 }
@@ -346,15 +354,26 @@ function decodeLookalikeUnavailable(raw: Record<string, unknown>): NativeResult 
 
 export function makeRequest(type: 'capabilities'): Extract<NativeRequest, { type: 'capabilities' }>
 export function makeRequest(type: 'activate'): Extract<NativeRequest, { type: 'activate' }>
-export function makeRequest(type: 'fill', origin: string, fields?: FillFields): Extract<NativeRequest, { type: 'fill' }>
-export function makeRequest(type: 'capabilities' | 'activate' | 'fill', origin?: string, fields: FillFields = 'both'): NativeRequest {
+export function makeRequest(
+  type: 'fill',
+  origin: string,
+  fields?: FillFields,
+  version?: FillProtocolVersion
+): Extract<NativeRequest, { type: 'fill' }>
+export function makeRequest(
+  type: 'capabilities' | 'activate' | 'fill',
+  origin?: string,
+  fields: FillFields = 'both',
+  version: FillProtocolVersion = FILL_SITE_PROTOCOL_VERSION
+): NativeRequest {
   const requestId = crypto.randomUUID()
   if (type === 'fill') {
     const normalizedOrigin = normalizeFillOrigin(origin)
     if (!normalizedOrigin) throw new TypeError('fill request requires a normalized web origin')
+    if (!isFillProtocolVersion(version)) throw new TypeError('fill request requires a supported protocol version')
     return fields === 'both'
-      ? { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin }
-      : { version: FILL_LOOKALIKE_PROTOCOL_VERSION, type, requestId, origin: normalizedOrigin, fields }
+      ? { version, type, requestId, origin: normalizedOrigin }
+      : { version, type, requestId, origin: normalizedOrigin, fields }
   }
   return { version: type === 'capabilities' ? CAPABILITIES_PROTOCOL_VERSION : PROTOCOL_VERSION, type, requestId }
 }
@@ -443,8 +462,14 @@ function isRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
 }
 
-function isFillMatchKind(value: unknown): value is FillMatchKind {
-  return value === 'exact' || value === 'wwwAlias'
+function isFillProtocolVersion(value: unknown): value is FillProtocolVersion {
+  return value === FILL_LOOKALIKE_PROTOCOL_VERSION || value === FILL_SITE_PROTOCOL_VERSION
+}
+
+function isFillMatchKind(value: unknown, version: number): value is FillMatchKind {
+  return value === 'exact'
+    || value === 'wwwAlias'
+    || (value === 'site' && version === FILL_SITE_PROTOCOL_VERSION)
 }
 
 const LOOKALIKE_HOST_FORBIDDEN = new Set([' ', '/', '?', '#', '@', ':'])

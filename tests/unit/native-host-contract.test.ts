@@ -48,7 +48,7 @@ describe('native host contract', () => {
 })
 
 describe('vendored browser contract', () => {
-  for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']) {
+  for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']) {
     const vendored = join(root, 'contracts', 'browser', version)
     const source = read('contracts', 'browser', version, 'SOURCE.json')
 

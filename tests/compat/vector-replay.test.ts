@@ -6,6 +6,7 @@ import {
   CAPABILITIES_PROTOCOL_VERSION,
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
+  FILL_SITE_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   TOTP_PROTOCOL_VERSION,
   isNativeRequest,
@@ -53,6 +54,7 @@ const CONTRACTS = [
   { directory: 'v4', protocolVersion: TOTP_PROTOCOL_VERSION },
   { directory: 'v5', protocolVersion: FILL_LOOKALIKE_PROTOCOL_VERSION },
   { directory: 'v6', protocolVersion: CAPABILITIES_PROTOCOL_VERSION },
+  { directory: 'v7', protocolVersion: FILL_SITE_PROTOCOL_VERSION },
 ]
 
 describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {
@@ -74,7 +76,7 @@ describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, 
     it(`is ${testCase.valid ? 'accepted' : 'rejected'} by isNativeRequest`, () => {
       const message = testCase.message as { type?: string; version?: number }
       const retired = message.type === 'capabilities' && message.version !== CAPABILITIES_PROTOCOL_VERSION
-        || message.type === 'fill' && message.version !== FILL_LOOKALIKE_PROTOCOL_VERSION
+        || message.type === 'fill' && message.version !== FILL_LOOKALIKE_PROTOCOL_VERSION && message.version !== FILL_SITE_PROTOCOL_VERSION
       expect(isNativeRequest(testCase.message)).toBe(testCase.valid && !retired)
     })
   })

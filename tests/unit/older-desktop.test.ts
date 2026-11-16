@@ -71,6 +71,27 @@ function hostBrowser(hosts: HostReply[]): { browser: Browser; requests: Record<s
   return { browser, requests, injections }
 }
 
+function desktopBeforeSiteRulesReply(request: Record<string, unknown>): unknown {
+  if (request.type === 'fill' && request.version !== 5) {
+    return { version: request.version, type: 'error', requestId: request.requestId, message: 'Unsupported protocol version.' }
+  }
+  return currentDesktopReply(request)
+}
+
+describe('a desktop before 0.6.0 that fills only at protocol 5', () => {
+  it('passes the connection check, then fills once through a version five retry', async () => {
+    const { browser, requests, injections } = hostBrowser([desktopBeforeSiteRulesReply])
+    const coordinator = createCoordinator(browser)
+
+    expect((await coordinator.checkConnection()).state).toBe('ready')
+    const filled = await coordinator.fillActivePage()
+
+    expect(filled.phase).toEqual({ name: 'complete', usernameFilled: true, passwordFilled: true, matchKind: 'exact' })
+    expect(requests.filter((request) => request.type === 'fill').map((request) => request.version)).toEqual([7, 5])
+    expect(injections.filter((entry) => entry.endsWith(':fill'))).toHaveLength(1)
+  })
+})
+
 describe('an older desktop that speaks only protocol 1 and 2', () => {
   it('fails the probe once as a protocol mismatch without retrying', async () => {
     const { browser, requests } = hostBrowser([olderDesktopReply])
