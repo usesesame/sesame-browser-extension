@@ -1,12 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { dismissOnboarding, GLOBAL_HTTPS_PATTERN } from '../permissions/inline-access'
-  import { DESKTOP_RELEASES_URL } from '../protocol/connection-presentation'
+  import { CONNECTION_RESPONSE_TIMEOUT_MS, DESKTOP_RELEASES_URL } from '../protocol/connection-presentation'
   import { SESAME_LINKS } from '../shared/links'
   import { desktopStateFromResponse, onboardingView, setupSteps, type DesktopState, type PermissionState } from './readiness'
   import Icon from '../shared/Icon.svelte'
-
-  const CONNECTION_TIMEOUT_MS = 9_000
 
   let permission: PermissionState = 'not-granted'
   let desktop: DesktopState = { status: 'checking' }
@@ -43,7 +41,7 @@
     try {
       const response = await withTimeout(
         chrome.runtime.sendMessage({ type: 'sesame:connect', force }),
-        CONNECTION_TIMEOUT_MS,
+        CONNECTION_RESPONSE_TIMEOUT_MS,
       )
       desktop = desktopStateFromResponse(response)
     } catch {
@@ -68,7 +66,7 @@
     try {
       const result = await withTimeout(
         chrome.runtime.sendMessage({ type: 'sesame:open-desktop' }),
-        CONNECTION_TIMEOUT_MS,
+        CONNECTION_RESPONSE_TIMEOUT_MS,
       )
       status = result?.state === 'opened'
         ? 'Sesame is opening. Unlock it, then check again.'

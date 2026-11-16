@@ -1,5 +1,5 @@
 import { isRecord } from '../shared/values'
-import { presentConnection, type ConnectionPresentation } from '../protocol/connection-presentation'
+import { presentConnection, SANDBOXED_BROWSER_NOTE, type ConnectionPresentation } from '../protocol/connection-presentation'
 
 export type PermissionState = 'granted' | 'not-granted'
 
@@ -103,5 +103,5 @@ function desktopStepDetail(desktop: DesktopState): string {
   if (desktop.status === 'checking') return 'Looking for the desktop app.'
   if (desktop.status === 'ready') return ''
   const connection = presentConnection(desktop.code)
-  return connection.action === 'install' ? 'Download and install Sesame, then open it once.' : connection.message
+  return connection.action === 'install' ? `Download and install Sesame, then open it once. ${SANDBOXED_BROWSER_NOTE}` : connection.message
 }

@@ -1913,7 +1913,7 @@ describe('extension browser suite', () => {
       { reply: { state: 'desktop-offline', diagnostic: { code: 'connected' } }, action: 'Open Sesame' },
       { reply: { state: 'unavailable', diagnostic: { code: 'protocol-mismatch' } }, action: 'Update Sesame' },
       { reply: { state: 'unavailable', diagnostic: { code: 'host-not-found' } }, action: 'Get Sesame' },
-      { reply: { state: 'unavailable', diagnostic: { code: 'host-forbidden' } }, action: 'Reload extension' },
+      { reply: { state: 'unavailable', diagnostic: { code: 'host-forbidden' } }, action: 'Check again' },
       { reply: { state: 'unavailable', diagnostic: { code: 'timeout' } }, action: 'Check again' },
     ]
     for (const testCase of cases) {

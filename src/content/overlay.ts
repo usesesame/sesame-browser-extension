@@ -208,7 +208,7 @@ export function showFillStatus(result: unknown): boolean {
   const present = (globalThis as OverlayGlobal).sesameOverlayPresentStatus
   if (typeof present !== 'function') return false
   present(fillMessage(result))
-  return true
+  return overlayHost()?.style.display === 'block'
 }
 
 function ensureHostId(): string {

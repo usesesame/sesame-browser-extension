@@ -60,6 +60,18 @@ describe('the overlay status entry point', () => {
     detach()
   })
 
+  it('reports the status as unseen when the overlay was dismissed', () => {
+    document.body.innerHTML = '<input type="text" autocomplete="username" /><input type="password" name="password" />'
+    giveInputsLayout()
+    const detach = attachInlineButton(baseOptions())
+    document.querySelector('input')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    expect(overlayHost()?.style.display).toBe('none')
+    expect(showFillStatus({ state: 'unavailable', code: 'cancelled' })).toBe(false)
+    detach()
+  })
+
   it('reports no overlay after it is detached', () => {
     document.body.innerHTML = '<input type="text" autocomplete="username" /><input type="password" name="password" />'
     giveInputsLayout()

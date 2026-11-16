@@ -575,3 +575,62 @@ describe('card suggestions setting', () => {
     }
   }, 30000)
 })
+
+describe('a popup fill result after the popup closed', () => {
+  async function answerFillsWithLookalike(lookalike: string): Promise<void> {
+    await worker.evaluate((host) => {
+      const runtime = chrome.runtime as unknown as { connectNative: (name: string) => { onMessage: { addListener: (callback: (message: unknown) => void) => void } } }
+      const deferred = runtime.connectNative
+      runtime.connectNative = (name) => {
+        const port = deferred(name)
+        const addListener = port.onMessage.addListener.bind(port.onMessage)
+        port.onMessage.addListener = (callback) => addListener((message) => {
+          const reply = message as { type?: string; version?: number; requestId?: string }
+          callback(reply.type === 'fill'
+            ? { version: reply.version, requestId: reply.requestId, type: 'fill-unavailable', reason: 'lookalike', lookalike: host }
+            : message)
+        })
+        return port
+      }
+    }, lookalike)
+  }
+
+  async function toolbarNotice(): Promise<{ text: string; title: string }> {
+    return worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      return {
+        text: await chrome.action.getBadgeText({ tabId: tab!.id! }),
+        title: await chrome.action.getTitle({ tabId: tab!.id! }),
+      }
+    })
+  }
+
+  it('marks the toolbar button when no page field was focused and shows the warning in the next popup', async () => {
+    const page = await openFixture('/login')
+    await installDeferredNativeHost()
+    await answerFillsWithLookalike('examp1e.test')
+    let popup = await openToolbarPopup()
+    try {
+      await waitForPopupButton(popup, 'Fill login')
+      await popup.click('Fill login')
+      await expect.poll(async () => (await nativeCounts()).requests, { timeout: 10000 }).toBe(1)
+      await closePopupAndSettle(popup)
+      await approvePendingRequests()
+
+      await expect.poll(toolbarNotice, { timeout: 10000 }).toEqual({
+        text: '!',
+        title: 'Sesame did not fill this page. Open Sesame to see why.',
+      })
+      expect(await fieldValue(page, 'password')).toBe('')
+
+      popup = await openToolbarPopup()
+      await expect.poll(
+        () => popup.evaluate<string>(`document.querySelector('.fill-feedback')?.textContent ?? ''`),
+        { timeout: 15000 },
+      ).toContain('This page looks like examp1e.test, a site you saved, but the address is different.')
+      await expect.poll(toolbarNotice, { timeout: 5000 }).toEqual({ text: '', title: 'Sesame' })
+    } finally {
+      await finish(page, popup)
+    }
+  }, 60000)
+})

@@ -4,15 +4,16 @@
     popupState, setChecking, setUnavailable, setDesktopOffline, setReady,
     setHostname, setPageDiagnostic,
   } from './states/store'
-  import { makeRegistrationPassword, normalizeRegistrationOutcome, type PasswordSurfaceKind } from '../content/registration'
+  import { makeRegistrationPassword, normalizeRegistrationOutcome } from '../content/registration'
   import { copyTemporarily, type TemporaryCopyHandle } from '../content/temporary-copy'
   import type { OneTimeCodeKind } from '../content/one-time-code'
   import { fillMatchExplanation } from '../shared/fill-match'
   import { lookalikeWarningForResult } from '../shared/lookalike-warning'
   import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
   import { normalizeFillOrigin } from '../protocol/native'
+  import { pageSurfaceView, type PageKind } from './page-surfaces'
   import {
-    CHECKING_PRESENTATION, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
+    CHECKING_PRESENTATION, CONNECTION_RESPONSE_TIMEOUT_MS, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
   } from '../protocol/connection-presentation'
   import {
     GLOBAL_HTTPS_PATTERN, inlinePermissionMode, loadInlineSettings, originPattern, setSitePaused,
@@ -24,8 +25,9 @@
   import Diagnostics from './components/Diagnostics.svelte'
 
   const RECONNECT_DELAY_MS = 4_000
-  const POPUP_RESPONSE_TIMEOUT_MS = 9_000
+  const POPUP_RESPONSE_TIMEOUT_MS = CONNECTION_RESPONSE_TIMEOUT_MS
   const REGISTRATION_EXPIRY_MS = 120_000
+  const PAGE_CHECK_TIMEOUT_MS = 6_000
 
   const FILL_MESSAGES: Record<string, string> = {
     'approval-declined': 'Nothing was filled. The request was declined in Sesame.',
@@ -63,7 +65,7 @@
     'desktop-unavailable': 'Open Sesame, then choose Save this login again.',
     'host-disconnected': 'The desktop connection closed. Keep Sesame open and retry.',
     'host-exited': 'Sesame stopped the connection. Open it again and retry.',
-    'host-forbidden': 'Reload the extension, restart Sesame, then choose Save this login again.',
+    'host-forbidden': 'Install the extension from the store listing that Sesame links to, then choose Save this login again.',
     'host-not-found': 'Open Sesame, then choose Save this login again.',
     'invalid-capture': 'Sesame could not verify that form. Nothing was saved.',
     'no-password': 'No new password to read on this page. Fill the form with Sesame first.',
@@ -75,7 +77,6 @@
     'vault-locked': 'Unlock your vault in the Sesame desktop app, then choose Save this login again.',
   }
 
-  type PageKind = 'checking' | 'restricted' | 'none' | 'username' | 'login' | 'registration' | 'password-change' | 'ambiguous'
   interface PageState {
     kind: PageKind
     code: string
@@ -228,6 +229,13 @@
       page.hostname = parsed?.hostname ?? ''
       setHostname(page.hostname)
       activeOrigin = originPattern(origin ?? '') ? origin! : ''
+      if (activeTabId === null || !origin) throw new Error('restricted page')
+    } catch {
+      activeTabId = null
+      activeOrigin = ''
+      page = { ...page, kind: 'restricted', code: 'page-restricted' }
+    }
+    try {
       const [permissions, settings] = await Promise.all([
         chrome.permissions.getAll(),
         loadInlineSettings(),
@@ -236,57 +244,21 @@
       inlineGlobalEnabled = permissionMode === 'global'
       inlineLegacyAccess = permissionMode === 'legacy-sites'
       inlineSitePaused = activeOrigin ? settings.pausedOrigins.includes(activeOrigin) : false
-      if (activeTabId === null || !origin) throw new Error('restricted page')
-
-      await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content.js'] })
-      const [purposeResult] = await chrome.scripting.executeScript({
-        target: { tabId: activeTabId },
-        func: invokePasswordSurfaceInspection,
-      })
-      const purpose = normalizePasswordSurfaceKind(purposeResult?.result)
-      const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-page' }), 4_000)
-      if (response?.state !== 'ready') {
-        const code = response?.code ?? 'page-check-failed'
-        page = { ...page, kind: code === 'no-fields' ? 'none' : 'restricted', code }
-      } else {
-        const hasUsernameField = response.hasUsernameField === true
-        const hasPasswordField = response.hasPasswordField === true
-        const kind: PageKind = purpose === 'registration' ? 'registration'
-          : purpose === 'password-change' ? 'password-change'
-            : purpose === 'ambiguous' ? 'ambiguous'
-              : hasPasswordField ? 'login'
-                : hasUsernameField ? 'username' : 'none'
-        const code = kind === 'registration' ? 'registration-form-found'
-          : kind === 'password-change' ? 'password-change-form'
-            : kind === 'ambiguous' ? 'multiple-matches'
-              : kind === 'login' && hasUsernameField ? 'sign-in-form-found'
-                : kind === 'login' ? 'password-field-found'
-                  : kind === 'username' ? 'username-field-found' : 'no-sign-in-fields'
-        page = { ...page, kind, code, hasUsernameField, hasPasswordField }
-      }
-
-      const identityResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-identity' }), 4_000)
-      identityFields = identityResponse?.state === 'ready' && Array.isArray(identityResponse.fields)
-        ? identityResponse.fields
-        : []
-      const cardResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-card' }), 4_000)
-      cardFields = cardResponse?.state === 'ready' && Array.isArray(cardResponse.fields) ? cardResponse.fields : []
-      cardFeedback = cardResponse?.state === 'ready' && cardResponse.embedded === true
-        ? 'Card fields are in Stripe payment frames. Approval stays bound to this page.'
-        : cardResponse?.code === 'insecure-page'
-        ? 'Cards are never filled on HTTP pages.'
-        : cardResponse?.code === 'untrusted-frame'
-          ? 'Cards are filled only on this page or in Stripe payment frames.' : ''
-      const codeResponse = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-one-time-code' }), 4_000)
-      codeKind = codeResponse?.state === 'ready' ? normalizeOneTimeCodeKind(codeResponse.kind) : null
     } catch {
-      activeTabId = null
-      activeOrigin = ''
       inlineSitePaused = false
-      identityFields = []
-      cardFields = []
-      codeKind = null
-      page = { ...page, kind: 'restricted', code: 'page-restricted' }
+    }
+    identityFields = []
+    cardFields = []
+    cardFeedback = ''
+    codeKind = null
+    if (activeTabId !== null) {
+      let surfaces: unknown
+      try {
+        surfaces = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:inspect-surfaces' }), PAGE_CHECK_TIMEOUT_MS)
+      } catch {
+        surfaces = undefined
+      }
+      applyPageSurfaces(surfaces)
     }
     const saveState = activeTabId === null ? { armed: false, held: false } : await querySaveState(activeTabId)
     const saveSurface = page.kind === 'registration' || page.kind === 'password-change'
@@ -301,19 +273,18 @@
     })
   }
 
-  function invokePasswordSurfaceInspection(): unknown {
-    const inspect = (globalThis as typeof globalThis & { sesameInspectPasswordSurface?: () => unknown }).sesameInspectPasswordSurface
-    return typeof inspect === 'function' ? inspect() : 'none'
-  }
-
-  function normalizePasswordSurfaceKind(value: unknown): PasswordSurfaceKind {
-    return value === 'login' || value === 'registration' || value === 'password-change' || value === 'ambiguous' || value === 'none'
-      ? value
-      : 'ambiguous'
-  }
-
-  function normalizeOneTimeCodeKind(value: unknown): OneTimeCodeKind | null {
-    return value === 'single' || value === 'split' ? value : null
+  function applyPageSurfaces(surfaces: unknown) {
+    const view = pageSurfaceView(surfaces)
+    if (view.kind === 'restricted' && (surfaces as { state?: unknown } | undefined)?.state === 'restricted') {
+      activeTabId = null
+      activeOrigin = ''
+      inlineSitePaused = false
+    }
+    page = { ...page, kind: view.kind, code: view.code, hasUsernameField: view.hasUsernameField, hasPasswordField: view.hasPasswordField }
+    identityFields = view.identityFields
+    cardFields = view.cardFields
+    cardFeedback = view.cardFeedback
+    codeKind = view.codeKind
   }
 
   async function enableInlineEverywhere() {
@@ -419,11 +390,15 @@
           ? 'Username and password filled. Review the page before signing in.'
           : 'Sign-in field filled. Review the page before continuing.')
     } else {
-      fillFeedback = lookalikeWarningForResult(result)
-        ?? (result?.code === 'no-match' && page.hostname
-          ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
-          : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
+      fillFeedback = unavailableFillMessage(result)
     }
+  }
+
+  function unavailableFillMessage(result: any): string {
+    return lookalikeWarningForResult(result)
+      ?? (result?.code === 'no-match' && page.hostname
+        ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
+        : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
   }
 
   async function fillIdentity() {
@@ -608,6 +583,10 @@
     if (activeTabId === null) return
     try {
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:last-fill-result' }), 4_000)
+      if (response?.state === 'missed') {
+        fillFeedback = unavailableFillMessage(response.result)
+        return
+      }
       if (response?.state !== 'filled') return
       const explanation = fillMatchExplanation(response.matchKind)
       if (explanation) fillFeedback = explanation
@@ -722,6 +701,7 @@
   function pagePresentation(current: PageState) {
     if (current.kind === 'checking') return { title: 'Checking this page', message: 'Looking only for visible sign-in fields.', badge: 'Checking', tone: 'neutral' as const }
     if (current.kind === 'restricted') return { title: 'Browser page', message: 'Sesame cannot fill on this page.', badge: 'Unavailable', tone: 'warning' as const }
+    if (current.kind === 'unchecked') return { title: current.hostname || 'This page', message: 'Sesame could not finish checking this page. Choose the refresh button to check it again.', badge: 'Not checked', tone: 'warning' as const }
     if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Sesame fills your current password and creates a new one. Save it after the site accepts it.', badge: 'Change form', tone: 'success' as const }
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
     if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }

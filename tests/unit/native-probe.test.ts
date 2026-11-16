@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Browser, NativePort } from '../../src/platform/chrome'
-import { openDesktop, probeNativeHost, requestFill } from '../../src/background/native-connection'
+import { NATIVE_PROBE_BUDGET_MS, openDesktop, probeNativeHost, requestFill } from '../../src/background/native-connection'
+import { NATIVE_PROBE_TIMEOUT_MS } from '../../src/protocol/native'
+import { CONNECTION_RESPONSE_TIMEOUT_MS, presentConnection } from '../../src/protocol/connection-presentation'
 
 interface PortScript {
   reply?: (request: Record<string, unknown>) => unknown
@@ -77,6 +79,47 @@ describe('native connection probe', () => {
     expect(result).toMatchObject({ ok: true, attempts: 2 })
     expect(requests).toHaveLength(2)
     expect(new Set(requests.map((request) => request.requestId)).size).toBe(2)
+  })
+
+  it('keeps a whole probe of a silent desktop inside its budget and reports a timeout', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    try {
+      const { browser, requests } = fakeBrowser([{}, {}])
+      let settled = false
+      const probe = probeNativeHost(browser, { timeoutMs: 300, budgetMs: 450, retryDelayMs: 0 })
+        .finally(() => { settled = true })
+
+      await vi.advanceTimersByTimeAsync(300)
+      expect(requests).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(requests).toHaveLength(2)
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(148)
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      const result = await probe
+      expect(result).toMatchObject({ ok: false, code: 'timeout', attempts: 2, latencyMs: 450 })
+      expect(requests).toHaveLength(2)
+      expect(presentConnection(result.ok ? 'connected' : result.code).title).toBe('Sesame is taking too long')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips the retry when the pause would use up the budget', async () => {
+    const { browser, requests } = fakeBrowser([{}, {}])
+    const result = await probeNativeHost(browser, { timeoutMs: 200, budgetMs: 250, retryDelayMs: 100 })
+
+    expect(result).toMatchObject({ ok: false, code: 'timeout', attempts: 1 })
+    expect(requests).toHaveLength(1)
+  })
+
+  it('answers the popup and onboarding before they give up on the background', () => {
+    expect(NATIVE_PROBE_BUDGET_MS).toBeGreaterThanOrEqual(NATIVE_PROBE_TIMEOUT_MS)
+    expect(NATIVE_PROBE_BUDGET_MS + 1_000).toBeLessThanOrEqual(CONNECTION_RESPONSE_TIMEOUT_MS)
   })
 
   it('does not retry when no native host is registered', async () => {

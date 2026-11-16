@@ -2,6 +2,10 @@ import { SESAME_LINKS } from '../shared/links'
 
 export const DESKTOP_RELEASES_URL = SESAME_LINKS.desktopReleases
 
+export const CONNECTION_RESPONSE_TIMEOUT_MS = 9_000
+
+export const SANDBOXED_BROWSER_NOTE = 'A browser installed as a Snap or Flatpak package cannot reach desktop apps, so use one installed from your system packages or from its vendor.'
+
 export type ConnectionAction = 'install' | 'update' | 'open-desktop' | 'reload' | 'retry' | 'none'
 
 export type ConnectionStateName =
@@ -46,17 +50,17 @@ const PRESENTATIONS: Record<string, ConnectionPresentation> = {
   'host-not-found': {
     state: 'missing-host',
     title: 'Sesame desktop app not found',
-    message: 'Install Sesame for your desktop, then open it. Website access alone does not connect the desktop app.',
+    message: `Install Sesame for your desktop, then open it. Website access alone does not connect the desktop app. ${SANDBOXED_BROWSER_NOTE}`,
     action: 'install',
     actionLabel: 'Get Sesame',
     canRetry: true,
   },
   'host-forbidden': {
     state: 'forbidden-host',
-    title: 'Connection needs a refresh',
-    message: 'Reload this extension, then restart Sesame and try again.',
-    action: 'reload',
-    actionLabel: 'Reload extension',
+    title: 'Sesame does not recognize this extension',
+    message: 'Install the extension from the store listing that Sesame links to, then check again.',
+    action: 'retry',
+    actionLabel: 'Check again',
     canRetry: true,
   },
   'host-exited': {

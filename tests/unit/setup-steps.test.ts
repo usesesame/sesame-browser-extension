@@ -15,7 +15,7 @@ describe('setup steps', () => {
 
   it('tells a person without the desktop app to install it', () => {
     const [desktop] = setupSteps('not-granted', { status: 'blocked', code: 'host-not-found' })
-    expect(desktop.detail).toBe('Download and install Sesame, then open it once.')
+    expect(desktop.detail).toBe('Download and install Sesame, then open it once. A browser installed as a Snap or Flatpak package cannot reach desktop apps, so use one installed from your system packages or from its vendor.')
   })
 
   it('explains other connection problems on the desktop step', () => {
