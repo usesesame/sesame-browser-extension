@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Browser, NativePort } from '../../src/platform/chrome'
 import { NATIVE_PROBE_BUDGET_MS, openDesktop, probeNativeHost, requestFill } from '../../src/background/native-connection'
 import { NATIVE_PROBE_TIMEOUT_MS } from '../../src/protocol/native'
@@ -82,15 +82,31 @@ describe('native connection probe', () => {
   })
 
   it('keeps a whole probe of a silent desktop inside its budget and reports a timeout', async () => {
-    const { browser, requests } = fakeBrowser([{}, {}])
-    const startedAt = performance.now()
-    const result = await probeNativeHost(browser, { timeoutMs: 300, budgetMs: 450, retryDelayMs: 0 })
-    const elapsedMs = performance.now() - startedAt
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    try {
+      const { browser, requests } = fakeBrowser([{}, {}])
+      let settled = false
+      const probe = probeNativeHost(browser, { timeoutMs: 300, budgetMs: 450, retryDelayMs: 0 })
+        .finally(() => { settled = true })
 
-    expect(result).toMatchObject({ ok: false, code: 'timeout', attempts: 2 })
-    expect(requests).toHaveLength(2)
-    expect(elapsedMs).toBeLessThan(600)
-    expect(presentConnection(result.ok ? 'connected' : result.code).title).toBe('Sesame is taking too long')
+      await vi.advanceTimersByTimeAsync(300)
+      expect(requests).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(requests).toHaveLength(2)
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(148)
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      const result = await probe
+      expect(result).toMatchObject({ ok: false, code: 'timeout', attempts: 2, latencyMs: 450 })
+      expect(requests).toHaveLength(2)
+      expect(presentConnection(result.ok ? 'connected' : result.code).title).toBe('Sesame is taking too long')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('skips the retry when the pause would use up the budget', async () => {

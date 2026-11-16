@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Browser, ScriptInjectionDetails } from '../../src/platform/chrome'
 
 vi.mock('../../src/background/native-connection', () => ({
@@ -28,11 +28,13 @@ function browserForPage(options: {
   url?: string
   replies?: Record<string, BridgeReply>
   injectFails?: boolean
+  inject?: () => Promise<void>
 } = {}) {
   const replies = { ...DEFAULT_REPLIES, ...options.replies }
   const executeScript = vi.fn(async (details: ScriptInjectionDetails<unknown>) => {
     if ('files' in details) {
       if (options.injectFails) throw new Error('Cannot access contents of the page')
+      await options.inject?.()
       return []
     }
     const name = details.args?.[0] as string
@@ -57,6 +59,8 @@ function fileInjections(executeScript: ReturnType<typeof vi.fn>) {
 }
 
 describe('popup page inspection in the background', () => {
+  afterEach(() => { vi.useRealTimers() })
+
   it('injects the content script once for every check on the page', async () => {
     const { browser, executeScript } = browserForPage()
     const result = await createCoordinator(browser).inspectActivePageSurfaces({ cards: true })
@@ -86,6 +90,42 @@ describe('popup page inspection in the background', () => {
       card: { state: 'unavailable', code: 'page-check-failed' },
     })
     expect(pageSurfaceView(result)).toMatchObject({ kind: 'login', cardFields: [] })
+  })
+
+  it('counts a slow content script setup against the same page check budget', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const { browser } = browserForPage({
+      inject: () => new Promise((done) => setTimeout(done, 2_500)),
+      replies: { sesameInspectCardSurface: () => new Promise(() => {}) },
+    })
+    let result: unknown
+    void createCoordinator(browser).inspectActivePageSurfaces({ cards: true, checkTimeoutMs: 4_000 })
+      .then((value) => { result = value })
+
+    await vi.advanceTimersByTimeAsync(3_999)
+    expect(result).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(result).toMatchObject({
+      state: 'checked',
+      login: { state: 'ready', hasPasswordField: true },
+      card: { state: 'unavailable', code: 'page-check-failed' },
+    })
+    expect(pageSurfaceView(result)).toMatchObject({ kind: 'login', cardFields: [] })
+  })
+
+  it('reports an unchecked page, not a restricted one, when the content script setup outlasts the budget', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const { browser, executeScript } = browserForPage({ inject: () => new Promise(() => {}) })
+    let result: unknown
+    void createCoordinator(browser).inspectActivePageSurfaces({ cards: true, checkTimeoutMs: 4_000 })
+      .then((value) => { result = value })
+
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    expect(result).toMatchObject({ state: 'checked', login: { state: 'unavailable', code: 'page-check-failed' } })
+    expect(pageSurfaceView(result).kind).toBe('unchecked')
+    expect(executeScript).toHaveBeenCalledTimes(1)
   })
 
   it('keeps a working login form when the identity check throws', async () => {

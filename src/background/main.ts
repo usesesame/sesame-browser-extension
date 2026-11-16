@@ -11,6 +11,7 @@ import { createPopupResultRelay } from './popup-result'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
 import type { FillContext } from './fill-state'
+import { createMissedResultNotice } from './missed-result'
 
 const coordinator = createCoordinator(chromeBrowser)
 const saveSession = createSaveSessionController()
@@ -18,6 +19,7 @@ const lastFill = createLastFillTracker()
 const CONNECTION_CACHE_MS = 4_000
 let cachedConnection: { checkedAt: number; value: Awaited<ReturnType<typeof coordinator.checkConnection>> } | undefined
 let connectionCheck: Promise<Awaited<ReturnType<typeof coordinator.checkConnection>>> | undefined
+const missedResults = createMissedResultNotice(chrome.action, chrome.runtime.getManifest().action?.default_title ?? 'Sesame')
 
 async function checkConnection(force = false) {
   if (!force && cachedConnection && Date.now() - cachedConnection.checkedAt < CONNECTION_CACHE_MS) {
@@ -107,6 +109,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   saveSession.handleTabUpdated(tabId, changeInfo)
   if (typeof changeInfo.url === 'string' || changeInfo.status === 'loading') {
     lastFill.clear(tabId)
+    missedResults.forget(tabId)
     coordinator.cancelActive(tabId)
   }
 })
@@ -114,6 +117,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   saveSession.handleTabRemoved(tabId)
   lastFill.clear(tabId)
   coordinator.cancelActive(tabId)
+  missedResults.forget(tabId)
 })
 
 function recordLastFillResult(result: FillContext): void {
@@ -331,9 +335,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ state: 'none' })
       return false
     }
-    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
       const tabId = tab?.id
-      const record = typeof tabId === 'number' && Number.isInteger(tabId) ? lastFill.lookup(tabId) : undefined
+      const validTab = typeof tabId === 'number' && Number.isInteger(tabId)
+      const missed = validTab ? await missedResults.take(tabId) : undefined
+      if (missed) {
+        sendResponse({ state: 'missed', result: missed })
+        return
+      }
+      const record = validTab ? lastFill.lookup(tabId) : undefined
       sendResponse(record
         ? {
             state: 'filled',
@@ -407,16 +417,18 @@ function presentOverlayStatus(result: unknown): boolean {
 }
 
 async function presentFillStatus(tabId: number, result: PublicFillResult): Promise<boolean> {
+  let shown = false
   try {
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId },
       func: presentOverlayStatus,
       args: [result],
     })
-    return injection?.result === true
+    shown = injection?.result === true
   } catch {
-    return false
+    shown = false
   }
+  return shown || missedResults.hold(tabId, result)
 }
 
 function popupResultRelay(port: chrome.runtime.Port) {

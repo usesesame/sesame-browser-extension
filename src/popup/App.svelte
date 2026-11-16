@@ -390,11 +390,15 @@
           ? 'Username and password filled. Review the page before signing in.'
           : 'Sign-in field filled. Review the page before continuing.')
     } else {
-      fillFeedback = lookalikeWarningForResult(result)
-        ?? (result?.code === 'no-match' && page.hostname
-          ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
-          : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
+      fillFeedback = unavailableFillMessage(result)
     }
+  }
+
+  function unavailableFillMessage(result: any): string {
+    return lookalikeWarningForResult(result)
+      ?? (result?.code === 'no-match' && page.hostname
+        ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
+        : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
   }
 
   async function fillIdentity() {
@@ -579,6 +583,10 @@
     if (activeTabId === null) return
     try {
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:last-fill-result' }), 4_000)
+      if (response?.state === 'missed') {
+        fillFeedback = unavailableFillMessage(response.result)
+        return
+      }
       if (response?.state !== 'filled') return
       const explanation = fillMatchExplanation(response.matchKind)
       if (explanation) fillFeedback = explanation

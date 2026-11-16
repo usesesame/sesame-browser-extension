@@ -209,6 +209,8 @@ export function createCoordinator(browser: Browser): Coordinator {
     },
 
     async inspectActivePageSurfaces({ cards, checkTimeoutMs = PAGE_CHECK_TIMEOUT_MS }): Promise<PageSurfacesResult> {
+      const deadline = Date.now() + checkTimeoutMs
+      const remainingMs = () => Math.max(0, deadline - Date.now())
       let page: PageResolution
       try {
         const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
@@ -217,13 +219,18 @@ export function createCoordinator(browser: Browser): Coordinator {
         return { state: 'restricted', code: 'page-restricted' }
       }
       if (!page.ok) return { state: 'restricted', code: page.code }
-      try {
-        await installContentBridge(browser, page.tabId, true)
-      } catch {
-        return { state: 'restricted', code: 'page-restricted' }
+      const tabId = page.tabId
+      const bridge = await withCheckTimeout<'ready' | 'refused' | 'late'>(
+        () => installContentBridge(browser, tabId, true).then(() => 'ready', () => 'refused'),
+        remainingMs(),
+        'late',
+      )
+      if (bridge === 'refused') return { state: 'restricted', code: 'page-restricted' }
+      if (bridge === 'late') {
+        return { state: 'checked', purpose: null, login: PAGE_CHECK_FAILED, identity: PAGE_CHECK_FAILED, card: PAGE_CHECK_FAILED, oneTimeCode: PAGE_CHECK_FAILED }
       }
       const target: InspectTarget = { browser, tabId: page.tabId, origin: page.origin, bridgeReady: true }
-      const check = <T>(run: () => Promise<T>, failed: T) => withCheckTimeout(run, checkTimeoutMs, failed)
+      const check = <T>(run: () => Promise<T>, failed: T) => withCheckTimeout(run, remainingMs(), failed)
       const [purpose, login, identity, card, oneTimeCode] = await Promise.all([
         check(async () => {
           const [injection] = await browser.scripting.executeScript({
