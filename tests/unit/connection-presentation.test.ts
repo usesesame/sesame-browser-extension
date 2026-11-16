@@ -27,15 +27,26 @@ describe('connection presentation', () => {
     expect(presentation.action).toBe('install')
     expect(presentation.actionLabel).toBe('Get Sesame')
     expect(presentation.message).not.toMatch(/Windows/)
+    expect(presentation.message).toMatch(/Snap or Flatpak package cannot reach desktop apps/)
     expect(presentation.canRetry).toBe(true)
   })
 
-  it('offers a reload action when the host refuses the extension', () => {
-    expect(presentConnection('host-forbidden')).toMatchObject({
+  it('sends a refused extension to the store listing instead of a reload', () => {
+    const presentation = presentConnection('host-forbidden')
+    expect(presentation).toMatchObject({
       state: 'forbidden-host',
-      action: 'reload',
-      actionLabel: 'Reload extension',
+      action: 'retry',
+      actionLabel: 'Check again',
     })
+    expect(presentation.message).toBe('Install the extension from the store listing that Sesame links to, then check again.')
+    expect(presentation.message).not.toMatch(/reload|restart/i)
+  })
+
+  it('writes connection copy as plain sentences without dashes or parentheses', () => {
+    for (const code of KNOWN_CODES) {
+      const { title, message } = presentConnection(code)
+      expect(`${title} ${message}`, code).not.toMatch(/[()\u2013\u2014]/)
+    }
   })
 
   it('offers an update action for a protocol mismatch', () => {

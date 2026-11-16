@@ -4,9 +4,10 @@ import { NATIVE_HOST, normalizeFillOrigin } from '../protocol/native'
 import { createInlineRegistrationSync, syncInlineContentScript } from './inline-registration'
 import { handleExtensionCommand } from './command-handler'
 import { createContextMenuFillHandler, ensureFillContextMenu } from './context-menu'
-import { INLINE_SETTINGS_KEY, loadInlineSettings, normalizePausedOrigins } from '../permissions/inline-access'
+import { INLINE_SETTINGS_KEY, loadInlineSettings, normalizePausedOrigins, pauseChangedOrigins } from '../permissions/inline-access'
 import { publicFillResult, type PublicFillResult } from './fill-result'
 import { createLastFillTracker } from './last-fill'
+import { createPopupResultRelay } from './popup-result'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
 import type { FillContext } from './fill-state'
@@ -51,13 +52,14 @@ async function refreshInlineRegistration() {
   await ensureContentScriptRegistered()
 }
 
-async function reconcileOpenTabs() {
+async function reconcileOpenTabs(onlyOrigins?: readonly string[]) {
+  if (onlyOrigins?.length === 0) return
   const settings = await loadInlineSettings()
   const tabs = await chrome.tabs.query({})
   await Promise.allSettled(tabs.flatMap((tab) => {
     if (!Number.isInteger(tab.id)) return []
     const origin = safeSenderOrigin(tab.url)
-    if (!origin) return []
+    if (!origin || (onlyOrigins && !onlyOrigins.includes(origin))) return []
     if (settings.pausedOrigins.includes(origin)) {
       return [chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: detachInlineOverlay })]
     }
@@ -78,7 +80,8 @@ chrome.permissions.onRemoved.addListener(() => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local' || !(INLINE_SETTINGS_KEY in changes)) return
   coordinator.cancelActive()
-  void reconcileOpenTabs()
+  const change = changes[INLINE_SETTINGS_KEY]
+  void reconcileOpenTabs(pauseChangedOrigins(change.oldValue, change.newValue))
 })
 chrome.runtime.onInstalled.addListener((details) => {
   void syncInlineAccess()
@@ -140,11 +143,14 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onMessage.addListener((message) => {
       if (started || message?.type !== 'start') return
       started = true
+      const deliver = popupResultRelay(port)
       coordinator.fillActivePage().then((result) => {
         recordLastFillResult(result)
-        try { port.postMessage(publicFillResult(result)) } catch { /* noop */ }
+        const publicResult = publicFillResult(result)
+        void deliver(publicResult, publicResult)
       }).catch(() => {
-        try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }
+        const failed: PublicFillResult = { state: 'unavailable', code: 'fill-failed' }
+        void deliver(failed, failed)
       })
     })
     return
@@ -159,15 +165,20 @@ chrome.runtime.onConnect.addListener((port) => {
         try { port.postMessage({ state: 'unavailable', code: 'password-change-fill-failed' }) } catch { /* noop */ }
         return
       }
+      const deliver = popupResultRelay(port)
       coordinator.changePasswordActivePage(newPassword).then((result) => {
         if (result.ok) {
           saveSession.arm(result.tabId, result.origin, { username: result.username, password: newPassword })
-          try { port.postMessage({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled }) } catch { /* noop */ }
+          void deliver({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled })
         } else {
-          try { port.postMessage({ state: 'unavailable', code: result.code, lookalike: result.lookalike }) } catch { /* noop */ }
+          const failed: PublicFillResult = result.lookalike === undefined
+            ? { state: 'unavailable', code: result.code }
+            : { state: 'unavailable', code: result.code, lookalike: result.lookalike }
+          void deliver({ state: 'unavailable', code: result.code, lookalike: result.lookalike }, failed)
         }
       }).catch(() => {
-        try { port.postMessage({ state: 'unavailable', code: 'fill-failed' }) } catch { /* noop */ }
+        const failed: PublicFillResult = { state: 'unavailable', code: 'fill-failed' }
+        void deliver(failed, failed)
       })
     })
     return
@@ -220,25 +231,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }))
     return true
   }
-  if (message?.type === 'sesame:inspect-page') {
-    coordinator.inspectActivePage().then(sendResponse).catch(() => sendResponse({
-      state: 'unavailable',
-      code: 'page-check-failed',
-    }))
-    return true
-  }
-  if (message?.type === 'sesame:inspect-identity') {
-    coordinator.inspectIdentityActivePage().then(sendResponse).catch(() => sendResponse({
-      state: 'unavailable',
-      code: 'page-check-failed',
-    }))
-    return true
-  }
-  if (message?.type === 'sesame:inspect-card') {
-    loadInlineSettings().then((settings) => settings.cardSuggestionsEnabled
-      ? coordinator.inspectCardActivePage()
-      : { state: 'unavailable' as const, code: 'card-suggestions-disabled' }
-    ).then(sendResponse).catch(() => sendResponse({ state: 'unavailable', code: 'page-check-failed' }))
+  if (message?.type === 'sesame:inspect-surfaces') {
+    if (sender.url !== chrome.runtime.getURL('popup.html')) {
+      sendResponse({ state: 'restricted', code: 'page-restricted' })
+      return false
+    }
+    loadInlineSettings()
+      .catch(() => null)
+      .then((settings) => coordinator.inspectActivePageSurfaces({ cards: settings?.cardSuggestionsEnabled === true }))
+      .then(sendResponse)
+      .catch(() => sendResponse({ state: 'unavailable', code: 'page-check-failed' }))
     return true
   }
   if (message?.type === 'sesame:autofill') {
@@ -262,13 +264,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     fillCardWhenEnabled().then(sendResponse).catch(() => sendResponse({
       ok: false,
       code: 'fill-failed',
-    }))
-    return true
-  }
-  if (message?.type === 'sesame:inspect-one-time-code') {
-    coordinator.inspectOneTimeCodeActivePage().then(sendResponse).catch(() => sendResponse({
-      state: 'unavailable',
-      code: 'page-check-failed',
     }))
     return true
   }
@@ -421,6 +416,24 @@ async function presentFillStatus(tabId: number, result: PublicFillResult): Promi
     return injection?.result === true
   } catch {
     return false
+  }
+}
+
+function popupResultRelay(port: chrome.runtime.Port) {
+  return createPopupResultRelay(port, {
+    queryActiveTab: async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0],
+    tabOrigin: async (tabId) => fillPageOrigin((await chrome.tabs.get(tabId)).url),
+    pageOrigin: fillPageOrigin,
+    showStatus: presentFillStatus,
+  })
+}
+
+function fillPageOrigin(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    return normalizeFillOrigin(new URL(url).origin)
+  } catch {
+    return null
   }
 }
 

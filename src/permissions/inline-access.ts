@@ -39,6 +39,12 @@ export function normalizePausedOrigins(value: unknown): string[] {
   return [...new Set(origins)].sort()
 }
 
+export function pauseChangedOrigins(previous: unknown, next: unknown): string[] {
+  const before = new Set(normalizePausedOrigins(isRecord(previous) ? previous.pausedOrigins : undefined))
+  const after = new Set(normalizePausedOrigins(isRecord(next) ? next.pausedOrigins : undefined))
+  return [...new Set([...before, ...after])].filter((origin) => before.has(origin) !== after.has(origin)).sort()
+}
+
 export function originPattern(origin: string): string | null {
   const [normalized] = normalizePausedOrigins([origin])
   return normalized ? `${normalized}/*` : null

@@ -21,6 +21,8 @@ import {
 } from '../protocol/native'
 import type { Browser, NativePort } from '../platform/chrome'
 
+export const NATIVE_PROBE_BUDGET_MS = 7_500
+
 const TRANSIENT_PROBE_ERRORS = new Set([
   'host-disconnected',
   'host-exited',
@@ -51,11 +53,14 @@ export async function probeNativeHost(
     signal?: AbortSignal
     attempts?: number
     retryDelayMs?: number
+    budgetMs?: number
     sleep?: (milliseconds: number) => Promise<void>
   } = {}
 ): Promise<NativeProbeResult | NativeProbeFailure> {
   const timeoutMs = options.timeoutMs ?? NATIVE_PROBE_TIMEOUT_MS
   const startedAt = performance.now()
+  const deadline = startedAt + (options.budgetMs ?? NATIVE_PROBE_BUDGET_MS)
+  const retryDelayMs = options.retryDelayMs ?? 250
   const totalAttempts = Math.max(1, options.attempts ?? 2)
   const sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)))
   let result: ConnectOnceResult | ConnectOnceFailure = { ok: false, code: 'native-runtime-error' }
@@ -63,15 +68,20 @@ export async function probeNativeHost(
 
   for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
     attempts = attempt
+    const remainingMs = Math.floor(deadline - performance.now())
     // Fresh request id per attempt: a delayed earlier response is never accepted.
-    result = await connectOnce(browser, makeRequest('capabilities'), { timeoutMs, signal: options.signal })
+    result = await connectOnce(browser, makeRequest('capabilities'), {
+      timeoutMs: Math.max(1, Math.min(timeoutMs, remainingMs)),
+      signal: options.signal,
+    })
     if (result.ok
       || !TRANSIENT_PROBE_ERRORS.has(result.code)
       || attempt === totalAttempts
-      || options.signal?.aborted) {
+      || options.signal?.aborted
+      || deadline - performance.now() - retryDelayMs <= 0) {
       break
     }
-    await sleep(options.retryDelayMs ?? 250)
+    await sleep(retryDelayMs)
   }
 
   const latencyMs = Math.round(performance.now() - startedAt)

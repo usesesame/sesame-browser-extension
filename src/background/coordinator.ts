@@ -40,6 +40,7 @@ export interface Coordinator {
   state(): FillContext
   checkConnection(): Promise<ConnectionState>
   inspectActivePage(): Promise<PageCheckResult>
+  inspectActivePageSurfaces(options: { cards: boolean; checkTimeoutMs?: number }): Promise<PageSurfacesResult>
   fillActivePage(signal?: AbortSignal): Promise<FillContext>
   changePasswordActivePage(newPassword: string, signal?: AbortSignal): Promise<ChangePasswordResult>
   inspectIdentityActivePage(): Promise<IdentityPageCheckResult>
@@ -117,6 +118,20 @@ export interface PageCheckResult {
   hasPasswordField?: boolean
 }
 
+export type PageSurfacesResult =
+  | { state: 'restricted'; code: string }
+  | {
+      state: 'checked'
+      purpose: unknown
+      login: PageCheckResult
+      identity: IdentityPageCheckResult
+      card: CardPageCheckResult
+      oneTimeCode: OneTimeCodePageCheckResult
+    }
+
+const PAGE_CHECK_TIMEOUT_MS = 4_000
+const PAGE_CHECK_FAILED = { state: 'unavailable', code: 'page-check-failed' } as const
+
 interface ActiveOperation {
   controller: AbortController
   tabId?: number
@@ -191,6 +206,57 @@ export function createCoordinator(browser: Browser): Coordinator {
       } catch {
         return { state: 'unavailable', code: 'page-restricted' }
       }
+    },
+
+    async inspectActivePageSurfaces({ cards, checkTimeoutMs = PAGE_CHECK_TIMEOUT_MS }): Promise<PageSurfacesResult> {
+      let page: PageResolution
+      try {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+        page = topLevelPage(tab)
+      } catch {
+        return { state: 'restricted', code: 'page-restricted' }
+      }
+      if (!page.ok) return { state: 'restricted', code: page.code }
+      try {
+        await installContentBridge(browser, page.tabId, true)
+      } catch {
+        return { state: 'restricted', code: 'page-restricted' }
+      }
+      const target: InspectTarget = { browser, tabId: page.tabId, origin: page.origin, bridgeReady: true }
+      const check = <T>(run: () => Promise<T>, failed: T) => withCheckTimeout(run, checkTimeoutMs, failed)
+      const [purpose, login, identity, card, oneTimeCode] = await Promise.all([
+        check(async () => {
+          const [injection] = await browser.scripting.executeScript({
+            target: { tabId: target.tabId },
+            func: invokeBridgeInspection,
+            args: ['sesameInspectPasswordSurface'],
+          })
+          return injection?.result
+        }, null as unknown),
+        check<PageCheckResult>(async () => {
+          const inspected = await loginSurface().inspect(target)
+          return inspected.ok
+            ? { state: 'ready', hasUsernameField: inspected.ready.hasUsernameField, hasPasswordField: inspected.ready.hasPasswordField }
+            : { state: 'unavailable', code: inspected.code }
+        }, PAGE_CHECK_FAILED),
+        check<IdentityPageCheckResult>(async () => {
+          const inspected = await identitySurface().inspect(target)
+          return inspected.ok ? { state: 'ready', fields: inspected.ready.fields } : { state: 'unavailable', code: inspected.code }
+        }, PAGE_CHECK_FAILED),
+        cards
+          ? check<CardPageCheckResult>(async () => {
+              const inspected = await cardSurface().inspect(target)
+              return inspected.ok
+                ? { state: 'ready', fields: inspected.ready.fields, embedded: inspected.ready.embedded }
+                : { state: 'unavailable', code: inspected.code }
+            }, PAGE_CHECK_FAILED)
+          : Promise.resolve<CardPageCheckResult>({ state: 'unavailable', code: 'card-suggestions-disabled' }),
+        check<OneTimeCodePageCheckResult>(async () => {
+          const inspected = await oneTimeCodeSurface().inspect(target)
+          return inspected.ok ? { state: 'ready', kind: inspected.ready.kind } : { state: 'unavailable', code: inspected.code }
+        }, PAGE_CHECK_FAILED),
+      ])
+      return { state: 'checked', purpose, login, identity, card, oneTimeCode }
     },
 
     async fillActivePage(externalSignal): Promise<FillContext> {
@@ -332,11 +398,13 @@ interface SurfaceContext {
   token: string
 }
 
+type InspectTarget = Pick<SurfaceContext, 'browser' | 'tabId' | 'origin'> & { bridgeReady?: boolean }
+
 type Inspected<Ready> = { ok: true; ready: Ready } | { ok: false; code: string }
 
 interface FillSurface<Ready extends object, ApprovalInput, Approved, Outcome extends { ok: boolean }> {
   resolvePage: (tab?: PageTab) => PageResolution
-  inspect: (ctx: Pick<SurfaceContext, 'browser' | 'tabId' | 'origin'>) => Promise<Inspected<Ready>>
+  inspect: (ctx: InspectTarget) => Promise<Inspected<Ready>>
   unfillableCode?: (ready: Ready) => string | undefined
   prepare: (ctx: SurfaceContext, ready: Ready) => Promise<{ ok: true; approvalInput: ApprovalInput } | { ok: false; code: string }>
   requestApproval: (
@@ -467,8 +535,8 @@ function loginSurface(
   let frameId = 0
   return {
     resolvePage: topLevelPage,
-    async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId, true)
+    async inspect({ browser, tabId, origin, bridgeReady }) {
+      if (!bridgeReady) await installContentBridge(browser, tabId, true)
       const injections = await browser.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
@@ -595,8 +663,8 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
   let frameId = 0
   return {
     resolvePage: topLevelPage,
-    async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId, true)
+    async inspect({ browser, tabId, origin, bridgeReady }) {
+      if (!bridgeReady) await installContentBridge(browser, tabId, true)
       const injections = await browser.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
@@ -652,8 +720,8 @@ function oneTimeCodeSurface(): FillSurface<
   let frameId = 0
   return {
     resolvePage: topLevelPage,
-    async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId, true)
+    async inspect({ browser, tabId, origin, bridgeReady }) {
+      if (!bridgeReady) await installContentBridge(browser, tabId, true)
       const injections = await browser.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
@@ -723,6 +791,16 @@ async function runIdentityFill(browser: Browser, operation: FillOperation): Prom
   return result.ok ? { ok: true, filledFields: result.outcome.filledFields } : result
 }
 
+function withCheckTimeout<T>(run: () => Promise<T>, timeoutMs: number, failed: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(failed), timeoutMs)
+    run().then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      () => { clearTimeout(timer); resolve(failed) },
+    )
+  })
+}
+
 async function installContentBridge(browser: Browser, tabId: number, allFrames = false): Promise<void> {
   await browser.scripting.executeScript({
     target: { tabId, allFrames },
@@ -781,8 +859,8 @@ function cardSurface(): FillSurface<CardSurface, CardFieldKey[], CardFields, Car
   let approvedCard: CardFields | undefined
   return {
     resolvePage: httpOnlyPage,
-    async inspect({ browser, tabId, origin }) {
-      await installContentBridge(browser, tabId, true)
+    async inspect({ browser, tabId, origin, bridgeReady }) {
+      if (!bridgeReady) await installContentBridge(browser, tabId, true)
       const injections = await browser.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: invokeBridgeInspection,
