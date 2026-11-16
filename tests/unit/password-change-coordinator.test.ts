@@ -127,10 +127,16 @@ describe('password change coordinator', () => {
 
   it('refuses a second change while one is in flight', async () => {
     let settle: (value: { ok: false; code: string }) => void = () => {}
-    native.requestChange.mockImplementation(() => new Promise((resolve) => { settle = resolve }))
+    const entered = new Promise<void>((markEntered) => {
+      native.requestChange.mockImplementation(() => new Promise((resolve) => {
+        settle = resolve
+        markEntered()
+      }))
+    })
     const coordinator = createCoordinator(browserForPage('password-change'))
 
     const first = coordinator.changePasswordActivePage(style)
+    await entered
     await expect(coordinator.changePasswordActivePage(style)).resolves.toEqual({ ok: false, code: 'fill-in-progress' })
 
     settle({ ok: false, code: 'approval-declined' })

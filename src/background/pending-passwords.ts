@@ -20,6 +20,7 @@ export interface PendingStore {
   remember(tabId: number, entry: PendingEntry): Promise<void>
   lookup(tabId: number, origin: string | null): Promise<PendingEntry | undefined>
   forget(tabId: number): Promise<void>
+  forgetHandle(tabId: number, handle: string): Promise<void>
 }
 
 export const PENDING_TTL_MS = 24 * 60 * 60_000
@@ -43,8 +44,18 @@ export function safePendingEntry(value: unknown): PendingEntry | null {
 
 export function createPendingStore(area: SessionArea, now: () => number = Date.now, ttlMs = PENDING_TTL_MS): PendingStore {
   const memory = new Map<number, PendingEntry>()
+  const generations = new Map<number, number>()
+
+  function generation(tabId: number): number {
+    return generations.get(tabId) ?? 0
+  }
+
+  function advance(tabId: number) {
+    generations.set(tabId, generation(tabId) + 1)
+  }
 
   async function forget(tabId: number) {
+    advance(tabId)
     memory.delete(tabId)
     try { await area.remove(pendingKey(tabId)) } catch { /* noop */ }
   }
@@ -53,6 +64,7 @@ export function createPendingStore(area: SessionArea, now: () => number = Date.n
     async remember(tabId, entry) {
       const safe = safePendingEntry(entry)
       if (!Number.isInteger(tabId) || !safe) return
+      advance(tabId)
       memory.set(tabId, safe)
       try { await area.set({ [pendingKey(tabId)]: { ...safe } }) } catch { /* noop */ }
     },
@@ -61,13 +73,15 @@ export function createPendingStore(area: SessionArea, now: () => number = Date.n
       if (!Number.isInteger(tabId) || !origin) return undefined
       let entry = memory.get(tabId)
       if (!entry) {
+        const started = generation(tabId)
         try {
           const stored = await area.get(pendingKey(tabId))
           entry = safePendingEntry(stored[pendingKey(tabId)]) ?? undefined
         } catch {
           entry = undefined
         }
-        if (entry) memory.set(tabId, entry)
+        if (generation(tabId) !== started) entry = memory.get(tabId)
+        else if (entry) memory.set(tabId, entry)
       }
       if (!entry) return undefined
       if (now() - entry.createdAt >= ttlMs || now() < entry.createdAt) {
@@ -78,5 +92,10 @@ export function createPendingStore(area: SessionArea, now: () => number = Date.n
     },
 
     forget,
+
+    async forgetHandle(tabId, handle) {
+      if (memory.get(tabId)?.handle !== handle) return
+      await forget(tabId)
+    },
   }
 }

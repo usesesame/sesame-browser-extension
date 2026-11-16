@@ -11,6 +11,7 @@
   import { DEFAULT_PASSWORD_STYLE, normalizeFillOrigin } from '../protocol/native'
   import { GENERATED_MESSAGES, acceptMessage, generatedMessage, type PendingKindView } from './generated-messages'
   import { pageSurfaceView, type PageKind } from './page-surfaces'
+  import { createRevisionGate } from './pending-revision'
   import {
     CHECKING_PRESENTATION, CONNECTION_RESPONSE_TIMEOUT_MS, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
   } from '../protocol/connection-presentation'
@@ -142,6 +143,7 @@
   let pendingKind: PendingKindView = null
   let pendingWorking = false
   let pendingFeedback = ''
+  const pendingRevision = createRevisionGate()
 
   onMount(() => {
     void refreshAll()
@@ -251,7 +253,9 @@
     const saveSurface = page.kind === 'registration' || page.kind === 'password-change'
     saveArmed = saveSurface && saveState.armed
     saveFeedback = ''
-    pendingKind = activeTabId === null ? null : await queryPending(activeTabId)
+    const pendingTabId = activeTabId
+    const pendingRead = await pendingRevision.read(async () => pendingTabId === null ? null : queryPending(pendingTabId))
+    if (pendingRead.current) pendingKind = pendingRead.value
     setPageDiagnostic({
       code: page.code,
       hasUsernameField: page.hasUsernameField,
@@ -483,7 +487,7 @@
     fillFeedback = 'Waiting for approval in Sesame…'
     try {
       const result = await runGenerated('sesame:create-password')
-      if (result?.state === 'created') pendingKind = 'new'
+      if (result?.state === 'created') setPendingKind('new')
       fillFeedback = generatedMessage(result)
     } catch {
       fillFeedback = generatedMessage(null)
@@ -499,13 +503,18 @@
     fillFeedback = 'Waiting for approval in Sesame…'
     try {
       const result = await runGenerated('sesame:change-password')
-      if (result?.state === 'changed') pendingKind = 'change'
+      if (result?.state === 'changed') setPendingKind('change')
       fillFeedback = lookalikeWarningForResult(result) ?? generatedMessage(result)
     } catch {
       fillFeedback = generatedMessage(null)
     } finally {
       changeWorking = false
     }
+  }
+
+  function setPendingKind(kind: PendingKindView) {
+    pendingRevision.advance()
+    pendingKind = kind
   }
 
   async function queryPending(tabId: number): Promise<PendingKindView> {
@@ -524,8 +533,8 @@
     try {
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:pending-accept', tabId: activeTabId }), POPUP_RESPONSE_TIMEOUT_MS)
       pendingFeedback = acceptMessage(response, kind)
-      if (typeof response?.state === 'string' && response.state !== 'unconfirmed') pendingKind = null
-      if (response?.code === 'pending-not-found') pendingKind = null
+      if (typeof response?.state === 'string' && response.state !== 'unconfirmed') setPendingKind(null)
+      if (response?.code === 'pending-not-found') setPendingKind(null)
     } catch {
       pendingFeedback = acceptMessage(null, kind)
     } finally {

@@ -21,7 +21,7 @@ interface GeneratedPasswordDeps {
   store: PendingStore
   browser: Browser
   tabOrigin(tabId: number): Promise<string | null>
-  captureUsername(tabId: number): Promise<string>
+  captureUsername(tabId: number, origin: string): Promise<string>
   now?: () => number
 }
 
@@ -54,11 +54,17 @@ export function createGeneratedPasswords(deps: GeneratedPasswordDeps) {
       const origin = await deps.tabOrigin(tabId)
       const entry = await deps.store.lookup(tabId, origin)
       if (!entry) return { code: 'pending-not-found' }
-      const username = entry.kind === 'new' ? await deps.captureUsername(tabId).catch(() => '') : undefined
+      const username = entry.kind === 'new' ? await deps.captureUsername(tabId, entry.origin).catch(() => '') : undefined
       const result = await requestPending(deps.browser, entry.origin, entry.handle, 'accepted', { username })
       if (!result.ok) return { code: result.code }
-      if (result.state !== 'unconfirmed') await deps.store.forget(tabId)
+      if (result.state !== 'unconfirmed') await deps.store.forgetHandle(tabId, entry.handle)
       return { state: result.state }
     },
   }
+}
+
+export function captureSignupUsernameInPage(expectedOrigin: string): unknown {
+  if (location.origin !== expectedOrigin) return ''
+  const capture = (globalThis as typeof globalThis & { sesameCaptureSignupUsername?: () => unknown }).sesameCaptureSignupUsername
+  return typeof capture === 'function' ? capture() : ''
 }

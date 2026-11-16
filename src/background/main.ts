@@ -11,7 +11,7 @@ import { createPopupResultRelay } from './popup-result'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
 import { createPendingStore } from './pending-passwords'
-import { createGeneratedPasswords, safePasswordStyle } from './generated-passwords'
+import { captureSignupUsernameInPage, createGeneratedPasswords, safePasswordStyle } from './generated-passwords'
 import type { FillContext } from './fill-state'
 import { createMissedResultNotice } from './missed-result'
 
@@ -24,9 +24,9 @@ const generatedPasswords = createGeneratedPasswords({
   store: pendingStore,
   browser: chromeBrowser,
   tabOrigin: async (tabId) => fillPageOrigin((await chrome.tabs.get(tabId)).url),
-  captureUsername: async (tabId) => {
+  captureUsername: async (tabId, origin) => {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] })
-    const [injection] = await chrome.scripting.executeScript({ target: { tabId }, func: captureSignupUsernameInPage })
+    const [injection] = await chrome.scripting.executeScript({ target: { tabId }, func: captureSignupUsernameInPage, args: [origin] })
     return typeof injection?.result === 'string' ? injection.result : ''
   },
 })
@@ -430,11 +430,6 @@ function safeSenderOrigin(value: string | undefined): string | null {
   } catch {
     return null
   }
-}
-
-function captureSignupUsernameInPage(): unknown {
-  const capture = (globalThis as typeof globalThis & { sesameCaptureSignupUsername?: () => unknown }).sesameCaptureSignupUsername
-  return typeof capture === 'function' ? capture() : ''
 }
 
 function detachInlineOverlay() {

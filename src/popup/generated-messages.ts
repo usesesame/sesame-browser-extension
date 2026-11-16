@@ -11,7 +11,7 @@ const FAILURES: Readonly<Record<string, string>> = {
   'approval-declined': 'Nothing was changed. The request was declined in Sesame.',
   'approval-timeout': 'The approval expired. Try again.',
   'approval-unavailable': 'Sesame could not show the approval. Bring the desktop app forward and retry.',
-  'cancelled': 'The request was cancelled. Nothing was changed.',
+  'cancelled': 'The request was cancelled, so check Sesame in case the password was already saved.',
   'desktop-unavailable': 'Open Sesame, then try again.',
   'fill-in-progress': 'Sesame is already busy. Try again in a moment.',
   'host-disconnected': 'The desktop connection closed. Keep Sesame open and retry.',
