@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const CONTRACT_DIRECTORIES = ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']
+const CONTRACT_DIRECTORIES = ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']
 const PROTOCOL_CONSTANTS = {
   v1: 'PROTOCOL_VERSION',
   v2: 'CARD_PROTOCOL_VERSION',
@@ -11,6 +11,7 @@ const PROTOCOL_CONSTANTS = {
   v4: 'TOTP_PROTOCOL_VERSION',
   v5: 'FILL_LOOKALIKE_PROTOCOL_VERSION',
   v6: 'CAPABILITIES_PROTOCOL_VERSION',
+  v7: 'FILL_SITE_PROTOCOL_VERSION',
 }
 const CONTRACT_FILES = ['contract.json', 'request.schema.json', 'response.schema.json', 'vectors.json']
 const FETCH_TIMEOUT_MS = 30_000

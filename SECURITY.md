@@ -74,7 +74,7 @@ In scope:
 - Native-messaging protocol handling: accepting an unsafe response shape,
   accepting a mismatched `requestId`, or accepting a protocol version outside
   the operation-specific contracts in `contracts/browser/v1/contract.json`
-  through `contracts/browser/v6/contract.json`.
+  through `contracts/browser/v7/contract.json`.
 - Permission escalation: obtaining host permissions the user did not grant, or
   keeping the inline control active on an origin the user paused.
 - The store manifests: an unexpected permission, an unexpected content-script

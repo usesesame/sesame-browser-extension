@@ -608,7 +608,7 @@ async function waitForReleaseEnabled(target: Page, text: string): Promise<void> 
   await expect.poll(() => closedShadowTextDisabled(target, text), { timeout: 10000 }).toBe(false)
 }
 
-async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' = 'exact'): Promise<void> {
+async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' | 'site' = 'exact'): Promise<void> {
   await worker.evaluate((matchKind) => {
     const target = globalThis as typeof globalThis & {
       __sesameTestRestore?: () => void
@@ -2342,14 +2342,17 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
-  it('shows the www alias explanation in the popup after a fill', async () => {
+  it.each([
+    { matchKind: 'wwwAlias' as const, explanation: /through its single www address/ },
+    { matchKind: 'site' as const, explanation: /another address on this site and is set to work across the whole site/ },
+  ])('shows the $matchKind explanation in the popup after a fill', async ({ matchKind, explanation }) => {
     const extensionId = new URL(worker.url()).host
     const current = await openFixture('/login')
     const fixtureUrl = current.url()
     const tabId = await findTabId(fixtureUrl)
     expect(tabId).toBeGreaterThan(0)
     await overrideWorkerTab(tabId, fixtureUrl)
-    await mockNativeHostInWorker('wwwAlias')
+    await mockNativeHostInWorker(matchKind)
     const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
       await recheckPopup(popup)
@@ -2361,7 +2364,7 @@ describe('extension browser suite', () => {
       await expect.poll(
         async () => popup.evaluate(() => document.body.innerText),
         { timeout: 15000 },
-      ).toMatch(/through its single www address/)
+      ).toMatch(explanation)
     } finally {
       if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()

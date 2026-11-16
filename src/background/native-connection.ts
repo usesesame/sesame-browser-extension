@@ -3,6 +3,8 @@ import {
   NATIVE_PROBE_TIMEOUT_MS,
   NATIVE_FILL_TIMEOUT_MS,
   CAPABILITIES_PROTOCOL_VERSION,
+  FILL_LOOKALIKE_PROTOCOL_VERSION,
+  FILL_SITE_PROTOCOL_VERSION,
   makeIdentityRequest,
   makeCardRequest,
   makeRequest,
@@ -124,11 +126,12 @@ export async function requestFill(
   origin: string,
   options: { timeoutMs?: number; signal?: AbortSignal; fields?: FillFields } = {}
 ): Promise<NativeFillResult | NativeFillFailure> {
-  const result = await connectOnce(
-    browser,
-    makeRequest('fill', origin, options.fields ?? 'both'),
-    { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal }
-  )
+  const fields = options.fields ?? 'both'
+  const connection = { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal }
+  let result = await connectOnce(browser, makeRequest('fill', origin, fields, FILL_SITE_PROTOCOL_VERSION), connection)
+  if (!result.ok && result.code === 'fill-version-unsupported') {
+    result = await connectOnce(browser, makeRequest('fill', origin, fields, FILL_LOOKALIKE_PROTOCOL_VERSION), connection)
+  }
   if (!result.ok) {
     return result
   }

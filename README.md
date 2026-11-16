@@ -54,8 +54,9 @@ each kind of change.
 The desktop app owns the native messaging protocol, and this repository keeps a
 pinned copy of each version under `contracts/browser/`. Version 1 covers
 identities, saving and the basic requests, version 2 covers cards, version 3
-and version 5 cover logins, version 4 covers one-time codes, and version 6 adds
-the capability check. Changing the wire format starts with a new contract in
+and version 5 cover logins, version 4 covers one-time codes, version 6 adds the
+capability check, and version 7 lets a login match anywhere on the same site
+when its rule allows that. Changing the wire format starts with a new contract in
 the desktop repository.
 
 The native host that the browser starts ships with the desktop app, which

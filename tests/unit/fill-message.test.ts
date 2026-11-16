@@ -18,13 +18,18 @@ describe('inline fill messages', () => {
       .toBe('Filled. The saved login matches this site through its single www address.')
   })
 
+  it('says a site rule matched another address on the same site', () => {
+    expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true, matchKind: 'site' }))
+      .toBe('Filled. The saved login is for another address on this site and is set to work across the whole site.')
+  })
+
   it('falls back to a plain review line when the result carries no rule', () => {
     expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true }))
       .toBe('Filled. Review the page and sign in.')
   })
 
-  it('shares one explanation string with the popup for both match kinds', () => {
-    for (const matchKind of ['exact', 'wwwAlias'] as const) {
+  it('shares one explanation string with the popup for every match kind', () => {
+    for (const matchKind of ['exact', 'wwwAlias', 'site'] as const) {
       const explanation = fillMatchExplanation(matchKind)
       expect(explanation).not.toBeNull()
       expect(fillMessage({ state: 'filled', usernameFilled: true, passwordFilled: true, matchKind }))

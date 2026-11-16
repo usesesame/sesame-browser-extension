@@ -5,6 +5,7 @@ import {
   CAPABILITIES_PROTOCOL_VERSION,
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
+  FILL_SITE_PROTOCOL_VERSION,
   MAX_CREDENTIAL_FIELD,
   MAX_LOOKALIKE_HOST,
   PROTOCOL_VERSION,
@@ -85,7 +86,10 @@ describe('makeRequest', () => {
   it('stamps every request with the protocol version its host checks', () => {
     expect(makeRequest('capabilities').version).toBe(CAPABILITIES_PROTOCOL_VERSION)
     expect(makeRequest('activate').version).toBe(PROTOCOL_VERSION)
-    expect(fillRequest('both').version).toBe(FILL_LOOKALIKE_PROTOCOL_VERSION)
+    expect(fillRequest('both').version).toBe(FILL_SITE_PROTOCOL_VERSION)
+    expect(makeRequest('fill', 'https://example.test', 'both', FILL_LOOKALIKE_PROTOCOL_VERSION).version)
+      .toBe(FILL_LOOKALIKE_PROTOCOL_VERSION)
+    expect(() => makeRequest('fill', 'https://example.test', 'both', 6 as never)).toThrow(TypeError)
     expect(makeCardRequest('https://checkout.example.test', ['number']).version).toBe(CARD_PROTOCOL_VERSION)
     expect(makeTotpRequest('https://example.test').version).toBe(TOTP_PROTOCOL_VERSION)
   })
@@ -121,6 +125,8 @@ describe('isNativeRequest', () => {
 
   it('rejects another protocol version', () => {
     expect(isNativeRequest({ ...fillRequest('both'), version: FILL_LOOKALIKE_PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isNativeRequest({ ...fillRequest('both'), version: FILL_SITE_PROTOCOL_VERSION + 1 })).toBe(false)
+    expect(isNativeRequest({ ...fillRequest('both'), version: FILL_LOOKALIKE_PROTOCOL_VERSION })).toBe(true)
     expect(isNativeRequest({ ...fillRequest('both'), version: 0 })).toBe(false)
   })
 
@@ -393,6 +399,13 @@ describe('safeNativeResponse', () => {
   it('accepts only host error messages it already knows', () => {
     const request = fillRequest('both')
     expect(respond(request, { type: 'error', message: 'Unsupported protocol version.' }))
+      .toEqual({ ok: false, code: 'fill-version-unsupported' })
+    expect(respond(request, { type: 'error', message: 'Invalid browser request.' }))
+      .toEqual({ ok: false, code: 'host-rejected-request' })
+    const v5Request = makeRequest('fill', 'https://example.test', 'both', FILL_LOOKALIKE_PROTOCOL_VERSION)
+    expect(respond(v5Request, { type: 'error', message: 'Unsupported protocol version.' }))
+      .toEqual({ ok: false, code: 'host-rejected-request' })
+    expect(respond(makeTotpRequest('https://example.test'), { type: 'error', message: 'Unsupported protocol version.' }))
       .toEqual({ ok: false, code: 'host-rejected-request' })
     expect(respond(request, { type: 'error', message: 'Run this instead' }))
       .toEqual({ ok: false, code: 'invalid-response' })
@@ -407,7 +420,7 @@ describe('safeNativeResponse', () => {
 })
 
 describe('version five lookalike responses', () => {
-  const v5Request = (): NativeRequest => makeRequest('fill', 'https://example.test')
+  const v5Request = (): NativeRequest => makeRequest('fill', 'https://example.test', 'both', FILL_LOOKALIKE_PROTOCOL_VERSION)
   const v3Request = (): NativeRequest => ({
     version: FILL_MATCH_PROTOCOL_VERSION,
     type: 'fill',
@@ -481,6 +494,73 @@ describe('version five lookalike responses', () => {
       requestId: request.requestId,
       reason: 'noMatch',
     }, request)).toEqual({ ok: false, code: 'protocol-mismatch' })
+  })
+})
+
+describe('version seven site responses', () => {
+  const v7Request = (fields?: 'username' | 'password' | 'both'): NativeRequest => makeRequest('fill', 'https://login.example.test', fields)
+  const v5Request = (): NativeRequest => makeRequest('fill', 'https://login.example.test', 'both', FILL_LOOKALIKE_PROTOCOL_VERSION)
+  const siteFill = { type: 'fill', username: 'person@example.test', password: 'fictional-value', matchKind: 'site' }
+
+  it('accepts a site match in a reply to a version seven fill', () => {
+    expect(respond(v7Request(), siteFill)).toEqual({
+      ok: true,
+      credential: { username: 'person@example.test', password: 'fictional-value' },
+      matchKind: 'site',
+    })
+    expect(respond(v7Request('password'), { type: 'fill', password: 'fictional-value', matchKind: 'site' })).toEqual({
+      ok: true,
+      credential: { username: '', password: 'fictional-value' },
+      matchKind: 'site',
+    })
+  })
+
+  it('keeps the exact and www rules at version seven', () => {
+    for (const matchKind of ['exact', 'wwwAlias']) {
+      expect(respond(v7Request(), { ...siteFill, matchKind })).toMatchObject({ ok: true, matchKind })
+    }
+  })
+
+  it('refuses a site match in a reply to a version five fill', () => {
+    expect(respond(v5Request(), siteFill)).toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('refuses a site match on a version three fill', () => {
+    const request: NativeRequest = { version: FILL_MATCH_PROTOCOL_VERSION, type: 'fill', requestId: 'fill-3-site', origin: 'https://login.example.test' }
+    expect(respond(request, siteFill)).toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('refuses an unknown or missing match kind at version seven', () => {
+    for (const matchKind of ['parentDomain', 'Site', 'SITE', '', null, 7, ['site']]) {
+      expect(respond(v7Request(), { ...siteFill, matchKind })).toEqual({ ok: false, code: 'unsafe-response' })
+    }
+    expect(respond(v7Request(), { type: 'fill', username: 'person@example.test', password: 'fictional-value' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('refuses a version seven reply to a version five request and the reverse', () => {
+    const v5 = v5Request()
+    expect(safeNativeResponse({ ...siteFill, version: FILL_SITE_PROTOCOL_VERSION, requestId: v5.requestId }, v5))
+      .toEqual({ ok: false, code: 'protocol-mismatch' })
+    const v7 = v7Request()
+    expect(safeNativeResponse({ ...siteFill, matchKind: 'exact', version: FILL_LOOKALIKE_PROTOCOL_VERSION, requestId: v7.requestId }, v7))
+      .toEqual({ ok: false, code: 'protocol-mismatch' })
+  })
+
+  it('never accepts a site match on a reply that is not a fill', () => {
+    expect(respond(makeTotpRequest('https://login.example.test'), { type: 'totp', code: '287082', remainingSeconds: 18, matchKind: 'site' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(makeIdentityRequest('https://login.example.test', ['email']), { type: 'identity', identity: { email: 'a@b.test' }, matchKind: 'site' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(makeSaveRequest('https://login.example.test', 'fictional-value', 'new'), { type: 'saved', saved: true, matchKind: 'site' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+    expect(respond(v7Request(), { type: 'fill-unavailable', reason: 'noMatch', matchKind: 'site' }))
+      .toEqual({ ok: false, code: 'unsafe-response' })
+  })
+
+  it('carries a lookalike warning at version seven', () => {
+    expect(respond(v7Request(), { type: 'fill-unavailable', reason: 'lookalike', lookalike: 'apple.example' }))
+      .toEqual({ ok: false, code: 'lookalike-domain', lookalike: 'apple.example' })
   })
 })
 

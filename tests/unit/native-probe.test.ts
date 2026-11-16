@@ -144,6 +144,74 @@ describe('native connection probe', () => {
       code: 'lookalike-domain',
       lookalike: 'apple.example',
     })
-    expect(requests[0]).toMatchObject({ version: 5, type: 'fill', origin: 'https://example.test' })
+    expect(requests[0]).toMatchObject({ version: 7, type: 'fill', origin: 'https://example.test' })
+  })
+})
+
+function desktopBeforeSiteRules(request: Record<string, unknown>): unknown {
+  if (request.version !== 5) {
+    return { version: request.version, type: 'error', requestId: request.requestId, message: 'Unsupported protocol version.' }
+  }
+  return { version: 5, type: 'fill', requestId: request.requestId, password: 'fictional-value', matchKind: 'exact' }
+}
+
+describe('fill against a desktop before site rules', () => {
+  it('asks once at version seven, then once at version five for the same page', async () => {
+    const { browser, requests } = fakeBrowser([{ reply: desktopBeforeSiteRules }, { reply: desktopBeforeSiteRules }])
+
+    await expect(requestFill(browser, 'https://example.test', { timeoutMs: 200, fields: 'password' })).resolves.toEqual({
+      ok: true,
+      credential: { username: '', password: 'fictional-value' },
+      matchKind: 'exact',
+    })
+    expect(requests).toHaveLength(2)
+    expect(requests[0]).toMatchObject({ version: 7, type: 'fill', origin: 'https://example.test', fields: 'password' })
+    expect(requests[1]).toMatchObject({ version: 5, type: 'fill', origin: 'https://example.test', fields: 'password' })
+    expect(requests[1].requestId).not.toBe(requests[0].requestId)
+  })
+
+  it('asks only once when the desktop answers version seven', async () => {
+    const { browser, requests } = fakeBrowser([{
+      reply: (request) => ({ version: request.version, type: 'fill', requestId: request.requestId, username: 'person@example.test', password: 'fictional-value', matchKind: 'site' }),
+    }])
+
+    await expect(requestFill(browser, 'https://login.example.test', { timeoutMs: 200 })).resolves.toMatchObject({ ok: true, matchKind: 'site' })
+    expect(requests).toHaveLength(1)
+  })
+
+  it('refuses a site match that a host sends to the version five retry', async () => {
+    const hostile = (request: Record<string, unknown>) => request.version === 5
+      ? { version: 5, type: 'fill', requestId: request.requestId, username: 'person@example.test', password: 'fictional-value', matchKind: 'site' }
+      : desktopBeforeSiteRules(request)
+    const { browser, requests } = fakeBrowser([{ reply: hostile }, { reply: hostile }])
+
+    await expect(requestFill(browser, 'https://login.example.test', { timeoutMs: 200 })).resolves.toEqual({ ok: false, code: 'unsafe-response' })
+    expect(requests).toHaveLength(2)
+  })
+
+  it('does not retry on any other rejection', async () => {
+    for (const reply of [
+      (request: Record<string, unknown>) => ({ version: request.version, type: 'error', requestId: request.requestId, message: 'Invalid browser request.' }),
+      (request: Record<string, unknown>) => ({ version: 1, type: 'error', requestId: request.requestId, message: 'Unsupported protocol version.' }),
+      (request: Record<string, unknown>) => ({ version: request.version, type: 'error', requestId: 'another-request', message: 'Unsupported protocol version.' }),
+      (request: Record<string, unknown>) => ({ version: request.version, type: 'fill-unavailable', requestId: request.requestId, reason: 'approvalDeclined' }),
+    ]) {
+      const { browser, requests } = fakeBrowser([{ reply }, { reply: desktopBeforeSiteRules }])
+      const result = await requestFill(browser, 'https://example.test', { timeoutMs: 200 })
+      expect(result).toMatchObject({ ok: false })
+      expect(requests).toHaveLength(1)
+    }
+  })
+
+  it('does not retry after the fill is cancelled', async () => {
+    const controller = new AbortController()
+    const { browser, requests } = fakeBrowser([
+      { reply: (request) => { controller.abort(); return desktopBeforeSiteRules(request) } },
+      { reply: desktopBeforeSiteRules },
+    ])
+
+    await expect(requestFill(browser, 'https://example.test', { timeoutMs: 200, signal: controller.signal }))
+      .resolves.toEqual({ ok: false, code: 'cancelled' })
+    expect(requests).toHaveLength(1)
   })
 })
