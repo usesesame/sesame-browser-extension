@@ -159,3 +159,23 @@ describe('an older desktop that speaks only protocol 1 and 2', () => {
     expect(result).not.toMatchObject({ ok: true })
   })
 })
+
+describe('a desktop before protocol 8', () => {
+  function desktopBeforePendingPasswords(request: Record<string, unknown>): unknown {
+    if (request.version === 8) {
+      return { version: 8, type: 'error', requestId: request.requestId, message: 'Unsupported protocol version.' }
+    }
+    return currentDesktopReply(request)
+  }
+
+  it('refuses a change once, asks for an update and never falls back to the old flow', async () => {
+    const { browser, requests } = hostBrowser([desktopBeforePendingPasswords])
+    const { requestChange, requestCreate } = await import('../../src/background/native-connection')
+
+    await expect(requestChange(browser, pageOrigin, { style: 'characters', size: 20 })).resolves.toEqual({ ok: false, code: 'pending-version-unsupported' })
+    await expect(requestCreate(browser, pageOrigin, { style: 'characters', size: 20 })).resolves.toEqual({ ok: false, code: 'pending-version-unsupported' })
+
+    expect(requests.map((request) => `${request.type}:${request.version}`)).toEqual(['change:8', 'create:8'])
+    expect(requests.every((request) => !('password' in request))).toBe(true)
+  })
+})

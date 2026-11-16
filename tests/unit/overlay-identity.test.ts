@@ -91,7 +91,7 @@ describe('the inline control on an identity form', () => {
     expect(identity.className).toBe('fill')
     expect(buttonIn(roots, 'Fill with Sesame').hidden).toBe(true)
     expect(selectIn(roots).hidden).toBe(true)
-    expect(buttonIn(roots, 'Copy password').hidden).toBe(true)
+    expect(buttonIn(roots, 'Copy password')).toBeUndefined()
     expect(options.onConnectionCheck).not.toHaveBeenCalled()
 
     await armRelease(roots, 'Fill identity')

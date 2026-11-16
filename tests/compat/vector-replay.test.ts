@@ -7,6 +7,7 @@ import {
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_MATCH_PROTOCOL_VERSION,
   FILL_SITE_PROTOCOL_VERSION,
+  PENDING_PASSWORD_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   TOTP_PROTOCOL_VERSION,
   isNativeRequest,
@@ -55,6 +56,7 @@ const CONTRACTS = [
   { directory: 'v5', protocolVersion: FILL_LOOKALIKE_PROTOCOL_VERSION },
   { directory: 'v6', protocolVersion: CAPABILITIES_PROTOCOL_VERSION },
   { directory: 'v7', protocolVersion: FILL_SITE_PROTOCOL_VERSION },
+  { directory: 'v8', protocolVersion: PENDING_PASSWORD_PROTOCOL_VERSION },
 ]
 
 describe.each(CONTRACTS)('browser protocol vectors ($directory)', ({ directory, protocolVersion }) => {

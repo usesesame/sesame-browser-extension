@@ -269,6 +269,13 @@ async function openFixture(path = '/login'): Promise<Page> {
   return page
 }
 
+async function openFreshFixture(path: string): Promise<Page> {
+  const fresh = await context.newPage()
+  await fresh.goto(`${primaryOrigin}${path}?tab=${Date.now()}`)
+  await injectBridge(fresh)
+  return fresh
+}
+
 async function openTlsFixture(path: string): Promise<Page> {
   await page.goto(`${tlsOrigin}${path}`)
   await injectBridge(page)
@@ -614,19 +621,18 @@ async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' | 'sit
       __sesameTestRestore?: () => void
       __sesameSaveRequests?: number
       __sesameFillRequests?: number
-      __sesameLastSave?: Record<string, unknown>
+      __sesameGeneratedRequests?: Array<Record<string, unknown>>
     }
     const runtime = chrome.runtime as unknown as { connectNative: unknown }
     const original = runtime.connectNative
     const previous = target.__sesameTestRestore
     target.__sesameSaveRequests = 0
     target.__sesameFillRequests = 0
-    delete target.__sesameLastSave
+    target.__sesameGeneratedRequests = []
     target.__sesameTestRestore = () => {
       runtime.connectNative = original
       delete target.__sesameSaveRequests
       delete target.__sesameFillRequests
-      delete target.__sesameLastSave
       previous?.()
     }
     runtime.connectNative = () => {
@@ -678,9 +684,17 @@ async function mockNativeHostInWorker(fillMatchKind: 'exact' | 'wwwAlias' | 'sit
                 type: 'identity',
                 identity,
               }))
+            } else if (request?.type === 'change' || request?.type === 'create' || request?.type === 'pending') {
+              target.__sesameGeneratedRequests?.push({ ...(request as Record<string, unknown>) })
+              const handle = 'fictional-handle-for-examples-only-AAAAAAAA'
+              const reply = request.type === 'change'
+                ? { type: 'changed', currentPassword: 'fictional-inline-pass', newPassword: 'fictional-desktop-pass-1', handle, matchKind: 'exact' }
+                : request.type === 'create'
+                  ? { type: 'created', password: 'fictional-desktop-pass-1', handle }
+                  : { type: 'pending-state', state: (request as { action?: string }).action === 'accepted' ? 'confirmed' : 'unconfirmed' }
+              messageListeners.forEach((listener) => listener({ ...base, ...reply }))
             } else if (request?.type === 'save') {
               target.__sesameSaveRequests = (target.__sesameSaveRequests ?? 0) + 1
-              target.__sesameLastSave = request
               messageListeners.forEach((listener) => listener({
                 ...base,
                 type: 'saved',
@@ -742,11 +756,30 @@ async function countNativeFills(): Promise<number> {
   })
 }
 
-async function lastNativeSave(): Promise<Record<string, unknown> | undefined> {
+async function generatedRequests(): Promise<Array<Record<string, unknown>>> {
   return worker.evaluate(() => {
-    const target = globalThis as typeof globalThis & { __sesameLastSave?: Record<string, unknown> }
-    return target.__sesameLastSave
+    const target = globalThis as typeof globalThis & { __sesameGeneratedRequests?: Array<Record<string, unknown>> }
+    return target.__sesameGeneratedRequests ?? []
   })
+}
+
+async function sessionStorageText(): Promise<string> {
+  return worker.evaluate(async () => JSON.stringify(await chrome.storage.session.get(null)))
+}
+
+async function restartWorker(page: Page): Promise<void> {
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('ServiceWorker.enable')
+  const stopped = worker
+  await cdp.send('ServiceWorker.stopAllWorkers')
+  await expect.poll(
+    async () => Promise.race([
+      stopped.evaluate(() => true).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), 500)),
+    ]),
+    { timeout: 10000 },
+  ).toBe(false)
+  await cdp.detach()
 }
 
 async function overrideWorkerTab(tabId: number, url: string): Promise<void> {
@@ -2372,7 +2405,7 @@ describe('extension browser suite', () => {
   }, 30000)
 
   it('creates a password at the format chosen from the inline control', async () => {
-    const current = await openFixture('/registration')
+    const current = await openFreshFixture('/registration')
     await current.evaluate(() => (document.getElementById('password') as HTMLInputElement).focus())
     await expect.poll(
       async () => current.evaluate(() => document.querySelector('[id^="sesame-overlay-"]') !== null),
@@ -2401,12 +2434,20 @@ describe('extension browser suite', () => {
       { timeout: 5000 },
     ).toBe('characters:32')
 
-    await waitForReleaseEnabled(current, 'Create password with Sesame')
-    await clickClosedShadowNode(current, 'BUTTON')
-    await expect.poll(
-      async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value.length),
-      { timeout: 10000 },
-    ).toBe(32)
+    const tabId = await findTabId(current.url())
+    await overrideWorkerTab(tabId, current.url())
+    await mockNativeHostInWorker()
+    try {
+      await waitForReleaseEnabled(current, 'Create password with Sesame')
+      await clickClosedShadowNode(current, 'BUTTON')
+      await expect.poll(
+        async () => current.evaluate(() => (document.getElementById('password') as HTMLInputElement).value),
+        { timeout: 10000 },
+      ).toBe('fictional-desktop-pass-1')
+      expect((await generatedRequests())[0]).toMatchObject({ type: 'create', style: 'characters', size: 32 })
+    } finally {
+      await restoreWorkerMocks()
+    }
     const values = await current.evaluate(() => ({
       password: (document.getElementById('password') as HTMLInputElement).value,
       confirm: (document.getElementById('confirm') as HTMLInputElement).value,
@@ -2423,17 +2464,18 @@ describe('extension browser suite', () => {
     const stored = await worker.evaluate(async () => chrome.storage.local.get(null))
     expect(JSON.stringify(stored)).not.toContain(values.password)
     expect(Object.keys(stored).filter((key) => key !== 'inlineSettingsV1')).toEqual([])
+    await current.close()
   }, 30000)
 
-  it('saves a registration only after the popup action', async () => {
+  it('creates a sign-up login in the desktop and confirms it after the worker restarts', async () => {
     const extensionId = new URL(worker.url()).host
-    const current = await openFixture('/registration')
+    const current = await openFreshFixture('/registration')
     const fixtureUrl = current.url()
     const tabId = await findTabId(fixtureUrl)
     expect(tabId).toBeGreaterThan(0)
     await overrideWorkerTab(tabId, fixtureUrl)
     await mockNativeHostInWorker()
-    const popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+    let popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
     try {
       await recheckPopup(popup)
       await expect.poll(
@@ -2442,25 +2484,62 @@ describe('extension browser suite', () => {
       ).toBe(true)
       await popup.getByRole('button', { name: 'Create password', exact: true }).click()
       await expect.poll(
-        async () => popup.getByRole('button', { name: 'Save this login', exact: true }).isVisible(),
+        async () => popup.getByRole('button', { name: 'The site accepted it', exact: true }).isVisible(),
         { timeout: 10000 },
       ).toBe(true)
+      expect(await current.evaluate(() => [...document.querySelectorAll<HTMLInputElement>('input[type="password"]')].map((input) => input.value)))
+        .toEqual(['fictional-desktop-pass-1', 'fictional-desktop-pass-1'])
+      const before = await generatedRequests()
+      expect(before.map((request) => request.type)).toEqual(['create', 'pending'])
+      expect(before.every((request) => !('password' in request))).toBe(true)
+      expect(before[1]).toMatchObject({ action: 'filled', handle: 'fictional-handle-for-examples-only-AAAAAAAA' })
+      expect(await sessionStorageText()).not.toContain('fictional-desktop-pass-1')
+      expect(JSON.stringify(await worker.evaluate(async () => chrome.storage.local.get(null)))).not.toContain('fictional-desktop-pass-1')
       expect(await countNativeSaves()).toBe(0)
-      await popup.getByRole('button', { name: 'Save this login', exact: true }).click()
+      await popup.close()
+
+      const stoppedWorker = worker
+      await restartWorker(current)
+      popup = await openReadyPopup(extensionId, tabId, fixtureUrl)
+      const answering = async () => {
+        for (const candidate of context.serviceWorkers()) {
+          if (!candidate.url().includes(extensionId)) continue
+          const alive = await Promise.race([
+            candidate.evaluate(() => true).catch(() => false),
+            new Promise((resolve) => setTimeout(() => resolve(false), 500)),
+          ])
+          if (alive === true) return candidate
+        }
+        return undefined
+      }
+      await expect.poll(async () => (await answering()) !== undefined, { timeout: 15000 }).toBe(true)
+      worker = (await answering()) ?? stoppedWorker
+      await overrideWorkerTab(tabId, fixtureUrl)
+      await mockNativeHostInWorker()
+      await recheckPopup(popup)
+      await expect.poll(
+        async () => popup.getByRole('button', { name: 'The site accepted it', exact: true }).isVisible(),
+        { timeout: 10000 },
+      ).toBe(true)
+      await popup.getByRole('button', { name: 'The site accepted it', exact: true }).click()
       await expect.poll(
         async () => popup.evaluate(() => document.body.innerText),
         { timeout: 15000 },
-      ).toMatch(/Login saved in Sesame/)
-      expect(await countNativeSaves()).toBe(1)
+      ).toMatch(/Sesame kept the new login/)
+      const after = await generatedRequests()
+      expect(after).toHaveLength(1)
+      expect(after[0]).toMatchObject({ type: 'pending', action: 'accepted', origin: primaryOrigin, handle: 'fictional-handle-for-examples-only-AAAAAAAA' })
+      expect('password' in after[0]).toBe(false)
     } finally {
       if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()
+      if (!current.isClosed()) await current.close()
     }
-  }, 30000)
+  }, 60000)
 
-  it('fills a password-change form and saves the generated password after the form clears', async () => {
+  it('fills a password-change form with the desktop password and keeps only a handle', async () => {
     const extensionId = new URL(worker.url()).host
-    const current = await openFixture('/password-change')
+    const current = await openFreshFixture('/password-change')
     const fixtureUrl = current.url()
     const tabId = await findTabId(fixtureUrl)
     expect(tabId).toBeGreaterThan(0)
@@ -2474,8 +2553,6 @@ describe('extension browser suite', () => {
         { timeout: 10000 },
       ).toBe(true)
       await popup.getByRole('button', { name: 'Change password', exact: true }).click()
-      const generated = await popup.locator('.generated-password code').innerText()
-      expect(generated.length).toBeGreaterThanOrEqual(16)
       await expect.poll(
         async () => current.evaluate(() => ({
           current: (document.getElementById('current') as HTMLInputElement).value,
@@ -2483,32 +2560,25 @@ describe('extension browser suite', () => {
           confirm: (document.getElementById('confirm') as HTMLInputElement).value,
         })),
         { timeout: 15000 },
-      ).toEqual({ current: 'fictional-inline-pass', next: generated, confirm: generated })
-      await current.evaluate(() => {
-        document.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach((input) => { input.value = '' })
-      })
-      await current.goto(`${primaryOrigin}/password-changed`)
-      await popup.getByRole('button', { name: 'Save this login', exact: true }).click()
-      await expect.poll(
-        async () => popup.evaluate(() => document.body.innerText),
-        { timeout: 15000 },
-      ).toMatch(/Login saved in Sesame/)
-      expect(await countNativeSaves()).toBe(1)
-      expect(await lastNativeSave()).toMatchObject({
-        type: 'save',
-        kind: 'update',
-        origin: primaryOrigin,
-        password: generated,
-      })
+      ).toEqual({ current: 'fictional-inline-pass', next: 'fictional-desktop-pass-1', confirm: 'fictional-desktop-pass-1' })
+      expect(await popup.locator('code').count()).toBe(0)
+      expect(await popup.evaluate(() => document.body.innerText)).not.toContain('fictional-desktop-pass-1')
+      expect(await sessionStorageText()).not.toMatch(/fictional-(desktop|inline)-pass/)
+      const requests = await generatedRequests()
+      expect(requests.map((request) => `${request.type}:${String(request.action ?? '')}`)).toEqual(['change:', 'pending:filled'])
+      expect(requests.every((request) => !('password' in request))).toBe(true)
+      expect(await countNativeFills()).toBe(0)
+      expect(await countNativeSaves()).toBe(0)
     } finally {
       if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()
+      if (!current.isClosed()) await current.close()
     }
   }, 30000)
 
   it('does not read or save when the registration form is submitted', async () => {
     const extensionId = new URL(worker.url()).host
-    const current = await openFixture('/registration')
+    const current = await openFreshFixture('/registration')
     const fixtureUrl = current.url()
     const tabId = await findTabId(fixtureUrl)
     expect(tabId).toBeGreaterThan(0)
@@ -2523,7 +2593,7 @@ describe('extension browser suite', () => {
       ).toBe(true)
       await popup.getByRole('button', { name: 'Create password', exact: true }).click()
       await expect.poll(
-        async () => popup.getByRole('button', { name: 'Save this login', exact: true }).isVisible(),
+        async () => popup.getByRole('button', { name: 'The site accepted it', exact: true }).isVisible(),
         { timeout: 10000 },
       ).toBe(true)
       await current.evaluate(() => (document.getElementById('signup-form') as HTMLFormElement).requestSubmit())
@@ -2533,9 +2603,11 @@ describe('extension browser suite', () => {
       ).toBe('/signup')
       await new Promise((resolve) => setTimeout(resolve, 500))
       expect(await countNativeSaves()).toBe(0)
+      expect((await generatedRequests()).filter((request) => request.action === 'accepted')).toEqual([])
     } finally {
       if (!popup.isClosed()) await popup.close()
       await restoreWorkerMocks()
+      if (!current.isClosed()) await current.close()
     }
   }, 30000)
 
@@ -2563,22 +2635,32 @@ describe('extension browser suite', () => {
     }
   }, 30000)
 
-  it('refuses a held save from a page context', async () => {
+  it('refuses pending password actions from a page context', async () => {
     const fresh = await context.newPage()
     try {
       await fresh.goto(`${primaryOrigin}/password-change`)
       await injectBridge(fresh)
       const tabId = await findTabId(fresh.url())
       expect(tabId).toBeGreaterThan(0)
-      const response = await worker.evaluate(async ({ tabId: expectedTabId }) => {
+      await worker.evaluate(async ({ tabId: expectedTabId, origin }) => {
+        await chrome.storage.session.set({ [`sesame:pending:${expectedTabId}`]: { handle: 'fictional-handle-for-examples-only-AAAAAAAA', origin, kind: 'change', createdAt: Date.now() } })
+      }, { tabId, origin: primaryOrigin })
+      const responses = await worker.evaluate(async ({ tabId: expectedTabId }) => {
         const [injection] = await chrome.scripting.executeScript({
           target: { tabId: expectedTabId },
-          func: (tab) => chrome.runtime.sendMessage({ type: 'sesame:save-held', tabId: tab }),
+          func: async (tab) => [
+            await chrome.runtime.sendMessage({ type: 'sesame:pending-state', tabId: tab }),
+            await chrome.runtime.sendMessage({ type: 'sesame:pending-accept', tabId: tab }),
+            await chrome.runtime.sendMessage({ type: 'sesame:save-held', tabId: tab }).catch(() => null),
+          ],
           args: [expectedTabId],
         })
         return injection?.result ?? null
       }, { tabId })
-      expect(response).toEqual({ ok: false, code: 'save-not-armed' })
+      expect(responses).toEqual([{ pending: null }, { code: 'pending-not-found' }, null])
+      const readable = await fresh.evaluate(() => typeof (globalThis as { chrome?: { storage?: unknown } }).chrome?.storage)
+      expect(readable).toBe('undefined')
+      await worker.evaluate(async ({ tabId: expectedTabId }) => chrome.storage.session.remove(`sesame:pending:${expectedTabId}`), { tabId })
     } finally {
       if (!fresh.isClosed()) await fresh.close()
     }
@@ -2587,7 +2669,7 @@ describe('extension browser suite', () => {
   it('refuses to arm a save session from a page context', async () => {
     const fresh = await context.newPage()
     try {
-      await fresh.goto(`${primaryOrigin}/registration`)
+      await fresh.goto(`${primaryOrigin}/registration?arm-check=${Date.now()}`)
       await injectBridge(fresh)
       const tabId = await findTabId(fresh.url())
       expect(tabId).toBeGreaterThan(0)
@@ -2608,7 +2690,7 @@ describe('extension browser suite', () => {
         })
         return injection?.result ?? null
       }, { tabId })
-      expect(state).toEqual({ armed: false, held: false })
+      expect(state).toEqual({ armed: false })
     } finally {
       if (!fresh.isClosed()) await fresh.close()
     }

@@ -22,21 +22,17 @@ import {
   eventTargetInput,
 } from './input-scan'
 import {
-  fillRegistrationSurface,
   inspectPasswordSurface,
   classifyPasswordFields,
-  makeRegistrationPassword,
   visiblePasswordFields,
   type PasswordSurfaceKind,
-  type RegistrationPasswordOptions,
 } from './registration'
-import { copyTemporarily, type TemporaryCopyHandle } from './temporary-copy'
 import {
   RELEASE_BLOCKED_MESSAGE,
   RELEASE_UNSUPPORTED_MESSAGE,
   createReleaseGate,
 } from './release-gate'
-import type { CardFieldKey, IdentityFieldKey } from '../protocol/native'
+import { DEFAULT_PASSWORD_STYLE, type CardFieldKey, type IdentityFieldKey, type PasswordStyle } from '../protocol/native'
 
 // Static stylesheet set via textContent, never parsed as markup.
 const OVERLAY_CSS = `
@@ -56,9 +52,6 @@ const OVERLAY_CSS = `
         .fill:hover{background:var(--accent-hover)}
         .fill:active:not(:disabled){transform:scale(.97);background:var(--accent-active);box-shadow:var(--button-shadow-pressed)}
         .fill:disabled{opacity:.5;cursor:default}
-        .copy{border:0;border-radius:var(--radius-sm);padding:6px 10px;
-          background:var(--button-secondary-bg);color:var(--text-heading);
-          cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.copy[hidden]{display:none}
         .choice{border:0;border-radius:var(--radius-sm);padding:5px 10px;
           background:var(--button-secondary-bg);color:var(--text-heading);cursor:pointer;
           font-family:inherit;font-size:var(--type-2)}.choice[hidden]{display:none}
@@ -72,8 +65,8 @@ const OVERLAY_CSS = `
           background:var(--button-secondary-bg);color:var(--text-heading);
           cursor:pointer;font-size:var(--type-2);font-weight:var(--weight-medium);white-space:nowrap}.code[hidden]{display:none}
         .code:disabled{opacity:.5;cursor:default}
-        .copy:hover,.identity:hover:not(:disabled),.choice:hover:not(:disabled),.code:hover:not(:disabled){background:var(--button-secondary-hover-bg)}
-        .copy:active,.identity:active:not(:disabled),.choice:active:not(:disabled),.code:active:not(:disabled){transform:scale(.97)}
+        .identity:hover:not(:disabled),.choice:hover:not(:disabled),.code:hover:not(:disabled){background:var(--button-secondary-hover-bg)}
+        .identity:active:not(:disabled),.choice:active:not(:disabled),.code:active:not(:disabled){transform:scale(.97)}
         .status{max-width:220px;color:var(--text-muted);font-size:var(--type-2);line-height:1.3}
         .card button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
         .close{border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:var(--type-3);line-height:1;display:inline-grid;place-items:center;width:24px;height:24px;padding:0}`
@@ -85,10 +78,10 @@ export interface OverlayOptions {
   onFillIdentityRequest(): Promise<unknown> | unknown
   onFillCardRequest(): Promise<unknown> | unknown
   onFillOneTimeCodeRequest(): Promise<unknown> | unknown
+  onCreatePasswordRequest?(style: PasswordStyle): Promise<unknown> | unknown
 }
 
 const CAPABILITY_TTL_MS = 15_000
-const GENERATED_PASSWORD_TTL_MS = 120_000
 const MAX_OBSERVED_SHADOW_ROOTS = 64
 
 export const REGISTRATION_CHOICES = [
@@ -101,11 +94,11 @@ export const REGISTRATION_CHOICES = [
   ['passphrase:7', '7-word passphrase'],
 ] as const
 
-export function registrationChoiceOptions(value: string): RegistrationPasswordOptions {
+export function registrationChoiceStyle(value: string): PasswordStyle {
   const passphrase = /^passphrase:(\d+)$/.exec(value)
-  if (passphrase) return { mode: 'passphrase', words: Number(passphrase[1]) }
+  if (passphrase) return { style: 'passphrase', size: Number(passphrase[1]) }
   const characters = /^characters:(\d+)$/.exec(value)
-  return characters ? { mode: 'characters', length: Number(characters[1]) } : {}
+  return characters ? { style: 'characters', size: Number(characters[1]) } : DEFAULT_PASSWORD_STYLE
 }
 
 export type OverlayKind = 'login' | 'username' | 'registration' | 'identity' | 'card' | 'code'
@@ -220,7 +213,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let stopped = false
   let host: HTMLDivElement | null = null
   let button: HTMLButtonElement | null = null
-  let copyButton: HTMLButtonElement | null = null
   let identityButton: HTMLButtonElement | null = null
   let status: HTMLSpanElement | null = null
   let anchorField: HTMLInputElement | null = null
@@ -240,9 +232,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
   let filling = false
   let capability: unknown
   let capabilityAt = 0
-  let registrationPassword = ''
-  let copyHandle: TemporaryCopyHandle | undefined
-  let expiryTimer: ReturnType<typeof setTimeout> | undefined
   let hideTimer: ReturnType<typeof setTimeout> | undefined
   let connectionRefreshTimer: ReturnType<typeof setTimeout> | undefined
   const releaseGate = createReleaseGate(renderState)
@@ -311,12 +300,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     codeFill.hidden = true
     codeFill.textContent = 'Fill code'
 
-    const copy = document.createElement('button')
-    copy.className = 'copy'
-    copy.type = 'button'
-    copy.hidden = true
-    copy.textContent = 'Copy password'
-
     const generate = document.createElement('select')
     generate.className = 'choice'
     generate.hidden = true
@@ -340,14 +323,13 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     close.setAttribute('aria-label', 'Dismiss')
     close.textContent = '×'
 
-    card.append(mark, fill, identityFill, cardFill, codeFill, copy, generate, statusNode, close)
+    card.append(mark, fill, identityFill, cardFill, codeFill, generate, statusNode, close)
     shadow.append(card)
 
     button = fill
     identityButton = identityFill
     cardButton = cardFill
     codeButton = codeFill
-    copyButton = copy
     choice = generate
     status = statusNode
     statusPresenter = (text) => { statusNode.textContent = text }
@@ -357,7 +339,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     identityFill.addEventListener('click', onFillIdentityClick)
     cardFill.addEventListener('click', onFillCardClick)
     codeFill.addEventListener('click', onFillCodeClick)
-    copy.addEventListener('click', onCopyPassword)
     generate.addEventListener('change', onChoiceChange)
     close.addEventListener('click', dismiss)
     document.documentElement.append(host)
@@ -386,7 +367,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     registrationMode = plan.kind === 'registration'
     identityFieldsAvailable = plan.identityFields
     if (status) status.textContent = ''
-    if (copyButton && !registrationPassword) copyButton.hidden = true
     if (host) {
       host.style.display = 'block'
     }
@@ -448,7 +428,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
         identityButton.className = 'identity'
         identityButton.hidden = true
       }
-      if (copyButton) copyButton.hidden = true
       if (choice) choice.hidden = true
       return
     }
@@ -456,7 +435,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       button.hidden = true
       button.disabled = filling || blocked
       if (choice) choice.hidden = true
-      if (copyButton) copyButton.hidden = true
       if (identityButton) {
         identityButton.className = 'fill'
         identityButton.hidden = false
@@ -476,7 +454,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       identityButton.disabled = filling || blocked
       identityButton.textContent = filling ? 'Filling…' : 'Fill identity'
     }
-    if (copyButton) copyButton.disabled = blocked
     if (filling) {
       button.textContent = registrationMode ? 'Creating…' : 'Filling…'
       button.disabled = true
@@ -537,24 +514,8 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     if (status) status.textContent = ''
     try {
       if (registrationMode) {
-        copyHandle?.cancel()
-        if (expiryTimer !== undefined) clearTimeout(expiryTimer)
-        registrationPassword = makeRegistrationPassword(registrationChoiceOptions(choiceValue))
-        const outcome = fillRegistrationSurface(location.origin, registrationPassword)
-        if (!outcome.ok) {
-          registrationPassword = ''
-          if (copyButton) copyButton.hidden = true
-          if (status) status.textContent = registrationMessage(outcome.code)
-        } else {
-          if (copyButton) {
-            copyButton.hidden = false
-            copyButton.textContent = 'Copy password'
-          }
-          if (status)
-            status.textContent =
-              outcome.fieldsFilled > 1 ? 'Password and confirmation filled.' : 'Password filled.'
-          expiryTimer = setTimeout(clearRegistrationPassword, GENERATED_PASSWORD_TTL_MS)
-        }
+        const result = await options.onCreatePasswordRequest?.(registrationChoiceStyle(choiceValue))
+        if (status) status.textContent = createMessage(result)
       } else {
         if (!capability) await refreshCapability(true)
         const connectionState = recordString(capability, 'state')
@@ -646,34 +607,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
       filling = false
       renderState()
     }
-  }
-
-  async function onCopyPassword(event: MouseEvent) {
-    if (!registrationPassword || !copyButton) return
-    if (await refuseRelease(event)) return
-    if (!registrationPassword || !copyButton) return
-    try {
-      copyHandle?.cancel()
-      copyHandle = await copyTemporarily(registrationPassword, {
-        onExpired: () => {
-          if (copyButton) copyButton.textContent = 'Copy password'
-        },
-        onClearFailed: () => {
-          if (copyButton) copyButton.textContent = 'Copy password'
-          if (status) status.textContent = 'Sesame could not clear the clipboard. Clear it yourself.'
-        },
-      })
-      copyButton.textContent = 'Copied'
-      if (status) status.textContent = 'Copied temporarily. Save the login in Sesame after sign-up.'
-    } catch {
-      if (status) status.textContent = 'The password is filled, but clipboard access was blocked.'
-    }
-  }
-
-  function clearRegistrationPassword() {
-    registrationPassword = ''
-    expiryTimer = undefined
-    if (copyButton) copyButton.hidden = true
   }
 
   function refreshFocusedField() {
@@ -781,10 +714,7 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     window.removeEventListener('resize', positionOverlay)
     window.removeEventListener('scroll', positionOverlay, true)
     if (hideTimer !== undefined) clearTimeout(hideTimer)
-    if (expiryTimer !== undefined) clearTimeout(expiryTimer)
     if (connectionRefreshTimer !== undefined) clearTimeout(connectionRefreshTimer)
-    void copyHandle?.clear()
-    registrationPassword = ''
     releaseGate.destroy()
     if ((globalThis as OverlayGlobal).sesameOverlayPresentStatus === statusPresenter) {
       ;(globalThis as OverlayGlobal).sesameOverlayPresentStatus = undefined
@@ -802,7 +732,6 @@ export function attachInlineButton(options: OverlayOptions): () => void {
     shownKind = null
     codeButton = null
     codeMode = false
-    copyButton = null
     choice = null
     status = null
     anchorField = null
@@ -976,9 +905,17 @@ export function identityFillMessage(result: unknown): string {
   return fillMessage(result)
 }
 
-function registrationMessage(code: string): string {
+export function createMessage(result: unknown): string {
+  if (isRecord(result) && result.ok === true) return 'Sesame saved a new login. Submit the form, then confirm in Sesame.'
+  const code = recordString(result, 'code')
   if (code === 'password-change-form') return 'Choose Change password in the Sesame popup for this form.'
   if (code === 'multiple-matches') return 'More than one form is visible. Sesame did not guess.'
+  if (code === 'pending-version-unsupported') return 'Update the Sesame desktop app to create passwords here.'
+  if (code === 'vault-locked') return 'Unlock Sesame, then try again.'
+  if (code === 'approval-declined' || code === 'cancelled') return 'Nothing was created.'
+  if (code === 'approval-timeout') return 'The approval expired. Try again.'
+  if (code === 'desktop-unavailable' || code === 'host-not-found') return 'Open Sesame, then try again.'
+  if (code === 'fill-in-progress') return 'Sesame is already busy. Try again in a moment.'
   return 'Sesame could not create a password for this form.'
 }
 

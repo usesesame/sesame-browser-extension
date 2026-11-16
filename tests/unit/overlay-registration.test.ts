@@ -4,9 +4,9 @@ import {
   attachInlineButton,
   overlayHost,
   REGISTRATION_CHOICES,
-  registrationChoiceOptions,
+  createMessage,
+  registrationChoiceStyle,
 } from '../../src/content/overlay'
-import { passphraseWordCounts } from './passphrase-words'
 import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
 
 function giveInputsLayout() {
@@ -62,6 +62,7 @@ function baseOptions() {
     onFillIdentityRequest: vi.fn(),
     onFillCardRequest: vi.fn(),
     onFillOneTimeCodeRequest: vi.fn(),
+    onCreatePasswordRequest: vi.fn().mockResolvedValue({ ok: true }),
   }
 }
 
@@ -104,24 +105,27 @@ describe('the registration password format choice', () => {
     detach()
   })
 
-  it('creates the chosen length when the control is used', async () => {
+  it('asks the desktop for the chosen length and writes nothing itself', async () => {
     const roots = captureShadow()
     renderRegistration()
-    const detach = attachInlineButton(baseOptions())
+    const options = baseOptions()
+    const detach = attachInlineButton(options)
     focusFirstInput()
 
     await armRelease(roots, 'Create password with Sesame')
     trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
-    await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(20))
-    expect(passwordFields()[1].value).toBe(passwordFields()[0].value)
+    await vi.waitFor(() => expect(options.onCreatePasswordRequest).toHaveBeenCalledWith({ style: 'characters', size: 20 }))
+    expect(passwordFields().every((field) => field.value === '')).toBe(true)
+    expect(roots.flatMap((root) => [...root.querySelectorAll('button')]).some((button) => /copy/i.test(button.textContent ?? ''))).toBe(false)
     detach()
   })
 
-  it('creates a passphrase when that format is chosen', async () => {
+  it('asks the desktop for a passphrase when that format is chosen', async () => {
     const roots = captureShadow()
     renderRegistration()
-    const detach = attachInlineButton(baseOptions())
+    const options = baseOptions()
+    const detach = attachInlineButton(options)
     focusFirstInput()
 
     const select = selectIn(roots)
@@ -130,7 +134,24 @@ describe('the registration password format choice', () => {
     await armRelease(roots, 'Create password with Sesame')
     trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
-    await vi.waitFor(() => expect(passphraseWordCounts(passwordFields()[0].value)).toContain(5))
+    await vi.waitFor(() => expect(options.onCreatePasswordRequest).toHaveBeenCalledWith({ style: 'passphrase', size: 5 }))
+    detach()
+  })
+
+  it('tells the person to update an older desktop and fills nothing', async () => {
+    const roots = captureShadow()
+    renderRegistration()
+    const options = baseOptions()
+    options.onCreatePasswordRequest.mockResolvedValue({ ok: false, code: 'pending-version-unsupported' })
+    const detach = attachInlineButton(options)
+    focusFirstInput()
+
+    await armRelease(roots, 'Create password with Sesame')
+    trustedClick(buttonIn(roots, 'Create password with Sesame'))
+
+    await vi.waitFor(() => expect(roots.flatMap((root) => [...root.querySelectorAll('.status')]).map((node) => node.textContent))
+      .toContain('Update the Sesame desktop app to create passwords here.'))
+    expect(passwordFields().every((field) => field.value === '')).toBe(true)
     detach()
   })
 
@@ -139,7 +160,8 @@ describe('the registration password format choice', () => {
     vi.stubGlobal('chrome', { storage })
     const roots = captureShadow()
     renderRegistration()
-    const detach = attachInlineButton(baseOptions())
+    const options = baseOptions()
+    const detach = attachInlineButton(options)
     focusFirstInput()
 
     const select = selectIn(roots)
@@ -148,25 +170,35 @@ describe('the registration password format choice', () => {
     await armRelease(roots, 'Create password with Sesame')
     trustedClick(buttonIn(roots, 'Create password with Sesame'))
 
-    await vi.waitFor(() => expect(passwordFields()[0].value).toHaveLength(32))
+    await vi.waitFor(() => expect(options.onCreatePasswordRequest).toHaveBeenCalledWith({ style: 'characters', size: 32 }))
     expect(storage.local.set).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
     detach()
   })
 })
 
-describe('registrationChoiceOptions', () => {
-  it('maps every offered value to a generator option', () => {
-    expect(registrationChoiceOptions('characters:16')).toEqual({ mode: 'characters', length: 16 })
-    expect(registrationChoiceOptions('characters:20')).toEqual({ mode: 'characters', length: 20 })
-    expect(registrationChoiceOptions('characters:24')).toEqual({ mode: 'characters', length: 24 })
-    expect(registrationChoiceOptions('characters:32')).toEqual({ mode: 'characters', length: 32 })
-    expect(registrationChoiceOptions('passphrase:5')).toEqual({ mode: 'passphrase', words: 5 })
-    expect(registrationChoiceOptions('passphrase:6')).toEqual({ mode: 'passphrase', words: 6 })
-    expect(registrationChoiceOptions('passphrase:7')).toEqual({ mode: 'passphrase', words: 7 })
+describe('registrationChoiceStyle', () => {
+  it('maps every offered value to a desktop password style', () => {
+    expect(registrationChoiceStyle('characters:16')).toEqual({ style: 'characters', size: 16 })
+    expect(registrationChoiceStyle('characters:20')).toEqual({ style: 'characters', size: 20 })
+    expect(registrationChoiceStyle('characters:24')).toEqual({ style: 'characters', size: 24 })
+    expect(registrationChoiceStyle('characters:32')).toEqual({ style: 'characters', size: 32 })
+    expect(registrationChoiceStyle('passphrase:5')).toEqual({ style: 'passphrase', size: 5 })
+    expect(registrationChoiceStyle('passphrase:6')).toEqual({ style: 'passphrase', size: 6 })
+    expect(registrationChoiceStyle('passphrase:7')).toEqual({ style: 'passphrase', size: 7 })
   })
 
-  it('falls back to the default format for an unknown value', () => {
-    expect(registrationChoiceOptions('unknown')).toEqual({})
+  it('falls back to the default style for an unknown value', () => {
+    expect(registrationChoiceStyle('unknown')).toEqual({ style: 'characters', size: 20 })
+  })
+})
+
+describe('createMessage', () => {
+  it('answers every outcome in a short plain sentence', () => {
+    for (const result of [{ ok: true }, { ok: false, code: 'vault-locked' }, { ok: false, code: 'approval-declined' }, { ok: false, code: 'other' }, undefined]) {
+      const text = createMessage(result)
+      expect(text).not.toMatch(/[—–()]/)
+      expect(text.endsWith('.')).toBe(true)
+    }
   })
 })

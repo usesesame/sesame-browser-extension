@@ -17,7 +17,7 @@ desktop app, and the native messaging host are not part of it.
 
 The desktop owns the protocol because it owns the host. This repository keeps
 tagged, digest-bound copies under `contracts/browser/v1/` through
-`contracts/browser/v7/`. Editing the TypeScript types without first landing a
+`contracts/browser/v8/`. Editing the TypeScript types without first landing a
 matching tagged contract is a bug rather than a protocol change.
 
 ## Your first change
@@ -56,8 +56,9 @@ are in `eslint.config.js`, each with its reason next to it. In short:
 
 - Credentials live in the active call stack only. Nothing credential-shaped is
   written to `chrome.storage`, a badge, a diagnostic, a console, or an error
-  message. `chrome.storage` holds inline-control preferences and nothing else;
-  the eslint config's `no-restricted-globals` rule keeps page-origin storage
+  message. `chrome.storage.local` holds inline-control preferences and nothing
+  else. `chrome.storage.session` holds only pending-change handles, which
+  release no secret. The eslint config's `no-restricted-globals` rule keeps page-origin storage
   out of the extension for the same reason.
 - No markup parsing and no runtime code construction in a content script. Build
   nodes.

@@ -10,12 +10,26 @@ import { createLastFillTracker } from './last-fill'
 import { createPopupResultRelay } from './popup-result'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
+import { createPendingStore } from './pending-passwords'
+import { createGeneratedPasswords, safePasswordStyle } from './generated-passwords'
 import type { FillContext } from './fill-state'
 import { createMissedResultNotice } from './missed-result'
 
 const coordinator = createCoordinator(chromeBrowser)
 const saveSession = createSaveSessionController()
 const lastFill = createLastFillTracker()
+const pendingStore = createPendingStore(chrome.storage.session)
+const generatedPasswords = createGeneratedPasswords({
+  coordinator,
+  store: pendingStore,
+  browser: chromeBrowser,
+  tabOrigin: async (tabId) => fillPageOrigin((await chrome.tabs.get(tabId)).url),
+  captureUsername: async (tabId) => {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] })
+    const [injection] = await chrome.scripting.executeScript({ target: { tabId }, func: captureSignupUsernameInPage })
+    return typeof injection?.result === 'string' ? injection.result : ''
+  },
+})
 const CONNECTION_CACHE_MS = 4_000
 let cachedConnection: { checkedAt: number; value: Awaited<ReturnType<typeof coordinator.checkConnection>> } | undefined
 let connectionCheck: Promise<Awaited<ReturnType<typeof coordinator.checkConnection>>> | undefined
@@ -115,6 +129,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 })
 chrome.tabs.onRemoved.addListener((tabId) => {
   saveSession.handleTabRemoved(tabId)
+  void pendingStore.forget(tabId)
   lastFill.clear(tabId)
   coordinator.cancelActive(tabId)
   missedResults.forget(tabId)
@@ -159,27 +174,29 @@ chrome.runtime.onConnect.addListener((port) => {
     })
     return
   }
-  if (port.name === 'sesame:change-password') {
+  if (port.name === 'sesame:change-password' || port.name === 'sesame:create-password') {
     let started = false
     port.onMessage.addListener((message) => {
       if (started || message?.type !== 'start') return
       started = true
-      const newPassword = typeof message?.newPassword === 'string' ? message.newPassword : ''
-      if (newPassword.length < 16 || newPassword.length > 128) {
+      const style = safePasswordStyle(message)
+      if (!style) {
         try { port.postMessage({ state: 'unavailable', code: 'password-change-fill-failed' }) } catch { /* noop */ }
         return
       }
       const deliver = popupResultRelay(port)
-      coordinator.changePasswordActivePage(newPassword).then((result) => {
-        if (result.ok) {
-          saveSession.arm(result.tabId, result.origin, { username: result.username, password: newPassword })
-          void deliver({ state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled })
-        } else {
-          const failed: PublicFillResult = result.lookalike === undefined
-            ? { state: 'unavailable', code: result.code }
-            : { state: 'unavailable', code: result.code, lookalike: result.lookalike }
-          void deliver({ state: 'unavailable', code: result.code, lookalike: result.lookalike }, failed)
-        }
+      const run = port.name === 'sesame:change-password'
+        ? generatedPasswords.change(style).then((result) => result.ok
+          ? { state: 'changed', currentFilled: result.currentFilled, newFilled: result.newFilled }
+          : { state: 'unavailable', code: result.code, lookalike: result.lookalike })
+        : generatedPasswords.create(style).then((result) => result.ok
+          ? { state: 'created', fieldsFilled: result.fieldsFilled }
+          : { state: 'unavailable', code: result.code })
+      run.then((outcome) => {
+        const page: PublicFillResult | undefined = outcome.state === 'unavailable'
+          ? { state: 'unavailable', code: outcome.code as string }
+          : undefined
+        void deliver(outcome, page)
       }).catch(() => {
         const failed: PublicFillResult = { state: 'unavailable', code: 'fill-failed' }
         void deliver(failed, failed)
@@ -278,6 +295,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }))
     return true
   }
+  if (message?.type === 'sesame:create-password') {
+    const style = safePasswordStyle(message)
+    if (fromExtensionPage || sender.frameId !== 0 || !style) {
+      sendResponse({ ok: false, code: 'invalid-request' })
+      return false
+    }
+    generatedPasswords.create(style)
+      .then((result) => sendResponse(result.ok ? { ok: true } : { ok: false, code: result.code }))
+      .catch(() => sendResponse({ ok: false, code: 'fill-failed' }))
+    return true
+  }
+  if (message?.type === 'sesame:pending-state' || message?.type === 'sesame:pending-accept') {
+    const tabId = message?.tabId
+    if (sender.url !== chrome.runtime.getURL('popup.html') || typeof tabId !== 'number' || !Number.isInteger(tabId)) {
+      sendResponse(message?.type === 'sesame:pending-state' ? { pending: null } : { code: 'pending-not-found' })
+      return false
+    }
+    if (message.type === 'sesame:pending-state') {
+      generatedPasswords.pending(tabId)
+        .then((pending) => sendResponse({ pending }))
+        .catch(() => sendResponse({ pending: null }))
+    } else {
+      generatedPasswords.accept(tabId)
+        .then(sendResponse)
+        .catch(() => sendResponse({ code: 'pending-failed' }))
+    }
+    return true
+  }
   if (message?.type === 'sesame:capture-signup') {
     const tabId = sender.tab?.id
     // Origin from the delivering frame, never the message.
@@ -309,26 +354,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'sesame:save-state') {
     const tabId = message?.tabId
     const validTab = typeof tabId === 'number' && Number.isInteger(tabId)
-    sendResponse({
-      armed: validTab ? saveSession.isArmed(tabId) : false,
-      held: validTab ? saveSession.hasHeldCapture(tabId) : false,
-    })
+    sendResponse({ armed: validTab ? saveSession.isArmed(tabId) : false })
     return false
-  }
-  if (message?.type === 'sesame:save-held') {
-    if (sender.url !== chrome.runtime.getURL('popup.html')) {
-      sendResponse({ ok: false, code: 'save-not-armed' })
-      return false
-    }
-    const tabId = message?.tabId
-    if (typeof tabId !== 'number' || !Number.isInteger(tabId)) {
-      sendResponse({ ok: false, code: 'save-not-armed' })
-      return false
-    }
-    saveSession.saveHeld(chromeBrowser, tabId)
-      .then(sendResponse)
-      .catch(() => sendResponse({ ok: false, code: 'save-failed' }))
-    return true
   }
   if (message?.type === 'sesame:last-fill-result') {
     if (sender.url !== chrome.runtime.getURL('popup.html')) {
@@ -403,6 +430,11 @@ function safeSenderOrigin(value: string | undefined): string | null {
   } catch {
     return null
   }
+}
+
+function captureSignupUsernameInPage(): unknown {
+  const capture = (globalThis as typeof globalThis & { sesameCaptureSignupUsername?: () => unknown }).sesameCaptureSignupUsername
+  return typeof capture === 'function' ? capture() : ''
 }
 
 function detachInlineOverlay() {

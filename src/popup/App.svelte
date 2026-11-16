@@ -4,13 +4,12 @@
     popupState, setChecking, setUnavailable, setDesktopOffline, setReady,
     setHostname, setPageDiagnostic,
   } from './states/store'
-  import { makeRegistrationPassword, normalizeRegistrationOutcome } from '../content/registration'
-  import { copyTemporarily, type TemporaryCopyHandle } from '../content/temporary-copy'
   import type { OneTimeCodeKind } from '../content/one-time-code'
   import { fillMatchExplanation } from '../shared/fill-match'
   import { lookalikeWarningForResult } from '../shared/lookalike-warning'
   import { oneTimeCodeSecondsMessage } from '../shared/one-time-code-copy'
-  import { normalizeFillOrigin } from '../protocol/native'
+  import { DEFAULT_PASSWORD_STYLE, normalizeFillOrigin } from '../protocol/native'
+  import { GENERATED_MESSAGES, acceptMessage, generatedMessage, type PendingKindView } from './generated-messages'
   import { pageSurfaceView, type PageKind } from './page-surfaces'
   import {
     CHECKING_PRESENTATION, CONNECTION_RESPONSE_TIMEOUT_MS, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
@@ -26,7 +25,6 @@
 
   const RECONNECT_DELAY_MS = 4_000
   const POPUP_RESPONSE_TIMEOUT_MS = CONNECTION_RESPONSE_TIMEOUT_MS
-  const REGISTRATION_EXPIRY_MS = 120_000
   const PAGE_CHECK_TIMEOUT_MS = 6_000
 
   const FILL_MESSAGES: Record<string, string> = {
@@ -136,30 +134,19 @@
   let fillWorking = false
   let desktopOpening = false
   let fillFeedback = ''
-  let generatedPassword = ''
   let registrationWorking = false
   let changeWorking = false
-  let heldSave = false
   let saveArmed = false
   let saveWorking = false
   let saveFeedback = ''
-  let copiedPassword = false
-  let generatedExpiryTimer: ReturnType<typeof setTimeout> | null = null
-  let copyHandle: TemporaryCopyHandle | null = null
-
-  function releaseCopiedPassword() {
-    void copyHandle?.clear()
-  }
+  let pendingKind: PendingKindView = null
+  let pendingWorking = false
+  let pendingFeedback = ''
 
   onMount(() => {
     void refreshAll()
-    window.addEventListener('pagehide', releaseCopiedPassword)
     return () => {
-      window.removeEventListener('pagehide', releaseCopiedPassword)
       if (reconnectTimer) clearTimeout(reconnectTimer)
-      if (generatedExpiryTimer) clearTimeout(generatedExpiryTimer)
-      releaseCopiedPassword()
-      generatedPassword = ''
     }
   })
 
@@ -260,11 +247,11 @@
       }
       applyPageSurfaces(surfaces)
     }
-    const saveState = activeTabId === null ? { armed: false, held: false } : await querySaveState(activeTabId)
+    const saveState = activeTabId === null ? { armed: false } : await querySaveState(activeTabId)
     const saveSurface = page.kind === 'registration' || page.kind === 'password-change'
-    heldSave = saveState.held
-    saveArmed = saveState.held || (saveSurface && saveState.armed)
+    saveArmed = saveSurface && saveState.armed
     saveFeedback = ''
+    pendingKind = activeTabId === null ? null : await queryPending(activeTabId)
     setPageDiagnostic({
       code: page.code,
       hasUsernameField: page.hasUsernameField,
@@ -474,39 +461,32 @@
     }
   }
 
-  async function generateAndFillPassword() {
-    if (registrationWorking || activeTabId === null) return
+  function runGenerated(portName: 'sesame:create-password' | 'sesame:change-password'): Promise<any> {
+    const port = chrome.runtime.connect({ name: portName })
+    return new Promise<any>((resolve) => {
+      let settled = false
+      const finish = (value: any) => {
+        if (settled) return
+        settled = true
+        resolve(value)
+      }
+      port.onMessage.addListener((message) => { finish(message); port.disconnect() })
+      port.onDisconnect.addListener(() => finish({ state: 'unavailable', code: 'host-disconnected' }))
+      port.postMessage({ type: 'start', style: DEFAULT_PASSWORD_STYLE.style, size: DEFAULT_PASSWORD_STYLE.size })
+    })
+  }
+
+  async function createPassword() {
+    if (registrationWorking || activeTabId === null || desktopState !== 'ready') return
     registrationWorking = true
-    fillFeedback = 'Creating a strong password on this device…'
-    copyHandle?.cancel()
-    if (generatedExpiryTimer) clearTimeout(generatedExpiryTimer)
-    generatedPassword = makeRegistrationPassword()
-    copiedPassword = false
+    pendingFeedback = ''
+    fillFeedback = 'Waiting for approval in Sesame…'
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      const origin = normalizeFillOrigin(tab?.url ? new URL(tab.url).origin : undefined)
-      if (!Number.isInteger(tab?.id) || tab.id !== activeTabId || !origin) throw new Error('page changed')
-      await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content.js'] })
-      const [injection] = await chrome.scripting.executeScript({
-        target: { tabId: activeTabId },
-        func: invokeRegistrationFill,
-        args: [origin, generatedPassword],
-      })
-      const outcome = normalizeRegistrationOutcome(injection?.result)
-      if (!outcome.ok) throw new Error(outcome.code)
-      await armSave(activeTabId)
-      fillFeedback = outcome.fieldsFilled === 1
-        ? 'Password filled. Choose Save this login after the site accepts it.'
-        : 'Password and confirmation filled. Choose Save this login after the site accepts it.'
-      generatedExpiryTimer = setTimeout(clearGeneratedPassword, REGISTRATION_EXPIRY_MS)
-    } catch (error) {
-      const code = error instanceof Error ? error.message : ''
-      generatedPassword = ''
-      fillFeedback = code === 'password-change-form'
-        ? 'This is a password-change form, so Sesame did not fill it.'
-        : code === 'multiple-matches'
-          ? 'More than one registration form was found. Sesame did not guess.'
-          : 'Could not create a password for this form.'
+      const result = await runGenerated('sesame:create-password')
+      if (result?.state === 'created') pendingKind = 'new'
+      fillFeedback = generatedMessage(result)
+    } catch {
+      fillFeedback = generatedMessage(null)
     } finally {
       registrationWorking = false
     }
@@ -515,47 +495,42 @@
   async function changePassword() {
     if (changeWorking || activeTabId === null || desktopState !== 'ready' || !desktopFillAvailable) return
     changeWorking = true
-    fillFeedback = 'Creating a strong password on this device…'
-    copyHandle?.cancel()
-    if (generatedExpiryTimer) clearTimeout(generatedExpiryTimer)
-    generatedPassword = makeRegistrationPassword()
-    copiedPassword = false
+    pendingFeedback = ''
+    fillFeedback = 'Waiting for approval in Sesame…'
     try {
-      const port = chrome.runtime.connect({ name: 'sesame:change-password' })
-      const result = await new Promise<any>((resolve) => {
-        let settled = false
-        const finish = (value: any) => {
-          if (settled) return
-          settled = true
-          resolve(value)
-        }
-        port.onMessage.addListener((message) => { finish(message); port.disconnect() })
-        port.onDisconnect.addListener(() => finish({ state: 'unavailable', code: 'host-disconnected' }))
-        port.postMessage({ type: 'start', newPassword: generatedPassword })
-      })
-      if (result?.state === 'changed') {
-        heldSave = true
-        saveArmed = true
-        fillFeedback = 'Current and new password filled. Submit the form, then choose Save this login.'
-        generatedExpiryTimer = setTimeout(clearGeneratedPassword, REGISTRATION_EXPIRY_MS)
-      } else {
-        generatedPassword = ''
-        fillFeedback = lookalikeWarningForResult(result)
-          ?? FILL_MESSAGES[result?.code] ?? 'The change request could not be completed.'
-      }
+      const result = await runGenerated('sesame:change-password')
+      if (result?.state === 'changed') pendingKind = 'change'
+      fillFeedback = lookalikeWarningForResult(result) ?? generatedMessage(result)
     } catch {
-      generatedPassword = ''
-      fillFeedback = 'The change request could not be completed.'
+      fillFeedback = generatedMessage(null)
     } finally {
       changeWorking = false
     }
   }
 
-  function invokeRegistrationFill(origin: string, password: string): unknown {
-    const fillRegistration = (globalThis as typeof globalThis & { sesameFillRegistrationSurface?: (expectedOrigin: string, generated: string) => unknown }).sesameFillRegistrationSurface
-    return typeof fillRegistration === 'function'
-      ? fillRegistration(origin, password)
-      : { version: 1, ok: false, code: 'registration-fill-failed' }
+  async function queryPending(tabId: number): Promise<PendingKindView> {
+    try {
+      const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:pending-state', tabId }), 4_000)
+      return response?.pending === 'change' || response?.pending === 'new' ? response.pending : null
+    } catch {
+      return null
+    }
+  }
+
+  async function acceptPending() {
+    if (pendingWorking || activeTabId === null || pendingKind === null) return
+    pendingWorking = true
+    const kind = pendingKind
+    try {
+      const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:pending-accept', tabId: activeTabId }), POPUP_RESPONSE_TIMEOUT_MS)
+      pendingFeedback = acceptMessage(response, kind)
+      if (typeof response?.state === 'string' && response.state !== 'unconfirmed') pendingKind = null
+      if (response?.code === 'pending-not-found') pendingKind = null
+    } catch {
+      pendingFeedback = acceptMessage(null, kind)
+    } finally {
+      pendingWorking = false
+    }
   }
 
   function invokeSaveCurrentLogin(): unknown {
@@ -570,12 +545,12 @@
     return { ok: false, code: typeof record.code === 'string' ? record.code : 'save-failed' }
   }
 
-  async function querySaveState(tabId: number): Promise<{ armed: boolean; held: boolean }> {
+  async function querySaveState(tabId: number): Promise<{ armed: boolean }> {
     try {
       const response = await withTimeout(chrome.runtime.sendMessage({ type: 'sesame:save-state', tabId }), 4_000)
-      return { armed: response?.armed === true, held: response?.held === true }
+      return { armed: response?.armed === true }
     } catch {
-      return { armed: false, held: false }
+      return { armed: false }
     }
   }
 
@@ -596,16 +571,13 @@
   async function armSave(tabId: number) {
     if (!activeOrigin) {
       saveArmed = false
-      heldSave = false
       return
     }
     try {
       const response = await chrome.runtime.sendMessage({ type: 'sesame:arm-save', tabId, origin: activeOrigin })
-      heldSave = false
       saveArmed = response?.armed === true && (page.kind === 'registration' || page.kind === 'password-change')
     } catch {
       saveArmed = false
-      heldSave = false
     }
   }
 
@@ -614,20 +586,6 @@
     saveWorking = true
     saveFeedback = 'Waiting for approval in Sesame…'
     try {
-      if (heldSave) {
-        const response = await chrome.runtime.sendMessage({ type: 'sesame:save-held', tabId: activeTabId })
-        const outcome = normalizeSaveOutcome(response)
-        if (outcome.ok) {
-          saveArmed = false
-          heldSave = false
-          saveFeedback = 'Login saved in Sesame.'
-        } else {
-          saveFeedback = outcome.code === 'save-not-armed'
-            ? 'The change expired. Choose Change password again.'
-            : SAVE_MESSAGES[outcome.code] ?? 'Sesame could not save this login.'
-        }
-        return
-      }
       await chrome.scripting.executeScript({ target: { tabId: activeTabId }, files: ['content.js'] })
       const [injection] = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
@@ -645,30 +603,6 @@
     } finally {
       saveWorking = false
     }
-  }
-
-  async function copyGeneratedPassword() {
-    if (!generatedPassword) return
-    try {
-      copyHandle?.cancel()
-      copyHandle = await copyTemporarily(generatedPassword, {
-        onExpired: () => { copiedPassword = false },
-        onClearFailed: () => {
-          copiedPassword = false
-          fillFeedback = 'Sesame could not clear the clipboard. Clear it yourself.'
-        },
-      })
-      copiedPassword = true
-      fillFeedback = 'Copied temporarily. Choose Save this login after the site accepts it.'
-    } catch {
-      fillFeedback = 'Clipboard access is unavailable. The password remains filled in the form.'
-    }
-  }
-
-  function clearGeneratedPassword() {
-    generatedPassword = ''
-    copiedPassword = false
-    generatedExpiryTimer = null
   }
 
   function openSettings() {
@@ -702,9 +636,9 @@
     if (current.kind === 'checking') return { title: 'Checking this page', message: 'Looking only for visible sign-in fields.', badge: 'Checking', tone: 'neutral' as const }
     if (current.kind === 'restricted') return { title: 'Browser page', message: 'Sesame cannot fill on this page.', badge: 'Unavailable', tone: 'warning' as const }
     if (current.kind === 'unchecked') return { title: current.hostname || 'This page', message: 'Sesame could not finish checking this page. Choose the refresh button to check it again.', badge: 'Not checked', tone: 'warning' as const }
-    if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Sesame fills your current password and creates a new one. Save it after the site accepts it.', badge: 'Change form', tone: 'success' as const }
+    if (current.kind === 'password-change') return { title: current.hostname || 'This page', message: 'Sesame fills your current password and saves a new one in the desktop app.', badge: 'Change form', tone: 'success' as const }
     if (current.kind === 'ambiguous') return { title: current.hostname || 'This page', message: 'More than one password surface is visible. Sesame did not guess.', badge: 'Ambiguous', tone: 'warning' as const }
-    if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Create a strong password and fill its matching confirmation fields.', badge: 'Registration', tone: 'success' as const }
+    if (current.kind === 'registration') return { title: current.hostname || 'This page', message: 'Sesame makes a password in the desktop app and fills it here.', badge: 'Registration', tone: 'success' as const }
     if (current.kind === 'login') return { title: current.hostname || 'This page', message: current.hasUsernameField ? 'Username and password fields were found.' : 'A password field was found.', badge: 'Sign-in', tone: 'success' as const }
     if (current.kind === 'username') return { title: current.hostname || 'This page', message: 'A possible username field was found.', badge: 'Username', tone: 'neutral' as const }
     return { title: current.hostname || 'This page', message: 'No visible sign-in fields were found.', badge: 'No form', tone: 'neutral' as const }
@@ -752,14 +686,17 @@
     </section>
   {/if}
 
-  {#if page.kind === 'registration'}
-    <button class="generate-button" type="button" disabled={registrationWorking} on:click={generateAndFillPassword}>{registrationWorking ? 'Creating…' : 'Create password'}</button>
+  {#if pendingKind}
+    <section class="pending-password" aria-live="polite">
+      <p>{GENERATED_MESSAGES.waiting[pendingKind]}</p>
+      <button class="generate-button" type="button" disabled={pendingWorking} on:click={acceptPending}>{pendingWorking ? 'Telling Sesame…' : 'The site accepted it'}</button>
+    </section>
+  {:else if page.kind === 'registration'}
+    <button class="generate-button" type="button" disabled={registrationWorking || desktopState !== 'ready'} on:click={createPassword}>{registrationWorking ? 'Creating…' : 'Create password'}</button>
   {:else if page.kind === 'password-change'}
     <button class="generate-button" type="button" disabled={changeWorking || desktopState !== 'ready' || !desktopFillAvailable} on:click={changePassword}>{changeWorking ? 'Creating…' : 'Change password'}</button>
   {/if}
-  {#if generatedPassword && (page.kind === 'registration' || page.kind === 'password-change')}
-    <div class="generated-password"><code>{generatedPassword}</code><button type="button" on:click={copyGeneratedPassword}>{copiedPassword ? 'Copied' : 'Copy temporarily'}</button></div>
-  {/if}
+  {#if pendingFeedback}<p class="fill-feedback" role="status">{pendingFeedback}</p>{/if}
   {#if saveArmed}
     <FillButton onClick={saveLogin} loading={saveWorking} loadingLabel="Saving…" label="Save this login" secondary={page.kind === 'registration'} />
   {/if}
@@ -830,12 +767,9 @@
   .generate-button { width: 100%; min-height: var(--control-h-md); border: 1px solid transparent; border-radius: var(--control-radius); padding: 0 var(--control-px-md); color: var(--on-accent); background: var(--accent); font-weight: var(--control-weight); cursor: pointer; box-shadow: var(--button-shadow); transition: var(--control-transition); }
   .generate-button:hover:not(:disabled) { background: var(--accent-hover); }
   .generate-button:active:not(:disabled) { background: var(--accent-active); box-shadow: var(--button-shadow-pressed); transform: var(--control-press); }
+  .pending-password { display: grid; gap: 8px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .pending-password p { margin: 0; color: var(--text); font-size: var(--type-3); line-height: 1.45; }
   .generate-button:disabled { cursor: wait; opacity: var(--control-disabled); }
-  .generated-password { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding: 8px; border-radius: var(--radius-sm); background: var(--surface-inset); }
-  .generated-password code { flex: 1; overflow: hidden; font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
-  .generated-password button { border: 0; border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text); background: var(--surface); font-size: var(--type-2); cursor: pointer; transition: background-color .16s ease, transform .1s ease; }
-  .generated-password button:hover { background: var(--tint); }
-  .generated-password button:active { transform: scale(.95); }
   .fill-feedback { min-height: 15px; margin: 7px 3px 0; }
   footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--text-faint); font-size: var(--type-2); }
   footer nav { display: flex; gap: var(--space-3); }

@@ -1,0 +1,19 @@
+{
+  "contractTag": "browser-protocol-v8",
+  "sourceRepository": "usesesame/sesame-desktop",
+  "sourcePath": "src-tauri/contracts/browser/v8",
+  "implementationSourceCommit": "4cb2a1de1b2ee0b8370d533f0d6603e0ce091d87",
+  "vendoredAt": "2026-11-16",
+  "publication": {
+    "repository": "usesesame/sesame-desktop",
+    "trackingRef": "main",
+    "note": "The desktop repository is public, so the raw transport needs no token. SESAME_CONTRACT_TOKEN is only required if it is ever made private again.",
+    "requiresDesktopMerge": true
+  },
+  "files": {
+    "contract.json": "b16f7090be86f015e00c0c88d71debedcdaa5186d40b946fd8355224e0668724",
+    "request.schema.json": "7bbc64eb5e6718584b3d4cf5128f2f739a02b3d922f4d02aad0c11827b5c9c17",
+    "response.schema.json": "3ab1b1b7decb7b9c2723690a421766036e80a4d52576e698d194b889a7390f68",
+    "vectors.json": "29310ba567d5be26b37f7a9d95af7af8adf27f8f99515695dd6f2ca87666df17"
+  }
+}
