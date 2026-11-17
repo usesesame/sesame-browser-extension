@@ -22,8 +22,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      - name: Audit npm dependencies
-        run: node scripts/audit-dependencies.mjs
       - name: Install the browser test runtime
         run: npx playwright-core install --with-deps chromium
       - name: Locate the browser test runtime
@@ -31,3 +29,5 @@ jobs:
           executable="$(node -e 'console.log(require("playwright-core").chromium.executablePath())')"
           echo "SESAME_BROWSER_TEST_EXECUTABLE=$executable" >> "$GITHUB_ENV"
       - run: npm run ci
+      - name: Audit npm dependencies
+        run: node scripts/audit-dependencies.mjs

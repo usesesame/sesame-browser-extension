@@ -4,6 +4,17 @@
   "license": "AGPL-3.0-or-later",
   "version": "0.3.0",
   "type": "module",
+  "shippedBuilds": [
+    "app-chrome",
+    "content-chrome",
+    "overlay-chrome",
+    "app-edge",
+    "content-edge",
+    "overlay-edge",
+    "app-firefox",
+    "content-firefox",
+    "overlay-firefox"
+  ],
   "scripts": {
     "version:check": "node scripts/version-contract.mjs check",
     "version:sync": "node scripts/version-contract.mjs sync",
