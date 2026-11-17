@@ -18,6 +18,7 @@ import {
   makeCreateRequest,
   makeIdentityRequest,
   makePendingRequest,
+  fitPasswordStyle,
   PENDING_PASSWORD_PROTOCOL_VERSION,
   makeRequest,
   makeSaveRequest,
@@ -762,6 +763,40 @@ describe('protocol 8 pending passwords', () => {
     expect(makePendingRequest('https://example.com', handle, 'filled', 'casey@example.com')).not.toHaveProperty('username')
     expect(makePendingRequest('https://example.com', handle, 'accepted', ' casey@example.com ').username).toBe('casey@example.com')
     expect(makePendingRequest('https://example.com', handle, 'accepted', '   ')).not.toHaveProperty('username')
+  })
+
+  it('measures the username in UTF-8 bytes the way the desktop does', () => {
+    const fits = '\u00e9'.repeat(MAX_CREDENTIAL_FIELD / 2)
+    const tooLong = `${fits}e`
+    expect(tooLong.length).toBeLessThan(MAX_CREDENTIAL_FIELD)
+    expect(makePendingRequest('https://example.com', handle, 'accepted', fits).username).toBe(fits)
+    const request = makePendingRequest('https://example.com', handle, 'accepted', tooLong)
+    expect(request).not.toHaveProperty('username')
+    expect(isNativeRequest(request)).toBe(true)
+    expect(isNativeRequest({ ...request, username: tooLong })).toBe(false)
+    expect(isNativeRequest({ ...request, username: fits })).toBe(true)
+  })
+
+  it('sends the report without a username that holds a control, format or broken character', () => {
+    for (const username of ['casey\u0000@example.com', 'casey\n@example.com', 'casey\u200b@example.com', 'casey\u202e@example.com', 'casey\ud800@example.com']) {
+      const request = makePendingRequest('https://example.com', handle, 'accepted', username)
+      expect(request).not.toHaveProperty('username')
+      expect(request.action).toBe('accepted')
+      expect(isNativeRequest(request)).toBe(true)
+    }
+    expect(makePendingRequest('https://example.com', handle, 'accepted', 'zo\u00eb@example.com').username).toBe('zo\u00eb@example.com')
+  })
+
+  it('fits the password style to the field limit or refuses a limit under 16', () => {
+    expect(fitPasswordStyle({ style: 'characters', size: 20 }, undefined)).toEqual({ style: 'characters', size: 20 })
+    expect(fitPasswordStyle({ style: 'characters', size: 20 }, 20)).toEqual({ style: 'characters', size: 20 })
+    expect(fitPasswordStyle({ style: 'characters', size: 20 }, 18)).toEqual({ style: 'characters', size: 18 })
+    expect(fitPasswordStyle({ style: 'characters', size: 20 }, 16)).toEqual({ style: 'characters', size: 16 })
+    expect(fitPasswordStyle({ style: 'characters', size: 20 }, 15)).toBeNull()
+    expect(fitPasswordStyle({ style: 'passphrase', size: 6 }, 59)).toEqual({ style: 'passphrase', size: 6 })
+    expect(fitPasswordStyle({ style: 'passphrase', size: 6 }, 40)).toEqual({ style: 'characters', size: 40 })
+    expect(fitPasswordStyle({ style: 'passphrase', size: 10 }, 80)).toEqual({ style: 'characters', size: 64 })
+    expect(fitPasswordStyle({ style: 'passphrase', size: 5 }, 12)).toBeNull()
   })
 
   it('reads a pending state and rejects one that echoes a secret', () => {

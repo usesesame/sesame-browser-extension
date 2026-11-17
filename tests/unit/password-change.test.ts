@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fillPasswordChangeSurface, normalizePasswordChangeOutcome } from '../../src/content/password-change'
+import { fillGeneratedRegistration, normalizeRegistrationOutcome } from '../../src/content/registration'
 
 const origin = 'https://accounts.example.test'
 const token = 'password-change-token-1234'
@@ -34,6 +35,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   Reflect.deleteProperty(globalThis, '__sesamePendingPasswordChangeV1')
+  Reflect.deleteProperty(globalThis, '__sesamePendingRegistrationV1')
 })
 
 describe('fillPasswordChangeSurface', () => {
@@ -152,5 +154,87 @@ describe('normalizePasswordChangeOutcome', () => {
     expect(normalizePasswordChangeOutcome({
       version: 1, ok: true, code: 'password-change-filled', currentFilled: 0, newFilled: 0,
     })).toEqual(fallback)
+  })
+})
+
+describe('the password limit of the fields that take the new password', () => {
+  it('reports the smallest limit of the new and confirmation fields and ignores the current field', () => {
+    prepareInputs(`
+      <form id="change">
+        <input type="password" name="current_password" autocomplete="current-password" maxlength="8">
+        <input type="password" name="new_password" autocomplete="new-password" maxlength="32">
+        <input type="password" name="confirm_password" maxlength="18">
+      </form>
+    `)
+    expect(fillPasswordChangeSurface(origin, token, null, null, 'prepare')).toEqual({
+      version: 1, ok: true, code: 'password-change-filled', currentFilled: 1, newFilled: 2, maxLength: 18,
+    })
+  })
+
+  it('reports no limit when no new field sets one', () => {
+    prepareInputs(changeForm)
+    expect(fillPasswordChangeSurface(origin, token, null, null, 'prepare')).not.toHaveProperty('maxLength')
+  })
+
+  it('refuses to write a new password longer than a field limit and clears the stored one', () => {
+    const inputs = prepareInputs(`
+      <form id="change">
+        <input type="password" name="current_password" autocomplete="current-password">
+        <input type="password" name="new_password" autocomplete="new-password">
+        <input type="password" name="confirm_password">
+      </form>
+    `)
+    expect(fillPasswordChangeSurface(origin, token, null, null, 'prepare').ok).toBe(true)
+    inputs[2].maxLength = 16
+    const credential = { username: 'casey', password: 'stored-password-1' }
+    expect(fillPasswordChangeSurface(origin, token, credential, 'generated-password-1234')).toEqual({
+      version: 1, ok: false, code: 'password-limit-too-short',
+    })
+    expect(inputs.map((input) => input.value)).toEqual(['', '', ''])
+    expect(credential).toEqual({ username: '', password: '' })
+  })
+
+  it('reports the smallest limit of every sign-up password field', () => {
+    prepareInputs(`
+      <form id="register">
+        <input type="password" name="new_password" autocomplete="new-password" maxlength="30">
+        <input type="password" name="confirm_password" maxlength="20">
+      </form>
+    `)
+    expect(fillGeneratedRegistration(origin, token, null, 'prepare')).toEqual({
+      version: 1, ok: true, code: 'registration-filled', fieldsFilled: 1, maxLength: 20,
+    })
+  })
+
+  it('refuses to write a sign-up password longer than a field limit', () => {
+    const inputs = prepareInputs(`
+      <form id="register">
+        <input type="password" name="new_password" autocomplete="new-password">
+        <input type="password" name="confirm_password">
+      </form>
+    `)
+    expect(fillGeneratedRegistration(origin, token, null, 'prepare')).not.toHaveProperty('maxLength')
+    inputs[1].maxLength = 16
+    expect(fillGeneratedRegistration(origin, token, 'generated-password-1234')).toEqual({
+      version: 1, ok: false, code: 'password-limit-too-short',
+    })
+    expect(inputs.map((input) => input.value)).toEqual(['', ''])
+  })
+
+  it('passes a sound limit through the normalizers and drops a planted one', () => {
+    expect(normalizePasswordChangeOutcome({
+      version: 1, ok: true, code: 'password-change-filled', currentFilled: 1, newFilled: 1, maxLength: 18,
+    })).toEqual({ version: 1, ok: true, code: 'password-change-filled', currentFilled: 1, newFilled: 1, maxLength: 18 })
+    expect(normalizePasswordChangeOutcome({
+      version: 1, ok: true, code: 'password-change-filled', currentFilled: 1, newFilled: 1, maxLength: 0,
+    })).toEqual(fallback)
+    expect(normalizePasswordChangeOutcome({ version: 1, ok: false, code: 'password-limit-too-short' }))
+      .toEqual({ version: 1, ok: false, code: 'password-limit-too-short' })
+    expect(normalizeRegistrationOutcome({
+      version: 1, ok: true, code: 'registration-filled', fieldsFilled: 1, maxLength: 20,
+    })).toEqual({ version: 1, ok: true, code: 'registration-filled', fieldsFilled: 1, maxLength: 20 })
+    expect(normalizeRegistrationOutcome({
+      version: 1, ok: true, code: 'registration-filled', fieldsFilled: 1, maxLength: '20',
+    })).toEqual({ version: 1, ok: false, code: 'registration-fill-failed' })
   })
 })

@@ -11,6 +11,7 @@ export const FILL_SITE_PROTOCOL_VERSION = 7
 export const PENDING_PASSWORD_PROTOCOL_VERSION = 8
 export const HANDLE_PATTERN = /^[A-Za-z0-9_-]{43}$/
 export const NATIVE_FILL_TIMEOUT_MS = 30_000
+export const NATIVE_PENDING_PASSWORD_TIMEOUT_MS = 40_000
 export const NATIVE_PROBE_TIMEOUT_MS = 5_000
 export const MAX_CREDENTIAL_FIELD = 4096
 export const MAX_LOOKALIKE_HOST = 128
@@ -221,7 +222,7 @@ export function isNativeRequest(value: unknown): value is NativeRequest {
       && isHandle(value.handle)
       && (value.action === 'filled' || value.action === 'notFilled' || value.action === 'accepted')
       && (value.username === undefined
-        || (value.action === 'accepted' && typeof value.username === 'string' && value.username.length <= MAX_CREDENTIAL_FIELD))
+        || (value.action === 'accepted' && typeof value.username === 'string' && utf8Length(value.username) <= MAX_CREDENTIAL_FIELD))
   }
   if (value.type === 'save') {
     const allowed = new Set(SAVE_REQUEST_KEYS)
@@ -552,8 +553,18 @@ export function makePendingRequest(
     action,
   }
   const trimmed = username?.trim()
-  if (action === 'accepted' && trimmed && trimmed.length <= MAX_CREDENTIAL_FIELD) request.username = trimmed
+  if (action === 'accepted' && trimmed && isSendableUsername(trimmed)) request.username = trimmed
   return request
+}
+
+const UNSENDABLE_USERNAME_CHARACTER = /[\p{Cc}\p{Cf}\p{Cs}]/u
+
+function isSendableUsername(value: string): boolean {
+  return utf8Length(value) <= MAX_CREDENTIAL_FIELD && !UNSENDABLE_USERNAME_CHARACTER.test(value)
+}
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).byteLength
 }
 
 export function isHandle(value: unknown): value is string {
@@ -564,6 +575,16 @@ export function isPasswordStyle(style: unknown, size: unknown): boolean {
   if (typeof size !== 'number' || !Number.isInteger(size)) return false
   return (style === 'characters' && size >= 16 && size <= 64)
     || (style === 'passphrase' && size >= 5 && size <= 10)
+}
+
+const LONGEST_PASSPHRASE_WORD = 9
+
+export function fitPasswordStyle(style: PasswordStyle, maxLength: number | undefined): PasswordStyle | null {
+  if (maxLength === undefined) return style
+  const longest = style.style === 'characters' ? style.size : style.size * (LONGEST_PASSPHRASE_WORD + 1) - 1
+  if (maxLength >= longest) return style
+  const size = Math.min(maxLength, 64)
+  return isPasswordStyle('characters', size) ? { style: 'characters', size } : null
 }
 
 function isSecret(value: unknown): value is string {

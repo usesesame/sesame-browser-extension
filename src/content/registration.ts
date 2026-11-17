@@ -6,7 +6,7 @@ import { collectInputs, collectInputsOfType } from './input-scan'
 const REGISTRATION_VERSION = 1
 
 export type RegistrationOutcome =
-  | { version: 1; ok: true; code: 'registration-filled'; fieldsFilled: number }
+  | { version: 1; ok: true; code: 'registration-filled'; fieldsFilled: number; maxLength?: number }
   | { version: 1; ok: false; code: string }
 
 export type PasswordSurfaceKind = 'none' | 'login' | 'registration' | 'password-change' | 'ambiguous'
@@ -52,6 +52,7 @@ export function fillRegistrationSurface(expectedOrigin: string, password: string
 
   const owners = new Set(passwordFields.map((field) => field.form ?? field.parentElement ?? field))
   if (owners.size > 1) return failure('multiple-matches')
+  if (!fitsPasswordLimit(password, passwordFields)) return failure('password-limit-too-short')
 
   const nativeValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
   if (typeof nativeValueSetter !== 'function') return failure('field-write-failed')
@@ -113,7 +114,10 @@ export function fillGeneratedRegistration(
       value: { token: documentToken, origin: expectedOrigin },
       writable: true,
     })
-    return { version: REGISTRATION_VERSION, ok: true, code: 'registration-filled', fieldsFilled: 1 }
+    const maxLength = passwordLengthLimit(visiblePasswordFields())
+    return maxLength === undefined
+      ? { version: REGISTRATION_VERSION, ok: true, code: 'registration-filled', fieldsFilled: 1 }
+      : { version: REGISTRATION_VERSION, ok: true, code: 'registration-filled', fieldsFilled: 1, maxLength }
   }
   const pending = world[PENDING_REGISTRATION_KEY]
   clearPendingRegistration(world)
@@ -189,17 +193,20 @@ export function normalizeRegistrationOutcome(value: unknown): RegistrationOutcom
     && value.code === 'registration-filled'
     && Number.isInteger(value.fieldsFilled)
     && (value.fieldsFilled as number) >= 1
-    && (value.fieldsFilled as number) <= 3) {
-    return {
+    && (value.fieldsFilled as number) <= 3
+    && (value.maxLength === undefined || isPasswordLengthLimit(value.maxLength))) {
+    const outcome: RegistrationOutcome = {
       version: REGISTRATION_VERSION,
       ok: true,
       code: 'registration-filled',
       fieldsFilled: value.fieldsFilled as number,
     }
+    if (value.maxLength !== undefined) outcome.maxLength = value.maxLength as number
+    return outcome
   }
   const safeCodes = new Set([
     'field-write-failed', 'multiple-matches', 'no-fields', 'not-registration-form',
-    'origin-mismatch', 'password-change-form', 'registration-fill-failed', 'stale-document',
+    'origin-mismatch', 'password-change-form', 'password-limit-too-short', 'registration-fill-failed', 'stale-document',
   ])
   return failure(typeof value.code === 'string' && safeCodes.has(value.code)
     ? value.code
@@ -230,6 +237,20 @@ export function isRegistrationField(field: HTMLInputElement): boolean {
   const hints = `${field.name} ${field.id} ${field.autocomplete} ${field.form?.name ?? ''} ${field.form?.id ?? ''}`.toLowerCase()
   return tokens(field.autocomplete).includes('new-password')
     || /new[-_ ]?pass|confirm|register|sign[-_ ]?up|create[-_ ]?(?:account|pass)/.test(hints)
+}
+
+export function passwordLengthLimit(fields: readonly HTMLInputElement[]): number | undefined {
+  const limits = fields.map((field) => field.maxLength).filter(isPasswordLengthLimit)
+  return limits.length > 0 ? Math.min(...limits) : undefined
+}
+
+export function fitsPasswordLimit(password: string, fields: readonly HTMLInputElement[]): boolean {
+  const limit = passwordLengthLimit(fields)
+  return limit === undefined || password.length <= limit
+}
+
+export function isPasswordLengthLimit(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 524_288
 }
 
 function tokens(value: unknown): string[] {

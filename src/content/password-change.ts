@@ -1,10 +1,18 @@
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
 import { setValue, type Credential } from './field-writer'
-import { inspectPasswordSurface, isCurrentPasswordField, isRegistrationField, visiblePasswordFields } from './registration'
+import {
+  fitsPasswordLimit,
+  inspectPasswordSurface,
+  isCurrentPasswordField,
+  isPasswordLengthLimit,
+  isRegistrationField,
+  passwordLengthLimit,
+  visiblePasswordFields,
+} from './registration'
 
 export type PasswordChangeOutcome =
-  | { version: 1; ok: true; code: 'password-change-filled'; currentFilled: number; newFilled: number }
+  | { version: 1; ok: true; code: 'password-change-filled'; currentFilled: number; newFilled: number; maxLength?: number }
   | { version: 1; ok: false; code: string }
 
 type PendingPasswordChange = { token: string; origin: string }
@@ -70,7 +78,7 @@ export function fillPasswordChangeSurface(
       value: { token: documentToken, origin: expectedOrigin },
       writable: true,
     })
-    return success(current.length, next.length)
+    return success(current.length, next.length, passwordLengthLimit(next))
   }
 
   if (!credential || typeof credential.password !== 'string' || credential.password.length === 0) {
@@ -78,6 +86,11 @@ export function fillPasswordChangeSurface(
   }
   if (typeof newPassword !== 'string' || newPassword.length < 16 || newPassword.length > 128) {
     return failure('password-change-fill-failed')
+  }
+  if (!fitsPasswordLimit(newPassword, next)) {
+    credential.username = ''
+    credential.password = ''
+    return failure('password-limit-too-short')
   }
 
   const nativeValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
@@ -117,12 +130,13 @@ export function normalizePasswordChangeOutcome(value: unknown): PasswordChangeOu
     && Number.isInteger(value.newFilled)
     && (value.newFilled as number) >= 1
     && (value.newFilled as number) <= 2
+    && (value.maxLength === undefined || isPasswordLengthLimit(value.maxLength))
   ) {
-    return success(1, value.newFilled as number)
+    return success(1, value.newFilled as number, value.maxLength as number | undefined)
   }
   const safeCodes = new Set([
     'field-write-failed', 'multiple-matches', 'not-password-change-form', 'origin-mismatch',
-    'password-change-fill-failed', 'stale-document', 'fill-failed', 'no-fields',
+    'password-change-fill-failed', 'password-limit-too-short', 'stale-document', 'fill-failed', 'no-fields',
   ])
   if (value.ok === false && typeof value.code === 'string' && safeCodes.has(value.code)) {
     return failure(value.code)
@@ -138,14 +152,16 @@ function clearPending(isolated: IsolatedWorld): void {
   }
 }
 
-function success(currentFilled: number, newFilled: number): PasswordChangeOutcome {
-  return {
+function success(currentFilled: number, newFilled: number, maxLength?: number): PasswordChangeOutcome {
+  const outcome: PasswordChangeOutcome = {
     version: PASSWORD_CHANGE_VERSION,
     ok: true,
     code: 'password-change-filled',
     currentFilled,
     newFilled,
   }
+  if (maxLength !== undefined) outcome.maxLength = maxLength
+  return outcome
 }
 
 function failure(code: string): PasswordChangeOutcome {

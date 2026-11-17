@@ -2,6 +2,7 @@ import {
   NATIVE_HOST,
   NATIVE_PROBE_TIMEOUT_MS,
   NATIVE_FILL_TIMEOUT_MS,
+  NATIVE_PENDING_PASSWORD_TIMEOUT_MS,
   CAPABILITIES_PROTOCOL_VERSION,
   FILL_LOOKALIKE_PROTOCOL_VERSION,
   FILL_SITE_PROTOCOL_VERSION,
@@ -259,7 +260,7 @@ export async function requestChange(
   style: PasswordStyle,
   options: { timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<{ ok: true; changed: ChangedPasswords } | { ok: false; code: string; lookalike?: string }> {
-  const result = await connectOnce(browser, makeChangeRequest(origin, style), { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal })
+  const result = await connectPendingPassword(browser, makeChangeRequest(origin, style), options)
   if (!result.ok) return result
   return result.response.changed ? { ok: true, changed: result.response.changed } : { ok: false, code: 'invalid-response' }
 }
@@ -270,9 +271,22 @@ export async function requestCreate(
   style: PasswordStyle,
   options: { timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<{ ok: true; created: CreatedPassword } | { ok: false; code: string }> {
-  const result = await connectOnce(browser, makeCreateRequest(origin, style), { timeoutMs: options.timeoutMs ?? NATIVE_FILL_TIMEOUT_MS, signal: options.signal })
+  const result = await connectPendingPassword(browser, makeCreateRequest(origin, style), options)
   if (!result.ok) return { ok: false, code: result.code }
   return result.response.created ? { ok: true, created: result.response.created } : { ok: false, code: 'invalid-response' }
+}
+
+const UNANSWERED_PENDING_PASSWORD_CODES = new Set(['host-disconnected', 'host-exited'])
+
+async function connectPendingPassword(
+  browser: Browser,
+  request: Extract<NativeRequest, { type: 'change' | 'create' }>,
+  options: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<ConnectOnceResult | ConnectOnceFailure> {
+  const result = await connectOnce(browser, request, { timeoutMs: options.timeoutMs ?? NATIVE_PENDING_PASSWORD_TIMEOUT_MS, signal: options.signal })
+  return !result.ok && UNANSWERED_PENDING_PASSWORD_CODES.has(result.code)
+    ? { ok: false, code: 'pending-version-unsupported' }
+    : result
 }
 
 export async function requestPending(

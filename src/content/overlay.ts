@@ -826,6 +826,7 @@ export function fillMessage(result: unknown): string {
   }
   const code = recordString(result, 'code') || recordString(result, 'reason')
   if (code === 'cancelled') return 'Fill was cancelled. Nothing was filled.'
+  if (code === 'password-limit-too-short') return "This site's password limit is too short for Sesame to create a password here."
   if (code === 'origin-mismatch' || code === 'no-match') return 'No saved login matches this site. Check that Sesame is unlocked, then try again.'
   if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this login.'
   if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
@@ -911,6 +912,7 @@ export function createMessage(result: unknown): string {
   if (code === 'password-change-form') return 'Choose Change password in the Sesame popup for this form.'
   if (code === 'multiple-matches') return 'More than one form is visible. Sesame did not guess.'
   if (code === 'pending-version-unsupported') return 'Update the Sesame desktop app to create passwords here.'
+  if (code === 'password-limit-too-short') return "This site's password limit is too short for Sesame to create a password here."
   if (code === 'vault-locked') return 'Unlock Sesame, then try again.'
   if (code === 'approval-declined' || code === 'cancelled') return 'Nothing was created.'
   if (code === 'approval-timeout') return 'The approval expired. Try again.'
