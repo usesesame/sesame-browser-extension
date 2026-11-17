@@ -24,6 +24,7 @@ jobs:
       contents: read
     outputs:
       record-sha256: ${{ steps.record.outputs.sha256 }}
+      artifact-name: ${{ steps.package-artifact.outputs.name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,13 +127,9 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
-      - name: Name the package artifact
-        id: package-artifact
-        run: echo "name=sesame-extension-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.package-artifact.outputs.name }}
+          name: ${{ needs.package.outputs.artifact-name }}
           path: store-packages
 
       - name: Re-hash every package against the record the package job wrote
@@ -166,13 +163,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Name the package artifact
-        id: package-artifact
-        run: echo "name=sesame-extension-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.package-artifact.outputs.name }}
+          name: ${{ needs.package.outputs.artifact-name }}
           path: store-packages
 
       - name: Re-hash every package and write the release files
