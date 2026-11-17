@@ -7,7 +7,7 @@ import { createPendingStore, pendingKey, PENDING_TTL_MS, safePendingEntry, type 
 const native = vi.hoisted(() => ({ requestPending: vi.fn() }))
 vi.mock('../../src/background/native-connection', () => ({ requestPending: native.requestPending }))
 
-import { captureSignupUsernameInPage, createGeneratedPasswords, safePasswordStyle } from '../../src/background/generated-passwords'
+import { captureSignupUsernameInPage, createGeneratedPasswords, createPasswordSenderPage, safePasswordStyle } from '../../src/background/generated-passwords'
 
 const HANDLE = 'fictional-handle-for-examples-only-AAAAAAAA'
 const NEWER_HANDLE = 'fictional-handle-for-examples-only-BBBBBBBB'
@@ -252,6 +252,25 @@ describe('generated password flow', () => {
     const { generated } = flow({})
     await expect(generated.accept(7)).resolves.toEqual({ state: 'unknown' })
     await expect(generated.pending(7)).resolves.toBeNull()
+  })
+
+  it('passes the sending page to the coordinator for a sign-up', async () => {
+    const createPasswordActivePage = vi.fn().mockResolvedValue({ ok: false, code: 'page-changed' })
+    const { generated } = flow({ createPasswordActivePage })
+    await expect(generated.create({ style: 'characters', size: 20 }, { tabId: 7, origin: ORIGIN })).resolves.toEqual({ ok: false, code: 'page-changed' })
+    expect(createPasswordActivePage).toHaveBeenCalledWith({ style: 'characters', size: 20 }, undefined, { tabId: 7, origin: ORIGIN })
+    expect(area.data.size).toBe(0)
+  })
+
+  it('takes a sign-up request only from the top frame of the active tab', () => {
+    const top = { url: `${ORIGIN}/join`, frameId: 0, tab: { id: 7, active: true } }
+    expect(createPasswordSenderPage(top)).toEqual({ tabId: 7, origin: ORIGIN })
+    expect(createPasswordSenderPage({ ...top, frameId: 2 })).toBeNull()
+    expect(createPasswordSenderPage({ ...top, tab: { id: 7, active: false } })).toBeNull()
+    expect(createPasswordSenderPage({ ...top, tab: { active: true } })).toBeNull()
+    expect(createPasswordSenderPage({ frameId: 0, tab: { id: 7, active: true } })).toBeNull()
+    expect(createPasswordSenderPage({ ...top, url: 'http://example.com/join' })).toBeNull()
+    expect(createPasswordSenderPage({ ...top, url: 'not a url' })).toBeNull()
   })
 
   it('accepts only supported password styles', () => {

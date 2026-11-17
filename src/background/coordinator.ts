@@ -28,6 +28,7 @@ import {
 import { isSameActivePage, tabFillContext, type PageTab } from './tab-context'
 import {
   CARD_FIELD_KEYS,
+  fitPasswordStyle,
   redactCard,
   type CardFieldKey,
   type CardFields,
@@ -45,7 +46,7 @@ export interface Coordinator {
   inspectActivePageSurfaces(options: { cards: boolean; checkTimeoutMs?: number }): Promise<PageSurfacesResult>
   fillActivePage(signal?: AbortSignal): Promise<FillContext>
   changePasswordActivePage(style: PasswordStyle, signal?: AbortSignal): Promise<ChangePasswordResult>
-  createPasswordActivePage(style: PasswordStyle, signal?: AbortSignal): Promise<CreatePasswordResult>
+  createPasswordActivePage(style: PasswordStyle, signal?: AbortSignal, expectedPage?: ExpectedPage): Promise<CreatePasswordResult>
   inspectIdentityActivePage(): Promise<IdentityPageCheckResult>
   fillIdentityActivePage(signal?: AbortSignal): Promise<IdentityFillResult>
   inspectCardActivePage(): Promise<CardPageCheckResult>
@@ -68,6 +69,11 @@ export type IdentityFillResult =
 export type ChangePasswordResult =
   | { ok: true; tabId: number; origin: string; handle: string; currentFilled: number; newFilled: number }
   | { ok: false; code: string; lookalike?: string }
+
+export interface ExpectedPage {
+  tabId: number
+  origin: string
+}
 
 export type CreatePasswordResult =
   | { ok: true; tabId: number; origin: string; handle: string; fieldsFilled: number }
@@ -147,6 +153,7 @@ interface ActiveOperation {
 interface FillOperation {
   signal: AbortSignal
   bindTab(tabId: number): void
+  expectedPage?: ExpectedPage
 }
 
 export function createCoordinator(browser: Browser): Coordinator {
@@ -304,14 +311,14 @@ export function createCoordinator(browser: Browser): Coordinator {
       })
     },
 
-    async createPasswordActivePage(style, externalSignal): Promise<CreatePasswordResult> {
+    async createPasswordActivePage(style, externalSignal, expectedPage): Promise<CreatePasswordResult> {
       return withFillGuard<CreatePasswordResult>(activeOperations, externalSignal, {
         cancelled: () => ({ ok: false, code: 'cancelled' }),
         busy: () => ({ ok: false, code: 'fill-in-progress' }),
         restricted: (aborted) => ({ ok: false, code: aborted ? 'cancelled' : 'page-restricted' }),
       }, async (operation) => {
         const create = registrationSurface(style)
-        const result = await runSurfaceFill(browser, operation, create.fill)
+        const result = await runSurfaceFill(browser, { ...operation, expectedPage }, create.fill)
         const issued = create.issued()
         if (issued) await reportFill(browser, issued, result.ok)
         if (!result.ok) return { ok: false, code: result.code }
@@ -481,6 +488,10 @@ async function runSurfaceFill<
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   const resolved = surface.resolvePage(tab)
   if (!resolved.ok) return { ok: false, code: resolved.code }
+  const expected = operation.expectedPage
+  if (expected && (resolved.tabId !== expected.tabId || resolved.origin !== expected.origin)) {
+    return { ok: false, code: 'page-changed' }
+  }
 
   const { signal } = operation
   operation.bindTab(resolved.tabId)
@@ -641,14 +652,16 @@ async function reportFill(browser: Browser, issued: IssuedHandle, filled: boolea
 
 type ApprovedChange = { credential: Credential; newPassword: string }
 
+const PASSWORD_LIMIT_TOO_SHORT = 'password-limit-too-short'
+
 function passwordChangeSurface(style: PasswordStyle): {
-  fill: FillSurface<ReadyPasswordChange, 'password', ApprovedChange, PasswordChangeOutcome>
+  fill: FillSurface<ReadyPasswordChange, PasswordStyle, ApprovedChange, PasswordChangeOutcome>
   issued: () => IssuedHandle | undefined
 } {
   let prepared = false
   let capturedTabId = 0
   let issued: IssuedHandle | undefined
-  const fill: FillSurface<ReadyPasswordChange, 'password', ApprovedChange, PasswordChangeOutcome> = {
+  const fill: FillSurface<ReadyPasswordChange, PasswordStyle, ApprovedChange, PasswordChangeOutcome> = {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
       capturedTabId = tabId
@@ -673,10 +686,11 @@ function passwordChangeSurface(style: PasswordStyle): {
       const prep = normalizePasswordChangeOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
-      return { ok: true, approvalInput: 'password' }
+      const fitted = fitPasswordStyle(style, prep.maxLength)
+      return fitted ? { ok: true, approvalInput: fitted } : { ok: false, code: PASSWORD_LIMIT_TOO_SHORT }
     },
-    async requestApproval(browser, origin, _input, signal) {
-      const change = await requestChange(browser, origin, style, { signal })
+    async requestApproval(browser, origin, fitted, signal) {
+      const change = await requestChange(browser, origin, fitted, { signal })
       if (!change.ok) return change
       issued = { tabId: capturedTabId, origin, handle: change.changed.handle }
       return {
@@ -713,13 +727,13 @@ type ReadyRegistration = { origin: string }
 type ApprovedCreate = { password: string }
 
 function registrationSurface(style: PasswordStyle): {
-  fill: FillSurface<ReadyRegistration, 'create', ApprovedCreate, RegistrationOutcome>
+  fill: FillSurface<ReadyRegistration, PasswordStyle, ApprovedCreate, RegistrationOutcome>
   issued: () => IssuedHandle | undefined
 } {
   let prepared = false
   let capturedTabId = 0
   let issued: IssuedHandle | undefined
-  const fill: FillSurface<ReadyRegistration, 'create', ApprovedCreate, RegistrationOutcome> = {
+  const fill: FillSurface<ReadyRegistration, PasswordStyle, ApprovedCreate, RegistrationOutcome> = {
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin }) {
       capturedTabId = tabId
@@ -745,10 +759,11 @@ function registrationSurface(style: PasswordStyle): {
       const prep = normalizeRegistrationOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
-      return { ok: true, approvalInput: 'create' }
+      const fitted = fitPasswordStyle(style, prep.maxLength)
+      return fitted ? { ok: true, approvalInput: fitted } : { ok: false, code: PASSWORD_LIMIT_TOO_SHORT }
     },
-    async requestApproval(browser, origin, _input, signal) {
-      const created = await requestCreate(browser, origin, style, { signal })
+    async requestApproval(browser, origin, fitted, signal) {
+      const created = await requestCreate(browser, origin, fitted, { signal })
       if (!created.ok) return created
       issued = { tabId: capturedTabId, origin, handle: created.created.handle }
       return { ok: true, approved: { password: created.created.password } }

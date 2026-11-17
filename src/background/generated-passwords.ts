@@ -1,8 +1,8 @@
 import { requestPending } from './native-connection'
-import type { ChangePasswordResult, Coordinator, CreatePasswordResult } from './coordinator'
+import type { ChangePasswordResult, Coordinator, CreatePasswordResult, ExpectedPage } from './coordinator'
 import type { PendingKind, PendingStore } from './pending-passwords'
 import type { Browser } from '../platform/chrome'
-import { isPasswordStyle, type PasswordStyle, type PendingState } from '../protocol/native'
+import { isPasswordStyle, normalizeFillOrigin, type PasswordStyle, type PendingState } from '../protocol/native'
 import { isRecord } from '../shared/values'
 
 export function safePasswordStyle(message: unknown): PasswordStyle | null {
@@ -12,6 +12,24 @@ export function safePasswordStyle(message: unknown): PasswordStyle | null {
   return style === 'passphrase'
     ? { style: 'passphrase', size: size as number }
     : { style: 'characters', size: size as number }
+}
+
+export interface CreatePasswordSender {
+  url?: string
+  frameId?: number
+  tab?: { id?: number; active?: boolean }
+}
+
+export function createPasswordSenderPage(sender: CreatePasswordSender): ExpectedPage | null {
+  const tabId = sender.tab?.id
+  if (sender.frameId !== 0 || sender.tab?.active !== true || typeof tabId !== 'number' || !Number.isInteger(tabId)) return null
+  let origin: string | null = null
+  try {
+    origin = typeof sender.url === 'string' ? normalizeFillOrigin(new URL(sender.url).origin) : null
+  } catch {
+    origin = null
+  }
+  return origin ? { tabId, origin } : null
 }
 
 export type AcceptResult = { state: PendingState } | { code: string }
@@ -39,8 +57,8 @@ export function createGeneratedPasswords(deps: GeneratedPasswordDeps) {
       return result
     },
 
-    async create(style: PasswordStyle): Promise<CreatePasswordResult> {
-      const result = await deps.coordinator.createPasswordActivePage(style)
+    async create(style: PasswordStyle, expectedPage?: ExpectedPage): Promise<CreatePasswordResult> {
+      const result = await deps.coordinator.createPasswordActivePage(style, undefined, expectedPage)
       if (result.ok) await remember(result.tabId, result.origin, result.handle, 'new')
       return result
     },

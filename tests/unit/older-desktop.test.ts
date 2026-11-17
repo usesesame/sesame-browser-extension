@@ -5,6 +5,8 @@ import { probeNativeHost, requestFill } from '../../src/background/native-connec
 
 const pageOrigin = 'https://example.test'
 
+const EXITS_WITHOUT_ANSWER = Symbol('exits without answer')
+
 type HostReply = (request: Record<string, unknown>) => unknown
 
 function olderDesktopReply(request: Record<string, unknown>): unknown {
@@ -41,17 +43,27 @@ function hostBrowser(hosts: HostReply[]): { browser: Browser; requests: Record<s
       connectNative: () => {
         const host = hosts[Math.min(connection, hosts.length - 1)]
         connection += 1
+        browser.runtime.lastError = undefined
         const listeners: Array<(message: unknown) => void> = []
+        const disconnectListeners: Array<() => void> = []
         const port: NativePort = {
           name: 'app.usesesame.browser',
           postMessage(message) {
             const request = message as Record<string, unknown>
             requests.push(request)
-            queueMicrotask(() => listeners.forEach((listener) => listener(host(request))))
+            const reply = host(request)
+            queueMicrotask(() => {
+              if (reply === EXITS_WITHOUT_ANSWER) {
+                browser.runtime.lastError = { message: 'Native host has exited.' }
+                disconnectListeners.forEach((listener) => listener())
+                return
+              }
+              listeners.forEach((listener) => listener(reply))
+            })
           },
           disconnect: () => {},
           onMessage: { addListener: (callback) => { listeners.push(callback) }, removeListener: () => {} },
-          onDisconnect: { addListener: () => {}, removeListener: () => {} },
+          onDisconnect: { addListener: (callback) => { disconnectListeners.push(callback) }, removeListener: () => {} },
         }
         return port
       },
@@ -161,14 +173,14 @@ describe('an older desktop that speaks only protocol 1 and 2', () => {
 })
 
 describe('a desktop before protocol 8', () => {
+  const versionEightFields = new Set(['style', 'size', 'handle', 'action'])
+
   function desktopBeforePendingPasswords(request: Record<string, unknown>): unknown {
-    if (request.version === 8) {
-      return { version: 8, type: 'error', requestId: request.requestId, message: 'Unsupported protocol version.' }
-    }
+    if (Object.keys(request).some((key) => versionEightFields.has(key))) return EXITS_WITHOUT_ANSWER
     return currentDesktopReply(request)
   }
 
-  it('refuses a change once, asks for an update and never falls back to the old flow', async () => {
+  it('reads a host that exits on the new fields as an older desktop and never falls back to the old flow', async () => {
     const { browser, requests } = hostBrowser([desktopBeforePendingPasswords])
     const { requestChange, requestCreate } = await import('../../src/background/native-connection')
 
@@ -177,5 +189,16 @@ describe('a desktop before protocol 8', () => {
 
     expect(requests.map((request) => `${request.type}:${request.version}`)).toEqual(['change:8', 'create:8'])
     expect(requests.every((request) => !('password' in request))).toBe(true)
+  })
+
+  it('still passes the connection check, since the capabilities answer does not name protocol 8', async () => {
+    const { browser } = hostBrowser([desktopBeforePendingPasswords])
+    const result = await probeNativeHost(browser, { timeoutMs: 200 })
+    expect(result).toMatchObject({ ok: true, protocolVersion: 6, capabilities: { desktopAvailable: true } })
+  })
+
+  it('keeps a disconnect on a fill as a connection problem', async () => {
+    const { browser } = hostBrowser([() => EXITS_WITHOUT_ANSWER])
+    await expect(requestFill(browser, pageOrigin, { timeoutMs: 200 })).resolves.toEqual({ ok: false, code: 'host-exited' })
   })
 })

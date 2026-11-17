@@ -23,6 +23,7 @@ const FAILURES: Readonly<Record<string, string>> = {
   'not-registration-form': 'This is not a sign-up form. Nothing was filled.',
   'page-changed': 'The page changed before Sesame could fill it. Check Sesame.',
   'password-change-form': 'This is a password-change form. Choose Change password instead.',
+  'password-limit-too-short': "This site's password limit is too short for Sesame to create a password here.",
   'pending-version-unsupported': 'Update the Sesame desktop app to do this from the browser.',
   'protocol-mismatch': 'Update Sesame and the extension, then try again.',
   'stale-document': 'The page reloaded. Check Sesame.',

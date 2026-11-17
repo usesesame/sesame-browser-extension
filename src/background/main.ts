@@ -11,7 +11,7 @@ import { createPopupResultRelay } from './popup-result'
 import { openDesktop } from './native-connection'
 import { createSaveSessionController, safeSignupCapturePayload } from './signup-capture'
 import { createPendingStore } from './pending-passwords'
-import { captureSignupUsernameInPage, createGeneratedPasswords, safePasswordStyle } from './generated-passwords'
+import { captureSignupUsernameInPage, createGeneratedPasswords, createPasswordSenderPage, safePasswordStyle } from './generated-passwords'
 import type { FillContext } from './fill-state'
 import { createMissedResultNotice } from './missed-result'
 
@@ -297,11 +297,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === 'sesame:create-password') {
     const style = safePasswordStyle(message)
-    if (fromExtensionPage || sender.frameId !== 0 || !style) {
+    const page = fromExtensionPage ? null : createPasswordSenderPage(sender)
+    if (!page || !style) {
       sendResponse({ ok: false, code: 'invalid-request' })
       return false
     }
-    generatedPasswords.create(style)
+    generatedPasswords.create(style, page)
       .then((result) => sendResponse(result.ok ? { ok: true } : { ok: false, code: result.code }))
       .catch(() => sendResponse({ ok: false, code: 'fill-failed' }))
     return true

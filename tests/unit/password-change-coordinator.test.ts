@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Browser, ScriptInjectionDetails } from '../../src/platform/chrome'
 
 const native = vi.hoisted(() => ({ requestFill: vi.fn(), requestChange: vi.fn(), requestCreate: vi.fn(), requestPending: vi.fn() }))
-const recorded = vi.hoisted(() => ({ fillCredential: null as Record<string, unknown> | null, fillOk: true }))
+const recorded = vi.hoisted(() => ({ fillCredential: null as Record<string, unknown> | null, fillOk: true, maxLength: undefined as number | undefined }))
 
 vi.mock('../../src/background/native-connection', () => ({
   probeNativeHost: vi.fn(),
@@ -39,6 +39,9 @@ function browserForPage(kind: string): Browser {
         if (name === 'sesameFillGeneratedRegistration') {
           const phase = details.args?.[4]
           if (phase === 'fill') recorded.fillCredential = { password: details.args?.[3] }
+          if (phase === 'prepare' && recorded.maxLength !== undefined) {
+            return [{ result: { version: 1, ok: true, code: 'registration-filled', fieldsFilled: 1, maxLength: recorded.maxLength } }]
+          }
           return [{ result: recorded.fillOk || phase !== 'fill'
             ? { version: 1, ok: true, code: 'registration-filled', fieldsFilled: 2 }
             : { version: 1, ok: false, code: 'field-write-failed' } }]
@@ -48,6 +51,9 @@ function browserForPage(kind: string): Browser {
         if (phase === 'fill') {
           recorded.fillCredential = { ...(details.args?.[3] as Record<string, unknown>), newPassword: details.args?.[4] }
           if (!recorded.fillOk) return [{ result: { version: 1, ok: false, code: 'field-write-failed' } }]
+        }
+        if (phase === 'prepare' && recorded.maxLength !== undefined) {
+          return [{ result: { version: 1, ok: true, code: 'password-change-filled', currentFilled: 1, newFilled: 2, maxLength: recorded.maxLength } }]
         }
         return [{ result: { version: 1, ok: true, code: 'password-change-filled', currentFilled: 1, newFilled: 2 } }]
       }) as unknown as Browser['scripting']['executeScript'],
@@ -59,6 +65,7 @@ beforeEach(() => {
   for (const mock of Object.values(native)) mock.mockReset()
   recorded.fillCredential = null
   recorded.fillOk = true
+  recorded.maxLength = undefined
   native.requestChange.mockResolvedValue({
     ok: true,
     changed: { currentPassword: 'fictional-current-pass-1', newPassword: 'fictional-new-pass-1', handle, matchKind: 'exact' },
@@ -169,5 +176,58 @@ describe('sign-up coordinator', () => {
     const coordinator = createCoordinator(browser)
     await expect(coordinator.createPasswordActivePage(style)).resolves.toEqual({ ok: false, code: 'field-write-failed' })
     expect(native.requestPending).toHaveBeenCalledWith(browser, pageOrigin, handle, 'notFilled')
+  })
+})
+
+describe('a site that limits the password length', () => {
+  it('asks the desktop for a password as long as the limit allows', async () => {
+    recorded.maxLength = 18
+    const browser = browserForPage('password-change')
+    await expect(createCoordinator(browser).changePasswordActivePage(style)).resolves.toMatchObject({ ok: true })
+    expect(native.requestChange).toHaveBeenCalledWith(browser, pageOrigin, { style: 'characters', size: 18 }, expect.any(Object))
+  })
+
+  it('asks for a character password when a passphrase could run past the limit', async () => {
+    recorded.maxLength = 32
+    const browser = browserForPage('registration')
+    await expect(createCoordinator(browser).createPasswordActivePage({ style: 'passphrase', size: 6 })).resolves.toMatchObject({ ok: true })
+    expect(native.requestCreate).toHaveBeenCalledWith(browser, pageOrigin, { style: 'characters', size: 32 }, expect.any(Object))
+  })
+
+  it('keeps the chosen size when the limit is long enough', async () => {
+    recorded.maxLength = 64
+    const browser = browserForPage('registration')
+    await expect(createCoordinator(browser).createPasswordActivePage(style)).resolves.toMatchObject({ ok: true })
+    expect(native.requestCreate).toHaveBeenCalledWith(browser, pageOrigin, style, expect.any(Object))
+  })
+
+  it('starts nothing in the desktop when the limit is under 16 characters', async () => {
+    recorded.maxLength = 12
+    await expect(createCoordinator(browserForPage('password-change')).changePasswordActivePage(style))
+      .resolves.toEqual({ ok: false, code: 'password-limit-too-short' })
+    await expect(createCoordinator(browserForPage('registration')).createPasswordActivePage(style))
+      .resolves.toEqual({ ok: false, code: 'password-limit-too-short' })
+    expect(native.requestChange).not.toHaveBeenCalled()
+    expect(native.requestCreate).not.toHaveBeenCalled()
+    expect(native.requestPending).not.toHaveBeenCalled()
+    expect(recorded.fillCredential).toBeNull()
+  })
+})
+
+describe('a sign-up request bound to the tab that sent it', () => {
+  it('creates for the sending tab when it is the active one', async () => {
+    const browser = browserForPage('registration')
+    await expect(createCoordinator(browser).createPasswordActivePage(style, undefined, { tabId: 5, origin: pageOrigin }))
+      .resolves.toMatchObject({ ok: true, tabId: 5 })
+  })
+
+  it('refuses when the active tab is not the one that sent the request', async () => {
+    const browser = browserForPage('registration')
+    await expect(createCoordinator(browser).createPasswordActivePage(style, undefined, { tabId: 6, origin: pageOrigin }))
+      .resolves.toEqual({ ok: false, code: 'page-changed' })
+    await expect(createCoordinator(browser).createPasswordActivePage(style, undefined, { tabId: 5, origin: 'https://other.example.com' }))
+      .resolves.toEqual({ ok: false, code: 'page-changed' })
+    expect(native.requestCreate).not.toHaveBeenCalled()
+    expect(browser.scripting.executeScript).not.toHaveBeenCalled()
   })
 })

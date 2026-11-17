@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createRevisionGate } from '../../src/popup/pending-revision'
 import { generatedMessage } from '../../src/popup/generated-messages'
+import { createMessage, fillMessage } from '../../src/content/overlay'
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {}
@@ -43,5 +44,13 @@ describe('popup pending state', () => {
     const message = generatedMessage({ ok: false, code: 'cancelled' })
     expect(message).toBe('The request was cancelled, so check Sesame in case the password was already saved.')
     expect(message).not.toMatch(/Nothing was changed/)
+  })
+
+  it('tells the person when a site password limit is too short in every place it can appear', () => {
+    const result = { ok: false, state: 'unavailable', code: 'password-limit-too-short' }
+    for (const message of [generatedMessage(result), createMessage(result), fillMessage(result)]) {
+      expect(message).toBe("This site's password limit is too short for Sesame to create a password here.")
+      expect(message).not.toMatch(/[—–()]/)
+    }
   })
 })

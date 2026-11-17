@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Browser, NativePort } from '../../src/platform/chrome'
-import { NATIVE_PROBE_BUDGET_MS, openDesktop, probeNativeHost, requestFill } from '../../src/background/native-connection'
-import { NATIVE_PROBE_TIMEOUT_MS } from '../../src/protocol/native'
+import { NATIVE_PROBE_BUDGET_MS, openDesktop, probeNativeHost, requestChange, requestCreate, requestFill, requestPending } from '../../src/background/native-connection'
+import { NATIVE_FILL_TIMEOUT_MS, NATIVE_PENDING_PASSWORD_TIMEOUT_MS, NATIVE_PROBE_TIMEOUT_MS } from '../../src/protocol/native'
 import { CONNECTION_RESPONSE_TIMEOUT_MS, presentConnection } from '../../src/protocol/connection-presentation'
 
 interface PortScript {
@@ -256,5 +256,58 @@ describe('fill against a desktop before site rules', () => {
     await expect(requestFill(browser, 'https://example.test', { timeoutMs: 200, signal: controller.signal }))
       .resolves.toEqual({ ok: false, code: 'cancelled' })
     expect(requests).toHaveLength(1)
+  })
+})
+
+describe('waiting for a new password from the desktop', () => {
+  const style = { style: 'characters', size: 20 } as const
+  const handle = 'fictional-handle-for-examples-only-AAAAAAAA'
+
+  it('outlasts the desktop approval window for change and create but not for fill', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      expect(NATIVE_FILL_TIMEOUT_MS).toBe(30_000)
+      expect(NATIVE_PENDING_PASSWORD_TIMEOUT_MS).toBe(40_000)
+      const settled: string[] = []
+      const { browser } = fakeBrowser([{}, {}, {}])
+      void requestChange(browser, 'https://example.test', style).then(() => settled.push('change'))
+      void requestCreate(browser, 'https://example.test', style).then(() => settled.push('create'))
+      void requestFill(browser, 'https://example.test').then(() => settled.push('fill'))
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(settled).toEqual(['fill'])
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(settled).toEqual(['fill'])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled.sort()).toEqual(['change', 'create', 'fill'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads a host that closes without answering a change or create as an older desktop', async () => {
+    for (const disconnectWith of ['Native host has exited.', 'Native host has disconnected.']) {
+      const { browser } = fakeBrowser([{ disconnectWith }, { disconnectWith }])
+      await expect(requestChange(browser, 'https://example.test', style, { timeoutMs: 200 })).resolves.toEqual({ ok: false, code: 'pending-version-unsupported' })
+      await expect(requestCreate(browser, 'https://example.test', style, { timeoutMs: 200 })).resolves.toEqual({ ok: false, code: 'pending-version-unsupported' })
+    }
+  })
+
+  it('keeps a missing host, a timeout and a cancel as they are', async () => {
+    const missing = fakeBrowser([{ disconnectWith: 'Specified native messaging host not found.' }])
+    await expect(requestChange(missing.browser, 'https://example.test', style, { timeoutMs: 200 })).resolves.toEqual({ ok: false, code: 'host-not-found' })
+
+    const silent = fakeBrowser([{}])
+    await expect(requestCreate(silent.browser, 'https://example.test', style, { timeoutMs: 20 })).resolves.toEqual({ ok: false, code: 'timeout' })
+
+    const controller = new AbortController()
+    controller.abort()
+    const cancelled = fakeBrowser([{}])
+    await expect(requestChange(cancelled.browser, 'https://example.test', style, { signal: controller.signal })).resolves.toEqual({ ok: false, code: 'cancelled' })
+  })
+
+  it('does not treat a closed connection on a pending report as an older desktop', async () => {
+    const { browser } = fakeBrowser([{ disconnectWith: 'Native host has exited.' }])
+    await expect(requestPending(browser, 'https://example.test', handle, 'filled', { timeoutMs: 200 })).resolves.toEqual({ ok: false, code: 'host-exited' })
   })
 })
