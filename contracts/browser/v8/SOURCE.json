@@ -2,8 +2,8 @@
   "contractTag": "browser-protocol-v8",
   "sourceRepository": "usesesame/sesame-desktop",
   "sourcePath": "src-tauri/contracts/browser/v8",
-  "implementationSourceCommit": "48e8f9ba11febf71cc947da350929aed5864698b",
-  "vendoredAt": "2026-11-16",
+  "implementationSourceCommit": "b987850a277429eda6911123e872985e04d3fd7d",
+  "vendoredAt": "2026-11-17",
   "publication": {
     "repository": "usesesame/sesame-desktop",
     "trackingRef": "main",
@@ -11,8 +11,8 @@
   },
   "files": {
     "contract.json": "b16f7090be86f015e00c0c88d71debedcdaa5186d40b946fd8355224e0668724",
-    "request.schema.json": "7bbc64eb5e6718584b3d4cf5128f2f739a02b3d922f4d02aad0c11827b5c9c17",
+    "request.schema.json": "99e2833982f1bc92a573d1d808eb4857dc57dc38a536cf8344917f9cba261908",
     "response.schema.json": "3ab1b1b7decb7b9c2723690a421766036e80a4d52576e698d194b889a7390f68",
-    "vectors.json": "29310ba567d5be26b37f7a9d95af7af8adf27f8f99515695dd6f2ca87666df17"
+    "vectors.json": "d13c2ccbc1b710e442bd33f6fe9c427595cce992c22fa486c41624c8d9f4569d"
   }
 }
