@@ -10,7 +10,7 @@ export type FillOutcome =
   | { ok: true; usernameFilled: boolean; passwordFilled: boolean }
   | { ok: false; code: string }
 
-type FillPhase = 'prepare' | 'fill' | 'clear'
+export type FillPhase = 'prepare' | 'fill' | 'clear'
 type PendingFill = { token: string; origin: string; mode: 'username-only' | 'password' }
 type IsolatedWorld = typeof globalThis & { __sesamePendingFillV1?: PendingFill }
 type Candidate = { field: HTMLInputElement; explicit: boolean }

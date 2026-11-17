@@ -1,6 +1,6 @@
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
-import { setValue, type Credential } from './field-writer'
+import { setValue, type Credential, type FillPhase } from './field-writer'
 import {
   fitsPasswordLimit,
   inspectPasswordSurface,
@@ -27,7 +27,7 @@ export function fillPasswordChangeSurface(
   documentToken: string,
   credential: Credential | null,
   newPassword: string | null,
-  phase: 'prepare' | 'fill' | 'clear' = 'fill',
+  phase: FillPhase = 'fill',
 ): PasswordChangeOutcome {
   if (typeof expectedOrigin !== 'string' || location.origin !== expectedOrigin) {
     return failure('origin-mismatch')

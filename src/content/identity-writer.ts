@@ -1,6 +1,6 @@
 // Gated by the prepare/fill/clear token binding; the form is never submitted.
 import type { IdentityFieldKey, IdentityFields } from '../protocol/native'
-import { setValue } from './field-writer'
+import { setValue, type FillPhase } from './field-writer'
 import type { IdentityTarget } from './identity-fields'
 import {
   clearIdentityFillAnchor,
@@ -17,7 +17,6 @@ export type IdentityFillOutcome =
   | { ok: true; filledFields: IdentityFieldKey[] }
   | { ok: false; code: string }
 
-type FillPhase = 'prepare' | 'fill' | 'clear'
 type PendingIdentityFill = {
   token: string
   origin: string

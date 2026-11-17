@@ -1,4 +1,5 @@
 import { isUsernameField } from './field-detector'
+import type { FillPhase } from './field-writer'
 import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
 import { collectInputs, collectInputsOfType } from './input-scan'
@@ -95,7 +96,7 @@ export function fillGeneratedRegistration(
   expectedOrigin: string,
   documentToken: string,
   password: string | null,
-  phase: 'prepare' | 'fill' | 'clear' = 'fill',
+  phase: FillPhase = 'fill',
 ): RegistrationOutcome {
   if (typeof expectedOrigin !== 'string' || location.origin !== expectedOrigin) return failure('origin-mismatch')
   if (typeof documentToken !== 'string' || documentToken.length < 16 || documentToken.length > 128) {
