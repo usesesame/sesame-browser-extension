@@ -35,11 +35,6 @@ export type FillOutcome =
   | { ok: true; usernameFilled: boolean; passwordFilled: boolean }
   | { ok: false; code: string }
 
-export type FillCommand =
-  | { phase: 'prepare'; origin: string; documentToken: string }
-  | { phase: 'fill'; origin: string; documentToken: string; credential?: Credential }
-  | { phase: 'clear'; origin: string; documentToken: string }
-
 export interface Credential {
   username: string
   password: string

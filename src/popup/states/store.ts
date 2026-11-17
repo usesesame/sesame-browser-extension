@@ -6,9 +6,6 @@ export type PopupPhase =
   | { name: 'unavailable'; code: string; title: string; message: string }
   | { name: 'desktop-offline'; title: string; message: string }
   | { name: 'ready'; pageFillable: boolean }
-  | { name: 'filling' }
-  | { name: 'filled'; usernameFilled: boolean; passwordFilled: boolean }
-  | { name: 'failed'; code: string; title: string; message: string }
 
 export interface PopupState {
   phase: PopupPhase
@@ -49,26 +46,10 @@ export function setReady(pageFillable: boolean) {
   popupState.update((s) => ({ ...s, phase: { name: 'ready', pageFillable } }))
 }
 
-export function setFilling() {
-  popupState.update((s) => ({ ...s, phase: { name: 'filling' } }))
-}
-
-export function setFilled(usernameFilled: boolean, passwordFilled: boolean) {
-  popupState.update((s) => ({ ...s, phase: { name: 'filled', usernameFilled, passwordFilled } }))
-}
-
-export function setFailed(code: string, title: string, message: string) {
-  popupState.update((s) => ({ ...s, phase: { name: 'failed', code, title, message } }))
-}
-
 export function setHostname(hostname: string) {
   popupState.update((s) => ({ ...s, hostname }))
 }
 
 export function setPageDiagnostic(pageDiagnostic: PageDiagnostic) {
   popupState.update((s) => ({ ...s, pageDiagnostic }))
-}
-
-export function clearPageDiagnostic() {
-  popupState.update((s) => ({ ...s, pageDiagnostic: undefined }))
 }

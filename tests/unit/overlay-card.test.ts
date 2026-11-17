@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
 import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
+import { captureShadow, giveInputsLayout } from './overlay-fixtures'
 
 beforeEach(() => {
   stubVisibilityObserver()
@@ -19,24 +20,6 @@ function buttonIn(roots: ShadowRoot[], label: string): HTMLButtonElement {
 async function armRelease(roots: ShadowRoot[], label: string) {
   visibilityObserver().report({ isVisible: true, isIntersecting: true })
   await vi.waitFor(() => expect(buttonIn(roots, label).disabled).toBe(false))
-}
-
-function giveInputsLayout() {
-  for (const input of document.querySelectorAll('input')) {
-    input.setAttribute('style', 'opacity:1;display:block;visibility:visible')
-    input.getBoundingClientRect = () => ({ width: 180, height: 32, top: 10, left: 10, bottom: 42, right: 190, x: 10, y: 10, toJSON: () => ({}) }) as DOMRect
-  }
-}
-
-function captureShadow(): ShadowRoot[] {
-  const roots: ShadowRoot[] = []
-  const original = Element.prototype.attachShadow
-  vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init: ShadowRootInit) {
-    const root = original.call(this, { ...init, mode: 'open' })
-    roots.push(root)
-    return root
-  })
-  return roots
 }
 
 function visibleLabels(roots: ShadowRoot[]): string[] {

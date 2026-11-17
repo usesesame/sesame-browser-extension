@@ -64,10 +64,6 @@ const NAME_ON_CARD = /\bname (?:on|of) (?:the )?card\b/
 const IDENTITY_INPUT_TYPES = new Set(['text', 'email', 'tel', 'url', 'number'])
 const MAX_FOCUS_DEPTH = 8
 
-export function identityFieldForAutocomplete(value: string): IdentityFieldKey | undefined {
-  return identityTargetKindForAutocomplete(value)?.key
-}
-
 export function identityFieldForInput(input: HTMLInputElement): IdentityFieldKey | undefined {
   return identityTargetForInput(input)?.key
 }

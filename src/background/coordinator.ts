@@ -14,7 +14,7 @@ import {
   type PageInspection,
 } from '../protocol/fill'
 import { makeDiagnostic, userMessage } from '../protocol/diagnostics'
-import type { Browser } from '../platform/chrome'
+import type { Browser, ScriptTarget } from '../platform/chrome'
 import { isRecord } from '../shared/values'
 import { normalizePasswordChangeOutcome, type PasswordChangeOutcome } from '../content/password-change'
 import { normalizeRegistrationOutcome, type RegistrationOutcome } from '../content/registration'
@@ -247,11 +247,7 @@ export function createCoordinator(browser: Browser): Coordinator {
       const check = <T>(run: () => Promise<T>, failed: T) => withCheckTimeout(run, remainingMs(), failed)
       const [purpose, login, identity, card, oneTimeCode] = await Promise.all([
         check(async () => {
-          const [injection] = await browser.scripting.executeScript({
-            target: { tabId: target.tabId },
-            func: invokeBridgeInspection,
-            args: ['sesameInspectPasswordSurface'],
-          })
+          const [injection] = await injectBridgeInspection(browser, { tabId: target.tabId }, 'sesameInspectPasswordSurface')
           return injection?.result
         }, null as unknown),
         check<PageCheckResult>(async () => {
@@ -583,11 +579,7 @@ function loginSurface(
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin, bridgeReady }) {
       if (!bridgeReady) await installContentBridge(browser, tabId, true)
-      const injections = await browser.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        func: invokeBridgeInspection,
-        args: ['sesameInspectLoginSurface'],
-      })
+      const injections = await injectBridgeInspection(browser, { tabId, allFrames: true }, 'sesameInspectLoginSurface')
       const selected = selectSameOriginSurface(injections, origin, normalizeInspection)
       if (!selected.ok) return selected
       frameId = selected.frameId
@@ -595,11 +587,7 @@ function loginSurface(
     },
     unfillableCode: (inspection) => (!inspection.hasPasswordField && !inspection.hasUsernameField ? 'no-fields' : undefined),
     async prepare(ctx) {
-      const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, null, 'prepare'],
-      })
+      const [preparation] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillLoginSurface', ctx.origin, ctx.token, null, 'prepare')
       const prep = normalizeFillOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
@@ -614,21 +602,13 @@ function loginSurface(
         : fill
     },
     async fill(ctx, approved) {
-      const [injection] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, approved.credential, 'fill'],
-      })
+      const [injection] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillLoginSurface', ctx.origin, ctx.token, approved.credential, 'fill')
       redactCredential({ credential: approved.credential })
       return normalizeFillOutcome(injection?.result)
     },
     async cleanup(ctx) {
       if (!prepared) return
-      await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillLoginSurface', ctx.origin, ctx.token, null, 'clear'],
-      })
+      await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillLoginSurface', ctx.origin, ctx.token, null, 'clear')
     },
     events: update ? {
       inspectionStarted: () => update({ type: 'inspection-started' }),
@@ -666,11 +646,7 @@ function passwordChangeSurface(style: PasswordStyle): {
     async inspect({ browser, tabId, origin }) {
       capturedTabId = tabId
       await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
-        func: invokeBridgeInspection,
-        args: ['sesameInspectPasswordSurface'],
-      })
+      const [injection] = await injectBridgeInspection(browser, { tabId }, 'sesameInspectPasswordSurface')
       const kind = injection?.result
       if (kind === 'password-change') return { ok: true, ready: { origin } }
       if (kind === 'none') return { ok: false, code: 'no-fields' }
@@ -678,11 +654,7 @@ function passwordChangeSurface(style: PasswordStyle): {
       return { ok: false, code: 'not-password-change-form' }
     },
     async prepare(ctx) {
-      const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
-        func: invokeBridgeFill,
-        args: ['sesameFillPasswordChangeSurface', ctx.origin, ctx.token, null, null, 'prepare'],
-      })
+      const [preparation] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId }, 'sesameFillPasswordChangeSurface', ctx.origin, ctx.token, null, null, 'prepare')
       const prep = normalizePasswordChangeOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
@@ -700,11 +672,7 @@ function passwordChangeSurface(style: PasswordStyle): {
     },
     async fill(ctx, approved) {
       try {
-        const [injection] = await ctx.browser.scripting.executeScript({
-          target: { tabId: ctx.tabId },
-          func: invokeBridgeFill,
-          args: ['sesameFillPasswordChangeSurface', ctx.origin, ctx.token, approved.credential, approved.newPassword, 'fill'],
-        })
+        const [injection] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId }, 'sesameFillPasswordChangeSurface', ctx.origin, ctx.token, approved.credential, approved.newPassword, 'fill')
         return normalizePasswordChangeOutcome(injection?.result)
       } finally {
         redactCredential({ credential: approved.credential })
@@ -713,11 +681,7 @@ function passwordChangeSurface(style: PasswordStyle): {
     },
     async cleanup(ctx) {
       if (!prepared) return
-      await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
-        func: invokeBridgeFill,
-        args: ['sesameFillPasswordChangeSurface', ctx.origin, ctx.token, null, null, 'clear'],
-      })
+      await injectBridgeFill(ctx.browser, { tabId: ctx.tabId }, 'sesameFillPasswordChangeSurface', ctx.origin, ctx.token, null, null, 'clear')
     },
   }
   return { fill, issued: () => issued }
@@ -738,11 +702,7 @@ function registrationSurface(style: PasswordStyle): {
     async inspect({ browser, tabId, origin }) {
       capturedTabId = tabId
       await installContentBridge(browser, tabId)
-      const [injection] = await browser.scripting.executeScript({
-        target: { tabId },
-        func: invokeBridgeInspection,
-        args: ['sesameInspectPasswordSurface'],
-      })
+      const [injection] = await injectBridgeInspection(browser, { tabId }, 'sesameInspectPasswordSurface')
       const kind = injection?.result
       if (kind === 'registration') return { ok: true, ready: { origin } }
       if (kind === 'none') return { ok: false, code: 'no-fields' }
@@ -751,11 +711,7 @@ function registrationSurface(style: PasswordStyle): {
       return { ok: false, code: 'not-registration-form' }
     },
     async prepare(ctx) {
-      const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
-        func: invokeBridgeFill,
-        args: ['sesameFillGeneratedRegistration', ctx.origin, ctx.token, null, 'prepare'],
-      })
+      const [preparation] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId }, 'sesameFillGeneratedRegistration', ctx.origin, ctx.token, null, 'prepare')
       const prep = normalizeRegistrationOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
@@ -770,11 +726,7 @@ function registrationSurface(style: PasswordStyle): {
     },
     async fill(ctx, approved) {
       try {
-        const [injection] = await ctx.browser.scripting.executeScript({
-          target: { tabId: ctx.tabId },
-          func: invokeBridgeFill,
-          args: ['sesameFillGeneratedRegistration', ctx.origin, ctx.token, approved.password, 'fill'],
-        })
+        const [injection] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId }, 'sesameFillGeneratedRegistration', ctx.origin, ctx.token, approved.password, 'fill')
         return normalizeRegistrationOutcome(injection?.result)
       } finally {
         approved.password = ''
@@ -782,11 +734,7 @@ function registrationSurface(style: PasswordStyle): {
     },
     async cleanup(ctx) {
       if (!prepared) return
-      await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId },
-        func: invokeBridgeFill,
-        args: ['sesameFillGeneratedRegistration', ctx.origin, ctx.token, null, 'clear'],
-      })
+      await injectBridgeFill(ctx.browser, { tabId: ctx.tabId }, 'sesameFillGeneratedRegistration', ctx.origin, ctx.token, null, 'clear')
     },
   }
   return { fill, issued: () => issued }
@@ -799,22 +747,14 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin, bridgeReady }) {
       if (!bridgeReady) await installContentBridge(browser, tabId, true)
-      const injections = await browser.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        func: invokeBridgeInspection,
-        args: ['sesameInspectIdentitySurface'],
-      })
+      const injections = await injectBridgeInspection(browser, { tabId, allFrames: true }, 'sesameInspectIdentitySurface')
       const selected = selectSameOriginSurface(injections, origin, normalizeIdentityInspection)
       if (!selected.ok) return selected
       frameId = selected.frameId
       return { ok: true, ready: selected.ready }
     },
     async prepare(ctx, ready) {
-      const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'prepare'],
-      })
+      const [preparation] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'prepare')
       const prep = normalizeIdentityFillOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
@@ -825,21 +765,13 @@ function identitySurface(): FillSurface<ReadyIdentityInspection, readonly Identi
       return fill.ok ? { ok: true, approved: fill.identity } : fill
     },
     async fill(ctx, approved) {
-      const [injection] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, approved, 'fill'],
-      })
+      const [injection] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillIdentitySurface', ctx.origin, ctx.token, approved, 'fill')
       redactIdentity({ identity: approved })
       return normalizeIdentityFillOutcome(injection?.result)
     },
     async cleanup(ctx) {
       if (!prepared) return
-      await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'clear'],
-      })
+      await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillIdentitySurface', ctx.origin, ctx.token, null, 'clear')
     },
   }
 }
@@ -856,22 +788,14 @@ function oneTimeCodeSurface(): FillSurface<
     resolvePage: topLevelPage,
     async inspect({ browser, tabId, origin, bridgeReady }) {
       if (!bridgeReady) await installContentBridge(browser, tabId, true)
-      const injections = await browser.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        func: invokeBridgeInspection,
-        args: ['sesameInspectOneTimeCodeSurface'],
-      })
+      const injections = await injectBridgeInspection(browser, { tabId, allFrames: true }, 'sesameInspectOneTimeCodeSurface')
       const selected = selectSameOriginSurface(injections, origin, normalizeOneTimeCodeInspection)
       if (!selected.ok) return selected
       frameId = selected.frameId
       return { ok: true, ready: selected.ready }
     },
     async prepare(ctx, ready) {
-      const [preparation] = await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'prepare'],
-      })
+      const [preparation] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'prepare')
       const prep = normalizeOneTimeCodeFillOutcome(preparation?.result)
       if (!prep.ok) return prep
       prepared = true
@@ -883,11 +807,7 @@ function oneTimeCodeSurface(): FillSurface<
     },
     async fill(ctx, approved) {
       try {
-        const [injection] = await ctx.browser.scripting.executeScript({
-          target: { tabId: ctx.tabId, frameIds: [frameId] },
-          func: invokeBridgeFill,
-          args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, approved.totpCode, 'fill'],
-        })
+        const [injection] = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, approved.totpCode, 'fill')
         return normalizeOneTimeCodeFillOutcome(injection?.result)
       } finally {
         approved.totpCode = ''
@@ -895,11 +815,7 @@ function oneTimeCodeSurface(): FillSurface<
     },
     async cleanup(ctx) {
       if (!prepared) return
-      await ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: [frameId] },
-        func: invokeBridgeFill,
-        args: ['sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'clear'],
-      })
+      await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: [frameId] }, 'sesameFillOneTimeCodeSurface', ctx.origin, ctx.token, null, 'clear')
     },
   }
 }
@@ -973,6 +889,14 @@ export function normalizeCardInspection(raw: unknown, expectedOrigin: string, fr
   }
 }
 
+function injectBridgeInspection(browser: Browser, target: ScriptTarget, name: string) {
+  return browser.scripting.executeScript({ target, func: invokeBridgeInspection, args: [name] })
+}
+
+function injectBridgeFill(browser: Browser, target: ScriptTarget, ...args: unknown[]) {
+  return browser.scripting.executeScript({ target, func: invokeBridgeFill, args })
+}
+
 function invokeBridgeInspection(...args: unknown[]): unknown {
   const [name] = args
   if (typeof name !== 'string') return { ok: false, code: 'content-bridge-unavailable' }
@@ -995,11 +919,7 @@ function cardSurface(): FillSurface<CardSurface, CardFieldKey[], CardFields, Car
     resolvePage: httpOnlyPage,
     async inspect({ browser, tabId, origin, bridgeReady }) {
       if (!bridgeReady) await installContentBridge(browser, tabId, true)
-      const injections = await browser.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        func: invokeBridgeInspection,
-        args: ['sesameInspectCardSurface'],
-      })
+      const injections = await injectBridgeInspection(browser, { tabId, allFrames: true }, 'sesameInspectCardSurface')
       const inspections = injections.map((injection) => normalizeCardInspection(injection.result, origin, injection.frameId ?? -1))
       const ready = inspections.filter((inspection): inspection is CardFrameInspection & {
         state: 'ready'
@@ -1037,11 +957,7 @@ function cardSurface(): FillSurface<CardSurface, CardFieldKey[], CardFields, Car
     async prepare(ctx, surface) {
       const requestedFields = new Set<CardFieldKey>()
       for (const target of surface.targets) {
-        const preparations = await ctx.browser.scripting.executeScript({
-          target: { tabId: ctx.tabId, frameIds: target.frameIds },
-          func: invokeBridgeFill,
-          args: ['sesameFillCardSurface', target.origin, ctx.token, null, 'prepare'],
-        })
+        const preparations = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: target.frameIds }, 'sesameFillCardSurface', target.origin, ctx.token, null, 'prepare')
         const fields = collectCardFillFields(preparations.map((preparation) => preparation.result))
         if (fields.length > 0) preparedTargets.push(target)
         for (const field of fields) requestedFields.add(field)
@@ -1059,11 +975,7 @@ function cardSurface(): FillSurface<CardSurface, CardFieldKey[], CardFields, Car
     async fill(ctx) {
       const writtenFields = new Set<CardFieldKey>()
       for (const target of preparedTargets) {
-        const writes = await ctx.browser.scripting.executeScript({
-          target: { tabId: ctx.tabId, frameIds: target.frameIds },
-          func: invokeBridgeFill,
-          args: ['sesameFillCardSurface', target.origin, ctx.token, approvedCard, 'fill'],
-        })
+        const writes = await injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: target.frameIds }, 'sesameFillCardSurface', target.origin, ctx.token, approvedCard, 'fill')
         for (const field of collectCardFillFields(writes.map((write) => write.result))) writtenFields.add(field)
       }
       const filledFields = [...writtenFields]
@@ -1072,11 +984,7 @@ function cardSurface(): FillSurface<CardSurface, CardFieldKey[], CardFields, Car
     async cleanup(ctx) {
       if (approvedCard) redactCard(approvedCard)
       if (!prepared) return
-      await Promise.allSettled(preparedTargets.map((target) => ctx.browser.scripting.executeScript({
-        target: { tabId: ctx.tabId, frameIds: target.frameIds },
-        func: invokeBridgeFill,
-        args: ['sesameFillCardSurface', target.origin, ctx.token, null, 'clear'],
-      })))
+      await Promise.allSettled(preparedTargets.map((target) => injectBridgeFill(ctx.browser, { tabId: ctx.tabId, frameIds: target.frameIds }, 'sesameFillCardSurface', target.origin, ctx.token, null, 'clear')))
     },
   }
 }

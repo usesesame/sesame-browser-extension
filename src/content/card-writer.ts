@@ -1,12 +1,11 @@
 import type { CardFieldKey, CardFields } from '../protocol/native'
-import { setValue } from './field-writer'
+import { setValue, type FillPhase } from './field-writer'
 import { cardFieldKeysForTargets, scanCardSurface } from './card-fields'
 
 type PendingCardFill = { token: string; origin: string; fields: CardFieldKey[] }
-type Phase = 'prepare' | 'fill' | 'clear'
 const PENDING_KEY = '__sesamePendingCardFillV2'
 
-export function fillCardSurface(origin: string, token: string, values: CardFields | null, phase: Phase = 'fill'): { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string } {
+export function fillCardSurface(origin: string, token: string, values: CardFields | null, phase: FillPhase = 'fill'): { ok: true; filledFields: CardFieldKey[] } | { ok: false; code: string } {
   if (location.protocol !== 'https:') return { ok: false, code: 'insecure-page' }
   if (location.origin !== origin || token.length < 16 || token.length > 128) return { ok: false, code: 'stale-document' }
   const isolated = globalThis as typeof globalThis & { [PENDING_KEY]?: PendingCardFill }

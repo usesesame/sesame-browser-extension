@@ -4,7 +4,7 @@ import { isVisibleInput } from '../shared/dom'
 import { isRecord } from '../shared/values'
 import { cardFieldsForInput } from './card-fields'
 import { labelText } from './field-detector'
-import { setValue } from './field-writer'
+import { setValue, type FillPhase } from './field-writer'
 import { collectInputs } from './input-scan'
 
 export type OneTimeCodeKind = 'single' | 'split'
@@ -22,7 +22,6 @@ export type OneTimeCodeFillOutcome =
   | { ok: true; kind: OneTimeCodeKind; filledFields: number }
   | { ok: false; code: string }
 
-type FillPhase = 'prepare' | 'fill' | 'clear'
 type PendingOneTimeCode = { token: string; origin: string; kind: OneTimeCodeKind }
 type IsolatedWorld = typeof globalThis & { __sesamePendingOneTimeCodeV1?: PendingOneTimeCode }
 type OneTimeCodeTarget =

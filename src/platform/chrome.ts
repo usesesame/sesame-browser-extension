@@ -15,14 +15,20 @@ export interface Browser {
 
 export type ScriptInjectionDetails<T> = ScriptFunctionInjection<T> | ScriptFileInjection
 
+export interface ScriptTarget {
+  tabId: number
+  allFrames?: boolean
+  frameIds?: number[]
+}
+
 export interface ScriptFunctionInjection<T> {
-  target: { tabId: number; allFrames?: boolean; frameIds?: number[] }
+  target: ScriptTarget
   func: (...args: unknown[]) => T
   args?: unknown[]
 }
 
 export interface ScriptFileInjection {
-  target: { tabId: number; allFrames?: boolean; frameIds?: number[] }
+  target: ScriptTarget
   files: string[]
 }
 
