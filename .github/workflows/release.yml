@@ -196,13 +196,16 @@ jobs:
             }
             const download = record.packages.find((entry) => entry.channel === "download")
             const firefox = record.packages.find((entry) => entry.browser === "firefox")
-            if (!download || !firefox) throw new Error("The package record has no download or Firefox package.")
-            const assets = [download.filename, firefox.filename, record.sbom.filename]
+            const chrome = record.packages.find((entry) => entry.browser === "chrome" && entry.channel === "store")
+            if (!download || !firefox || !chrome) throw new Error("The package record has no download, Chrome or Firefox package.")
+            const assets = [chrome.filename, download.filename, firefox.filename, record.sbom.filename]
             if (!/^[A-Za-z0-9._-]+\.cdx\.json$/.test(record.sbom.filename)) throw new Error("The SBOM filename is not plain.")
             writeFileSync("assets.txt", assets.map((name) => `store-packages/${name}`).join("\n") + "\nstore-packages/store-release.json\nSHA256SUMS\n")
             writeFileSync("SHA256SUMS", [...assets, "store-release.json"].map((name) => `${digest(`store-packages/${name}`)}  ${name}`).join("\n") + "\n")
             writeFileSync("notes.md", [
-              `To install Sesame by hand in Chrome, Edge or Chromium, download ${download.filename} and unzip it. Open the extensions page in your browser, turn on developer mode, choose Load unpacked and pick the unzipped folder. This copy has the same extension id the Sesame desktop app expects, so it connects without extra setup, but it does not update itself.`,
+              `${chrome.filename} is the package for the Chrome Web Store dashboard. It has no key in its manifest, because the store refuses an upload whose key is not the one it holds for the listing.`,
+              "",
+              `To install Sesame by hand in Chrome, Edge or Chromium, download ${download.filename} and unzip it. Open the extensions page in your browser, turn on developer mode, choose Load unpacked and pick the unzipped folder. This copy has the same extension id the Sesame desktop app expects, so it connects without extra setup, but it does not update itself. The store refuses this file.`,
               "",
               `${firefox.filename} is the experimental Firefox build. Release Firefox only loads it as a temporary add-on from about:debugging.`,
               "",
