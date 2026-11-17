@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
 import { stubVisibilityObserver, trustedClick, visibilityObserver } from './release-visibility-stub'
+import { captureShadow } from './overlay-fixtures'
 
 function giveInputsLayout() {
   for (const input of document.querySelectorAll('input')) {
@@ -19,17 +20,6 @@ function giveHostCenterLayout(): HTMLElement {
     width: 120, height: 30, top: 200, left: 100, bottom: 230, right: 220, x: 100, y: 200, toJSON: () => ({}),
   }) as DOMRect
   return host
-}
-
-function captureShadow(): ShadowRoot[] {
-  const roots: ShadowRoot[] = []
-  const original = Element.prototype.attachShadow
-  vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init: ShadowRootInit) {
-    const root = original.call(this, { ...init, mode: 'open' })
-    roots.push(root)
-    return root
-  })
-  return roots
 }
 
 function focusFirstInput() {

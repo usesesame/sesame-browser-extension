@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachInlineButton, overlayHost } from '../../src/content/overlay'
+import { captureShadow } from './overlay-fixtures'
 
 function layout(input: HTMLInputElement): void {
   input.getBoundingClientRect = () => ({
@@ -27,17 +28,6 @@ function addLoginForm(root: ShadowRoot): { password: HTMLInputElement } {
   layout(username)
   layout(password)
   return { password }
-}
-
-function captureShadow(): ShadowRoot[] {
-  const roots: ShadowRoot[] = []
-  const original = Element.prototype.attachShadow
-  vi.spyOn(Element.prototype, 'attachShadow').mockImplementation(function (this: Element, init: ShadowRootInit) {
-    const root = original.call(this, { ...init, mode: 'open' })
-    roots.push(root)
-    return root
-  })
-  return roots
 }
 
 function baseOptions() {
