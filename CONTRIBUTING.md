@@ -98,14 +98,17 @@ this extension.
 2. Open a pull request. `npm run ci` must pass.
 3. Tag `v<version>` on `main`. The release workflow builds the Chrome, Edge,
    and experimental Firefox packages, records their SHA-256 digests, generates
-   the dependency SBOM, and drafts a GitHub pre-release with the Chromium
-   download, the Firefox build and the SBOM.
+   the dependency SBOM, and drafts a GitHub pre-release with the Chrome store
+   package, the Chromium download, the Firefox build and the SBOM.
 4. Verify the Chrome and Edge packages and the Chromium download by hand in a
    clean profile before uploading or publishing the draft release. Unit tests and integration builds do not replace either store's
    installation flow.
-5. The native host pins the Chromium extension identity and the Firefox Gecko
+5. Upload `sesame-extension-<version>-chrome.zip` to the Chrome Web Store
+   dashboard. The store refuses `sesame-extension-<version>-chromium.zip`,
+   because that copy carries the `key` that gives a side-loaded install its id.
+6. The native host pins the Chromium extension identity and the Firefox Gecko
    id with no wildcards. Verify every packaged identity against that contract.
-6. After a listing is live, check the store's download against source with
+7. After a listing is live, check the store's download against source with
    `node scripts/check-store-zip.mjs --zip <downloaded zip> --browser chrome --revision v<released version>`.
    The check rebuilds the package from the tag of the release that the store
    serves, since the store can serve an earlier release than `HEAD`, and lists
