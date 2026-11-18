@@ -263,10 +263,10 @@ describe('waiting for a new password from the desktop', () => {
   const style = { style: 'characters', size: 20 } as const
   const handle = 'fictional-handle-for-examples-only-AAAAAAAA'
 
-  it('outlasts the desktop approval window for change and create but not for fill', async () => {
+  it('outlasts the desktop approval window of 30 seconds for fill, change and create', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      expect(NATIVE_FILL_TIMEOUT_MS).toBe(30_000)
+      expect(NATIVE_FILL_TIMEOUT_MS).toBe(35_000)
       expect(NATIVE_PENDING_PASSWORD_TIMEOUT_MS).toBe(40_000)
       const settled: string[] = []
       const { browser } = fakeBrowser([{}, {}, {}])
@@ -275,8 +275,10 @@ describe('waiting for a new password from the desktop', () => {
       void requestFill(browser, 'https://example.test').then(() => settled.push('fill'))
 
       await vi.advanceTimersByTimeAsync(30_000)
+      expect(settled).toEqual([])
+      await vi.advanceTimersByTimeAsync(5_000)
       expect(settled).toEqual(['fill'])
-      await vi.advanceTimersByTimeAsync(9_999)
+      await vi.advanceTimersByTimeAsync(4_999)
       expect(settled).toEqual(['fill'])
       await vi.advanceTimersByTimeAsync(1)
       expect(settled.sort()).toEqual(['change', 'create', 'fill'])
