@@ -832,12 +832,12 @@ export function fillMessage(result: unknown): string {
   if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
   if (code === 'desktop-unavailable' || code === 'host-not-found')
     return 'Open Sesame, then try again.'
-  if (/host-disconnected|host-exited|host-communication-failed|timeout/.test(code)) {
-    return 'The desktop connection closed. Keep Sesame open and try again.'
-  }
   if (/approval-declined/.test(code)) return 'Nothing was filled. The request was declined.'
   if (/approval-unavailable|approval-timeout|stale-request/.test(code))
     return 'Approval expired. Try filling again.'
+  if (/host-disconnected|host-exited|host-communication-failed|timeout/.test(code)) {
+    return 'The desktop connection closed. Keep Sesame open and try again.'
+  }
   if (/page-changed|stale-document/.test(code)) return 'The page changed. Try filling again.'
   if (code === 'field-write-failed')
     return 'This site blocked the field update. Nothing was submitted.'
@@ -877,11 +877,11 @@ export function oneTimeCodeMessage(result: unknown): string {
   if (code === 'protocol-mismatch') return 'The Sesame desktop app needs an update to fill this code.'
   if (code === 'vault-locked' || code === 'locked') return 'Unlock Sesame, then try again.'
   if (code === 'desktop-unavailable' || code === 'host-not-found') return 'Open Sesame, then try again.'
+  if (/approval-declined/.test(code)) return 'Nothing was filled. The request was declined.'
+  if (/approval-unavailable|approval-timeout|stale-request/.test(code)) return 'Approval expired. Try filling again.'
   if (/host-disconnected|host-exited|host-communication-failed|timeout/.test(code)) {
     return 'The desktop connection closed. Keep Sesame open and try again.'
   }
-  if (/approval-declined/.test(code)) return 'Nothing was filled. The request was declined.'
-  if (/approval-unavailable|approval-timeout|stale-request/.test(code)) return 'Approval expired. Try filling again.'
   if (/page-changed|stale-document/.test(code)) return 'The page changed. Try filling again.'
   if (code === 'field-write-failed') return 'This site blocked the field update. Nothing was submitted.'
   if (/no-fields|multiple-matches/.test(code)) return 'This form cannot be filled automatically.'
