@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
+import { shippedPackages } from './scripts/shipped-packages.mjs'
 
 const modeToManifest = {
   chrome: 'chrome.json',
@@ -15,6 +16,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       svelte(),
+      shippedPackages(`app-${mode}`),
       {
         name: 'manifest',
         generateBundle() {

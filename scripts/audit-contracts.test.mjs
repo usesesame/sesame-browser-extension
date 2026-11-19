@@ -7,18 +7,31 @@ import test from 'node:test'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
-test('the check job audits dependencies after installing them', () => {
+test('the check job audits dependencies after building every shipped package', () => {
   const workflow = read('.github', 'workflows', 'ci.yml')
-  const install = workflow.indexOf('- run: npm ci')
-  assert.ok(install >= 0, 'the check job no longer installs the locked dependencies')
+  const build = workflow.indexOf('- run: npm run ci')
+  assert.ok(build >= 0, 'the check job no longer builds the shipped packages')
 
-  const step = workflow.slice(install).match(/- name: Audit npm dependencies\n\s+run: (.+)\n/)
-  assert.ok(step, 'the check job no longer audits npm dependencies after npm ci')
+  const step = workflow.slice(build).match(/- name: Audit npm dependencies\n\s+run: (.+)\n/)
+  assert.ok(step, 'the check job no longer audits npm dependencies after the shipped builds record what they bundle')
   assert.equal(
     step[1].trim(),
     'node scripts/audit-dependencies.mjs',
     'the audit step no longer fails on high severity advisories through the reviewed exceptions',
   )
+
+  const manifest = JSON.parse(read('package.json'))
+  const builds = manifest.scripts['release:check']
+  for (const browser of ['chrome', 'edge', 'firefox']) {
+    assert.ok(builds.includes(`npm run build:${browser}`), `release:check no longer builds the ${browser} package`)
+    for (const part of ['app', 'content', 'overlay']) {
+      assert.ok(manifest.shippedBuilds.includes(`${part}-${browser}`), `the audit no longer requires a record of the ${part}-${browser} build`)
+    }
+  }
+  assert.ok(manifest.scripts.ci.includes('npm run release:check'), 'the ci script no longer runs the shipped builds')
+  for (const [config, part] of [['vite.config.ts', 'app'], ['vite.content.config.ts', 'content'], ['vite.overlay.config.ts', 'overlay']]) {
+    assert.ok(read(config).includes(`shippedPackages(\`${part}-\${mode}\`)`), `${config} no longer records which packages its build bundles`)
+  }
 })
 
 test('npm installs run no package scripts and fetch no git dependencies', () => {
