@@ -84,6 +84,15 @@ describe('inline fill messages', () => {
     }
   })
 
+  it('says the approval expired when the desktop timed it out, for logins and codes', () => {
+    expect(fillMessage({ code: 'approval-timeout' })).toBe('Approval expired. Try filling again.')
+    expect(oneTimeCodeMessage({ ok: false, code: 'approval-timeout' })).toBe('Approval expired. Try filling again.')
+    expect(fillMessage({ code: 'timeout' })).toBe('The desktop connection closed. Keep Sesame open and try again.')
+    expect(oneTimeCodeMessage({ ok: false, code: 'timeout' })).toBe(
+      'The desktop connection closed. Keep Sesame open and try again.',
+    )
+  })
+
   it('keeps card and identity failures non-empty', () => {
     expect(cardFillMessage({ ok: false, code: 'cancelled' })).toBe('Card fill was declined.')
     expect(cardFillMessage({ ok: false, code: 'untrusted-frame' }).length).toBeGreaterThan(0)
