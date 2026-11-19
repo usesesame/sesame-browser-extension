@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { pathToFileURL } from 'node:url'
 
 import {
   applyBuildToolRule,
@@ -260,7 +261,7 @@ test('every shipped build recorder in the repository is the same file', () => {
 })
 
 test('the shipped build recorder names the installed package of every bundled module', async () => {
-  const { installPathOf } = await import(recorderCopies[0])
+  const { installPathOf } = await import(pathToFileURL(recorderCopies[0]).href)
   const project = path.resolve(path.dirname(recorderCopies[0]), '..')
   const at = (...parts) => path.join(project, ...parts)
   assert.equal(installPathOf(at('node_modules', 'svelte', 'src', 'index-client.js')), 'node_modules/svelte')
