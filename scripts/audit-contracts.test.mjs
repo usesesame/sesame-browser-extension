@@ -7,17 +7,19 @@ import test from 'node:test'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
-test('the check job audits dependencies after building every shipped package', () => {
+test('the check job audits dependencies through the same command a contributor runs', () => {
   const workflow = read('.github', 'workflows', 'ci.yml')
-  const build = workflow.indexOf('- run: npm run ci')
-  assert.ok(build >= 0, 'the check job no longer builds the shipped packages')
+  const install = workflow.indexOf('- run: npm ci')
+  assert.ok(install >= 0, 'the check job no longer installs the locked dependencies')
 
-  const step = workflow.slice(build).match(/- name: Audit npm dependencies\n\s+run: (.+)\n/)
-  assert.ok(step, 'the check job no longer audits npm dependencies after the shipped builds record what they bundle')
+  assert.match(workflow.slice(install), /^\s+run: npm run verify$/m, 'the check job no longer runs the command a contributor runs before review')
+  assert.doesNotMatch(workflow, /^\s+run: node scripts\/audit-dependencies\.mjs$/m, 'the audit runs only through npm run verify')
+
+  const scripts = JSON.parse(read('package.json')).scripts
   assert.equal(
-    step[1].trim(),
-    'node scripts/audit-dependencies.mjs',
-    'the audit step no longer fails on high severity advisories through the reviewed exceptions',
+    scripts.verify,
+    'npm run ci && node scripts/audit-dependencies.mjs',
+    'npm run verify no longer builds every shipped package and then audits what they bundled, so a local pass can differ from the pull request check',
   )
 
   const manifest = JSON.parse(read('package.json'))

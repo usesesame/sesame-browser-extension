@@ -68,11 +68,13 @@ are in `eslint.config.js`, each with its reason next to it. In short:
 
 ## Before review
 
+Run `npm run verify` before you ask for review, because it runs `npm run ci` and then the dependency audit, which reads what the builds bundled, the same two steps the pull request check runs.
+
 | You changed | Run |
 | --- | --- |
-| Anything | `npm run ci` |
-| `src/protocol/` or `contracts/` | `npm run ci` and `npm run compat:host` |
-| `manifests/` | `npm run ci` and load both unpacked builds |
+| Anything | `npm run verify` |
+| `src/protocol/` or `contracts/` | `npm run verify` and `npm run compat:host` |
+| `manifests/` | `npm run verify` and load both unpacked builds |
 
 Name the exact commands in the pull request. "Tested" is not an answer.
 
