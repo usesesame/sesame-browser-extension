@@ -18,9 +18,22 @@ test('the check job audits dependencies through the same command a contributor r
   const scripts = JSON.parse(read('package.json')).scripts
   assert.equal(
     scripts.verify,
-    'node scripts/audit-dependencies.mjs && npm run ci',
-    'npm run verify no longer audits first and then runs the whole gate, so a local pass can differ from the pull request check',
+    'npm run ci && node scripts/audit-dependencies.mjs',
+    'npm run verify no longer builds every shipped package and then audits what they bundled, so a local pass can differ from the pull request check',
   )
+
+  const manifest = JSON.parse(read('package.json'))
+  const builds = manifest.scripts['release:check']
+  for (const browser of ['chrome', 'edge', 'firefox']) {
+    assert.ok(builds.includes(`npm run build:${browser}`), `release:check no longer builds the ${browser} package`)
+    for (const part of ['app', 'content', 'overlay']) {
+      assert.ok(manifest.shippedBuilds.includes(`${part}-${browser}`), `the audit no longer requires a record of the ${part}-${browser} build`)
+    }
+  }
+  assert.ok(manifest.scripts.ci.includes('npm run release:check'), 'the ci script no longer runs the shipped builds')
+  for (const [config, part] of [['vite.config.ts', 'app'], ['vite.content.config.ts', 'content'], ['vite.overlay.config.ts', 'overlay']]) {
+    assert.ok(read(config).includes(`shippedPackages(\`${part}-\${mode}\`)`), `${config} no longer records which packages its build bundles`)
+  }
 })
 
 test('npm installs run no package scripts and fetch no git dependencies', () => {

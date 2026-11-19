@@ -31,5 +31,5 @@ jobs:
         run: |
           executable="$(node -e 'console.log(require("playwright-core").chromium.executablePath())')"
           echo "SESAME_BROWSER_TEST_EXECUTABLE=$executable" >> "$GITHUB_ENV"
-      - name: Audit the dependencies and run the gate
+      - name: Run the gate and audit the dependencies
         run: npm run verify

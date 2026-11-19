@@ -4,6 +4,17 @@
   "license": "AGPL-3.0-or-later",
   "version": "0.3.1",
   "type": "module",
+  "shippedBuilds": [
+    "app-chrome",
+    "content-chrome",
+    "overlay-chrome",
+    "app-edge",
+    "content-edge",
+    "overlay-edge",
+    "app-firefox",
+    "content-firefox",
+    "overlay-firefox"
+  ],
   "scripts": {
     "version:check": "node scripts/version-contract.mjs check",
     "version:sync": "node scripts/version-contract.mjs sync",
@@ -30,7 +41,7 @@
     "audit:contract": "node --test scripts/audit-contracts.test.mjs scripts/advisory-exceptions-contracts.test.mjs",
     "repro:contract": "node --test scripts/reproducibility-contracts.test.mjs",
     "ci": "npm run governance:contract && npm run manifest:contract && npm run repro:contract && npm run audit:contract && npm run release:check && npm run test:compat && npm run test:packaged && npm run test:browser",
-    "verify": "node scripts/audit-dependencies.mjs && npm run ci"
+    "verify": "npm run ci && node scripts/audit-dependencies.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -68,7 +68,7 @@ are in `eslint.config.js`, each with its reason next to it. In short:
 
 ## Before review
 
-Run `npm run verify` before you ask for review, because it runs the dependency audit and then `npm run ci`, the same two steps the pull request check runs.
+Run `npm run verify` before you ask for review, because it runs `npm run ci` and then the dependency audit, which reads what the builds bundled, the same two steps the pull request check runs.
 
 | You changed | Run |
 | --- | --- |
