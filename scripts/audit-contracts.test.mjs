@@ -7,17 +7,19 @@ import test from 'node:test'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
-test('the check job audits dependencies after installing them', () => {
+test('the check job audits dependencies through the same command a contributor runs', () => {
   const workflow = read('.github', 'workflows', 'ci.yml')
   const install = workflow.indexOf('- run: npm ci')
   assert.ok(install >= 0, 'the check job no longer installs the locked dependencies')
 
-  const step = workflow.slice(install).match(/- name: Audit npm dependencies\n\s+run: (.+)\n/)
-  assert.ok(step, 'the check job no longer audits npm dependencies after npm ci')
+  assert.match(workflow.slice(install), /^\s+run: npm run verify$/m, 'the check job no longer runs the command a contributor runs before review')
+  assert.doesNotMatch(workflow, /^\s+run: node scripts\/audit-dependencies\.mjs$/m, 'the audit runs only through npm run verify')
+
+  const scripts = JSON.parse(read('package.json')).scripts
   assert.equal(
-    step[1].trim(),
-    'node scripts/audit-dependencies.mjs',
-    'the audit step no longer fails on high severity advisories through the reviewed exceptions',
+    scripts.verify,
+    'node scripts/audit-dependencies.mjs && npm run ci',
+    'npm run verify no longer audits first and then runs the whole gate, so a local pass can differ from the pull request check',
   )
 })
 

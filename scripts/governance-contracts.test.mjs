@@ -206,3 +206,79 @@ test('the documents state the desktop version the capability probe needs', () =>
     assert.match(read(document), /desktop (app of version |)0\.3\.0 or later/, `${document} does not say the extension needs desktop 0.3.0 or later`)
   }
 })
+
+const jobNames = (body) => {
+  const jobs = body.slice(body.indexOf('\njobs:'))
+  return [...jobs.matchAll(/^ {2}([a-z0-9_-]+):$/gm)].map(([, name]) => name)
+}
+
+test('every job stops after a bounded time', () => {
+  for (const workflow of workflows) {
+    const body = read(workflow)
+    const names = jobNames(body)
+    assert.ok(names.length > 0, `${workflow} defines no jobs`)
+    for (const name of names) {
+      const limit = jobBlock(body, name).match(/^ {4}timeout-minutes: (\d+)$/m)
+      assert.ok(limit, `${workflow} job ${name} has no timeout-minutes, so a hung run holds a runner for six hours`)
+      assert.ok(Number(limit[1]) >= 1 && Number(limit[1]) <= 60, `${workflow} job ${name} has a timeout of ${limit[1]} minutes outside 1 to 60`)
+    }
+  }
+})
+
+test('the CI workflow checks out without credentials and runs the command a contributor runs', () => {
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const check = jobBlock(workflow, 'check')
+  assert.doesNotMatch(check, /^ {4}name:/m, 'the release gate looks the job up by the name check')
+  assert.match(check, /actions\/checkout@[0-9a-f]{40} # [^\n]+\n\s+with:\n\s+persist-credentials: false\n/, 'no later step needs the checkout token, so the checkout must not keep it')
+  assert.match(check, /run: npm run verify$/m, 'the check job runs npm run verify')
+  assert.doesNotMatch(check, /GITHUB_TOKEN|github\.token|secrets\./, 'the check job holds no token for a persisted credential to matter')
+
+  const scripts = JSON.parse(read('package.json')).scripts
+  assert.ok(scripts.ci.indexOf('npm run test:packaged') > scripts.ci.indexOf('npm run release:check'), 'the packaged extension is tested after the store packages are built')
+  assert.ok(scripts.ci.indexOf('npm run test:packaged') < scripts.ci.indexOf('npm run test:browser'), 'npm run ci runs the packaged extension test')
+  assert.match(read('CONTRIBUTING.md'), /Run `npm run verify` before you ask for review/, 'CONTRIBUTING.md does not tell contributors to run npm run verify')
+})
+
+test('a release tag needs a commit on main whose CI check passed, and only the package job can ask', () => {
+  const workflow = read('.github', 'workflows', 'release.yml')
+  const packaging = jobBlock(workflow, 'package')
+  const stepStart = packaging.indexOf('- name: Require a tagged commit on main that passed the CI check')
+  assert.ok(stepStart >= 0, 'the package job no longer requires tested code before it builds')
+  const nextStep = packaging.indexOf('\n      - ', stepStart + 1)
+  const step = packaging.slice(stepStart, nextStep)
+
+  assert.match(step, /if: startsWith\(github\.ref, 'refs\/tags\/'\)/, 'the step guards a tag release')
+  assert.match(step, /GH_TOKEN: \$\{\{ github\.token \}\}/, 'the step uses the job token')
+  assert.match(step, /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/, 'the step requires the tagged commit to be on main')
+  assert.match(step, /workflows\/ci\.yml\/runs\?head_sha=\$GITHUB_SHA&event=push&branch=main/, 'the step looks up the CI run for the tagged commit on main')
+  assert.match(step, /select\(\.name == "check"\)/, 'the step reads the check job of the CI workflow')
+  assert.match(step, /grep -qx success/, 'only a successful check job passes')
+  assert.match(step, /Wait for it to pass on main, then rerun this workflow\./, 'a missing or running check tells the maintainer to wait and rerun')
+  assert.ok(step.trimEnd().endsWith('exit 1'), 'a check that is missing, running or failed fails the release')
+  assert.ok(stepStart < packaging.indexOf('run: npm run compat:host'), 'tested code is required before the desktop contracts are downloaded')
+  assert.ok(stepStart < packaging.indexOf('run: npm run release:check'), 'tested code is required before the packages are built')
+
+  assert.match(packaging, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read\s*\n\s+outputs:/, 'the package job reads workflow runs and nothing more')
+  assert.match(packaging, /actions\/checkout@[0-9a-f]{40} # [^\n]+\n\s+with:\n\s+persist-credentials: false\n\s+fetch-depth: 0\n/, 'the package job fetches main without keeping the token')
+  for (const job of ['browser', 'attest', 'publish']) {
+    assert.doesNotMatch(jobBlock(workflow, job), /actions: (read|write)/, `the ${job} job must not read workflow runs`)
+  }
+
+  const ci = read('.github', 'workflows', 'ci.yml')
+  assert.match(ci, /^name: Browser extension CI$/m)
+  assert.match(ci, /^ {2}check:$/m, 'the release step looks up a job named check in ci.yml')
+})
+
+test('the release runs each suite once and tests the package it attests', () => {
+  const workflow = read('.github', 'workflows', 'release.yml')
+  const packaging = jobBlock(workflow, 'package')
+  assert.equal([...workflow.matchAll(/npm run test:compat/g)].length, 0, 'npm run compat:host already runs the compatibility suite in the package job')
+  assert.match(packaging, /run: npm run compat:host$/m)
+
+  const browser = jobBlock(workflow, 'browser')
+  assert.match(browser, /needs: \[package\]/, 'the browser job waits for the packages it tests')
+  assert.match(browser, /actions\/download-artifact@[0-9a-f]{40} # [^\n]+\n\s+with:\n\s+name: \$\{\{ needs\.package\.outputs\.artifact-name \}\}\n\s+path: store-packages\n/, 'the browser job tests the artifact the package job uploaded')
+  const packaged = browser.indexOf('run: npm run test:packaged')
+  assert.ok(packaged > browser.indexOf('actions/download-artifact@'), 'the package is downloaded before it is tested')
+  assert.ok(packaged >= 0 && packaged < browser.indexOf('run: npm run test:browser'), 'the packaged extension is loaded in the browser job')
+})

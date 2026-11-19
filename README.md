@@ -42,12 +42,12 @@ You need Node.js 24.20 and a Chromium for the browser tests.
 ```sh
 npm ci
 npm run build:chrome
-npm run ci
+npm run verify
 ```
 
 Load `dist/chrome` or `dist/edge` with Load unpacked to try your build.
 [LOAD-UNPACKED.md](LOAD-UNPACKED.md) explains why the source folder itself
-can't be loaded. `npm run ci` runs everything a pull request needs, including
+can't be loaded. `npm run verify` runs everything a pull request needs, including
 a real Chromium, and [CONTRIBUTING.md](CONTRIBUTING.md) lists what to run for
 each kind of change.
 

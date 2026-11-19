@@ -19,9 +19,11 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     environment: store-release
     permissions:
       contents: read
+      actions: read
     outputs:
       record-sha256: ${{ steps.record.outputs.sha256 }}
       artifact-name: ${{ steps.package-artifact.outputs.name }}
@@ -29,6 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -45,6 +48,30 @@ jobs:
             exit 1
           fi
 
+      - name: Require a tagged commit on main that passed the CI check
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Commit $GITHUB_SHA is not an ancestor of main. Tag a commit that is on main." >&2
+            exit 1
+          fi
+          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=100" --jq '.workflow_runs[].id')"
+          states=""
+          for run in $runs; do
+            states="$states$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --jq '.jobs[] | select(.name == "check") | .conclusion // .status')"$'\n'
+          done
+          if printf '%s' "$states" | grep -qx success; then
+            exit 0
+          fi
+          if printf '%s' "$states" | grep -qxE 'failure|cancelled|timed_out|skipped|action_required|neutral|stale'; then
+            echo "The CI check on commit $GITHUB_SHA did not succeed. Fix main and tag the fixed commit." >&2
+          else
+            echo "The CI check on commit $GITHUB_SHA has not finished or has not started. Wait for it to pass on main, then rerun this workflow." >&2
+          fi
+          exit 1
+
       - name: Require the desktop contracts on main
         run: npm run compat:host
 
@@ -53,9 +80,6 @@ jobs:
 
       - name: Run the release gate and build the store packages
         run: npm run release:check
-
-      - name: Run the host compatibility suite
-        run: npm run test:compat
 
       - id: record
         name: Record the package record digest for the attestation job
@@ -93,7 +117,9 @@ jobs:
           retention-days: 90
 
   browser:
+    needs: [package]
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -115,12 +141,21 @@ jobs:
           executable="$(node -e 'console.log(require("playwright-core").chromium.executablePath())')"
           echo "SESAME_BROWSER_TEST_EXECUTABLE=$executable" >> "$GITHUB_ENV"
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.package.outputs.artifact-name }}
+          path: store-packages
+
+      - name: Load the Chromium package that will ship
+        run: npm run test:packaged
+
       - name: Run the browser suite
         run: npm run test:browser
 
   attest:
     needs: [package, browser]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
@@ -160,6 +195,7 @@ jobs:
     needs: [package, attest]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
