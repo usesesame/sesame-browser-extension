@@ -11,6 +11,7 @@
   import { DEFAULT_PASSWORD_STYLE, normalizeFillOrigin } from '../protocol/native'
   import { GENERATED_MESSAGES, acceptMessage, generatedMessage, type PendingKindView } from './generated-messages'
   import { pageSurfaceView, type PageKind } from './page-surfaces'
+  import { SAVE_MESSAGES, noFillableLoginMessage } from './login-messages'
   import { createRevisionGate } from './pending-revision'
   import {
     CHECKING_PRESENTATION, CONNECTION_RESPONSE_TIMEOUT_MS, DESKTOP_RELEASES_URL, presentConnection, type ConnectionPresentation,
@@ -55,25 +56,6 @@
     'stale-request': 'That approval request expired. Choose Fill to try again.',
     'timeout': 'The desktop approval did not answer in time. Try again.',
     'vault-locked': 'Unlock your vault in the Sesame desktop app.',
-  }
-
-  const SAVE_MESSAGES: Record<string, string> = {
-    'approval-declined': 'Nothing was saved. The request was declined in Sesame.',
-    'approval-timeout': 'The save approval expired. Choose Save this login again.',
-    'approval-unavailable': 'Sesame could not show the save approval. Bring the desktop app forward and retry.',
-    'desktop-unavailable': 'Open Sesame, then choose Save this login again.',
-    'host-disconnected': 'The desktop connection closed. Keep Sesame open and retry.',
-    'host-exited': 'Sesame stopped the connection. Open it again and retry.',
-    'host-forbidden': 'Install the extension from the store listing that Sesame links to, then choose Save this login again.',
-    'host-not-found': 'Open Sesame, then choose Save this login again.',
-    'invalid-capture': 'Sesame could not verify that form. Nothing was saved.',
-    'no-password': 'No new password to read on this page. Fill the form with Sesame first.',
-    'protocol-mismatch': 'Update Sesame and the extension, then choose Save this login again.',
-    'save-failed': 'Sesame could not save this login.',
-    'save-in-progress': 'A save request is already open.',
-    'save-not-armed': 'Fill the form with Sesame before saving.',
-    'timeout': 'The save did not answer in time. Choose Save this login again.',
-    'vault-locked': 'Unlock your vault in the Sesame desktop app, then choose Save this login again.',
   }
 
   interface PageState {
@@ -388,7 +370,7 @@
   function unavailableFillMessage(result: any): string {
     return lookalikeWarningForResult(result)
       ?? (result?.code === 'no-match' && page.hostname
-        ? `No login is saved for ${page.hostname}. Add or edit its website in Sesame.`
+        ? noFillableLoginMessage(page.hostname)
         : FILL_MESSAGES[result?.code] ?? 'The fill request could not be completed.')
   }
 
