@@ -201,9 +201,10 @@ test('the documents describe the Firefox package that the manifests build', () =
   assert.match(read('SECURITY.md'), /experimental Firefox package/)
 })
 
-test('the documents state the desktop version the capability probe needs', () => {
+test('the documents state the first desktop release that trusts the store copy', () => {
   for (const document of ['README.md', 'SECURITY.md', 'DESIGN.md']) {
-    assert.match(read(document), /desktop (app of version |)0\.3\.0 or later/, `${document} does not say the extension needs desktop 0.3.0 or later`)
+    assert.match(read(document), /desktop (app of version |)0\.4\.1 or later/, `${document} does not say the extension needs desktop 0.4.1 or later`)
+    assert.doesNotMatch(read(document), /desktop (app of version |)0\.3\.0 or later/, `${document} still names 0.3.0, which does not trust the Chrome Web Store copy`)
   }
 })
 
