@@ -6,7 +6,8 @@ approval in the Sesame desktop app. The extension never holds your vault and
 never submits a form for you.
 
 It supports Chrome and Edge on Windows and Linux, and it needs
-Sesame desktop 0.3.0 or later. Desktop 0.6.0 adds the "Whole site" and
+Sesame desktop 0.4.1 or later, because older desktops do not know the Chrome
+Web Store copy. Desktop 0.6.0 adds the "Whole site" and
 "Never fill" rules for a login and lets the extension create and change
 passwords. With an older desktop it still fills logins on their saved address
 and asks you to update Sesame before it creates or changes a password. On Linux, install the browser from your system
