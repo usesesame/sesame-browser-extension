@@ -2,7 +2,7 @@
 
 This repository holds the pre-release Sesame browser extension for Chrome and
 Edge on Windows and Linux. It has not had an independent security audit or store
-approval. It needs Sesame desktop 0.3.0 or later.
+approval. It needs Sesame desktop 0.4.1 or later.
 
 The extension is the only Sesame surface that runs inside a page it does not
 control. When you report or fix anything here, treat every page as hostile.
